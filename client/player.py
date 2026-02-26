@@ -38,7 +38,13 @@ class BorderlessFullscreenPlayer:
     def _pick_default_player_commands(self) -> tuple[str, str]:
         player_candidates = []
         if os.name == "nt":
-            player_candidates.extend(["vlc", "vlc.exe"])
+            player_candidates.extend(
+                [
+                    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                    "vlc",
+                    "vlc.exe",
+                ]
+            )
         player_candidates.extend(["vlc", "mpv"])
 
         for player in player_candidates:
