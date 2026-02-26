@@ -50,20 +50,24 @@ class BorderlessFullscreenPlayer:
 
         self.stop()
 
+        process = None
+
         try:
             command = self._build_command(media_path)
             if not self._resolve_executable(command):
                 print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
                 return False
 
-            self._process = subprocess.Popen(command)
-            self._process.wait()
-            return self._process.returncode == 0
+            process = subprocess.Popen(command)
+            self._process = process
+            process.wait()
+            return process.returncode == 0
         except Exception as exc:
             print(f"⚠️ medya oynatma hatası: {exc}")
             return False
         finally:
-            self._process = None
+            if self._process is process:
+                self._process = None
 
     def stop(self):
         if self._process and self._process.poll() is None:
