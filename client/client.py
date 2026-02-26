@@ -4,6 +4,7 @@ import platform
 import socket
 import subprocess
 import threading
+from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -128,6 +129,9 @@ class PlaybackController:
         self.player = BorderlessFullscreenPlayer()
         self.overlay = DownloadStatusOverlay()
         self._playlist: list[str] = self.media_manager.load_last_successful_playlist()
+        self._fallback_media = Path(
+            os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
+        )
         self._version = None
         self._lock = threading.Lock()
         self._running = False
@@ -144,6 +148,13 @@ class PlaybackController:
         with self._lock:
             percent = self._sync_percent
         return f"Yeni içerikler indiriliyor %{percent}\nBaylan Dijital Bilgi hazırlanıyor..."
+
+    def _effective_playlist(self, playlist: list[str]) -> list[str]:
+        if playlist:
+            return playlist
+        if self._fallback_media.exists():
+            return [str(self._fallback_media)]
+        return []
 
     def update_from_config(self, config: dict):
         videos = config.get("videos") or []
@@ -195,7 +206,7 @@ class PlaybackController:
         index = 0
         while self._running:
             with self._lock:
-                playlist = list(self._playlist)
+                playlist = self._effective_playlist(list(self._playlist))
                 sync_in_progress = self._sync_in_progress
 
             if sync_in_progress:
