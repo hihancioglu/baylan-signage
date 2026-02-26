@@ -1,6 +1,7 @@
 import eventlet
 eventlet.monkey_patch()
 
+import hashlib
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -67,9 +68,19 @@ def build_config(hostname):
             .all()
         )
 
+        videos = [i.path for i in items]
+        media_signatures = {
+            path: hashlib.sha256(path.encode("utf-8")).hexdigest() for path in videos
+        }
+        playlist_version = hashlib.sha256(
+            f"{playlist.id}:{'|'.join(videos)}".encode("utf-8")
+        ).hexdigest()[:16]
+
         return {
             "enabled": True,
-            "videos": [i.path for i in items]
+            "videos": videos,
+            "playlist_version": playlist_version,
+            "media_signatures": media_signatures,
         }
 
     finally:

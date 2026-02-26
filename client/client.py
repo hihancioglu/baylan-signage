@@ -1,14 +1,15 @@
 import json
 import os
-import shlex
 import socket
-import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 
 import socketio
 
 from idle import get_idle_seconds
+from media_manager import MediaManager
+from player import BorderlessFullscreenPlayer
 from state_machine import ClientState
 
 SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
@@ -18,21 +19,18 @@ HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
-PLAYER_COMMAND = os.getenv("PLAYER_COMMAND", "")
 
-sio = socketio.Client()
+sio = socketio.Client(reconnection=True)
 hostname = socket.gethostname()
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 current_state = ClientState.ACTIVE
-player_process = None
 
 
 class _WindowManager:
     def __init__(self):
         import ctypes
 
-        self._ctypes = ctypes
         self._user32 = ctypes.windll.user32
 
     def bring_to_front(self, window_title: str) -> bool:
@@ -46,7 +44,68 @@ class _WindowManager:
         return True
 
 
+class PlaybackController:
+    def __init__(self):
+        self.media_manager = MediaManager(cache_root=os.getenv("MEDIA_CACHE_DIR", "client/cache"))
+        self.player = BorderlessFullscreenPlayer()
+        self._playlist: list[str] = self.media_manager.load_last_successful_playlist()
+        self._version = None
+        self._lock = threading.Lock()
+        self._running = False
+        self._worker = None
+
+    def update_from_config(self, config: dict):
+        videos = config.get("videos") or []
+        playlist_version = config.get("playlist_version") or "default"
+        media_signatures = config.get("media_signatures") or {}
+
+        if self._version == playlist_version and self._playlist:
+            return
+
+        local_playlist = self.media_manager.sync_playlist(videos, playlist_version, media_signatures)
+        if local_playlist:
+            with self._lock:
+                self._playlist = local_playlist
+                self._version = playlist_version
+            print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_playlist)}")
+            return
+
+        fallback = self.media_manager.load_last_successful_playlist()
+        if fallback:
+            with self._lock:
+                self._playlist = fallback
+            print("📦 Offline mode: last successful cache playlist ile devam ediliyor")
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._worker = threading.Thread(target=self._run, daemon=True)
+        self._worker.start()
+
+    def stop(self):
+        self._running = False
+        self.player.stop()
+
+    def _run(self):
+        index = 0
+        while self._running:
+            with self._lock:
+                playlist = list(self._playlist)
+
+            if not playlist:
+                time.sleep(1)
+                continue
+
+            media_path = playlist[index % len(playlist)]
+            ok = self.player.play_blocking(media_path)
+            if not ok:
+                print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
+            index = (index + 1) % len(playlist)
+
+
 window_manager = _WindowManager()
+playback = PlaybackController()
 
 
 def log_state_transition(from_state: ClientState, to_state: ClientState, reason: str):
@@ -74,38 +133,6 @@ def set_state(next_state: ClientState, reason: str):
     print(f"🔁 STATE {prev.value} -> {next_state.value} | {reason}")
 
 
-def start_player():
-    global player_process
-
-    if player_process and player_process.poll() is None:
-        return
-
-    if not PLAYER_COMMAND:
-        print("ℹ️ PLAYER_COMMAND tanımlı değil, PLAYING durumu sadece state/log seviyesinde yürütülüyor.")
-        return
-
-    args = shlex.split(PLAYER_COMMAND)
-    player_process = subprocess.Popen(args)
-    print(f"▶️ Player started: {PLAYER_COMMAND}")
-
-
-def stop_player():
-    global player_process
-
-    if not player_process:
-        return
-
-    if player_process.poll() is None:
-        player_process.terminate()
-        try:
-            player_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            player_process.kill()
-
-    player_process = None
-    print("⏹️ Player stopped")
-
-
 def return_to_erp_window():
     if window_manager.bring_to_front(ERP_WINDOW_TITLE):
         print(f"🪟 ERP window brought to front: {ERP_WINDOW_TITLE}")
@@ -131,7 +158,7 @@ def connect():
 
 @sio.event
 def disconnect():
-    print("❌ Disconnected")
+    print("❌ Disconnected - offline cache playlist devam edebilir")
 
 
 @sio.on("hello")
@@ -152,6 +179,9 @@ def on_config(data):
     else:
         idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 
+    if isinstance(data, dict):
+        playback.update_from_config(data)
+
     print(f"🕒 idle_timeout_sec = {idle_timeout_sec}")
 
 
@@ -168,14 +198,14 @@ def run_state_cycle():
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")
 
     if current_state == ClientState.IDLE_PENDING:
-        start_player()
+        playback.start()
         set_state(ClientState.PLAYING, "player_started")
 
     if current_state == ClientState.PLAYING and idle_sec <= ACTIVITY_RESUME_SEC:
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:
-        stop_player()
+        playback.stop()
         return_to_erp_window()
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
