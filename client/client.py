@@ -20,6 +20,7 @@ SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
 HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
+MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 
@@ -29,6 +30,7 @@ hostname = socket.gethostname()
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 current_state = ClientState.ACTIVE
 emergency_active = False
+playing_started_at = 0.0
 
 SUPPORTED_COMMANDS = {
     "REFRESH_CONFIG",
@@ -324,12 +326,15 @@ def log_state_transition(from_state: ClientState, to_state: ClientState, reason:
 
 def set_state(next_state: ClientState, reason: str):
     global current_state
+    global playing_started_at
 
     if next_state == current_state:
         return
 
     prev = current_state
     current_state = next_state
+    if next_state == ClientState.PLAYING:
+        playing_started_at = time.monotonic()
     log_state_transition(prev, next_state, reason)
     print(f"🔁 STATE {prev.value} -> {next_state.value} | {reason}")
 
@@ -438,7 +443,12 @@ def run_state_cycle():
         playback.start()
         set_state(ClientState.PLAYING, "player_started")
 
-    if current_state == ClientState.PLAYING and idle_sec <= ACTIVITY_RESUME_SEC:
+    played_for_sec = time.monotonic() - playing_started_at
+    if (
+        current_state == ClientState.PLAYING
+        and played_for_sec >= MIN_PLAYING_SECONDS
+        and idle_sec <= ACTIVITY_RESUME_SEC
+    ):
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:
