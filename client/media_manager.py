@@ -61,7 +61,13 @@ class MediaManager:
         safe_key = self._sha256_text(cache_key)[:20]
         return self.media_store_root / f"{safe_key}{ext}"
 
-    def sync_playlist(self, playlist_items: list[str], playlist_version: str, media_signatures: dict[str, str]) -> list[str]:
+    def sync_playlist(
+        self,
+        playlist_items: list[str],
+        playlist_version: str,
+        media_signatures: dict[str, str],
+        progress_callback=None,
+    ) -> list[str]:
         version = str(playlist_version or "default")
         version_dir = self.versions_root / version
         manifest_path = version_dir / "manifest.json"
@@ -70,6 +76,33 @@ class MediaManager:
 
         version_dir.mkdir(parents=True, exist_ok=True)
 
+        downloadable_items = []
+        for source in playlist_items:
+            signature = media_signatures.get(source)
+            if self._is_url(source):
+                target = self._url_cache_target(source, signature)
+                if not target.exists():
+                    downloadable_items.append(source)
+
+        downloaded_count = 0
+        total_download_count = len(downloadable_items)
+
+        def report_progress(state: str, source: str = ""):
+            if not progress_callback:
+                return
+            percent = int((downloaded_count / total_download_count) * 100) if total_download_count else 100
+            progress_callback(
+                {
+                    "state": state,
+                    "source": source,
+                    "downloaded": downloaded_count,
+                    "total": total_download_count,
+                    "percent": max(0, min(percent, 100)),
+                }
+            )
+
+        report_progress("start")
+
         for source in playlist_items:
             signature = media_signatures.get(source)
 
@@ -77,7 +110,10 @@ class MediaManager:
                 if self._is_url(source):
                     target = self._url_cache_target(source, signature)
                     if not target.exists():
+                        report_progress("downloading", source)
                         self._download_url(source, target)
+                        downloaded_count += 1
+                        report_progress("downloaded", source)
                     checksum = self._sha256_file(target)
                     local_items.append(str(target))
                     manifest.append(
@@ -106,6 +142,8 @@ class MediaManager:
                     )
             except Exception:
                 continue
+
+        report_progress("done")
 
         if local_items:
             with open(manifest_path, "w", encoding="utf-8") as fh:
