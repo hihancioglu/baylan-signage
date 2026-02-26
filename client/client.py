@@ -55,15 +55,95 @@ class _WindowManager:
         return True
 
 
+class DownloadStatusOverlay:
+    def __init__(self):
+        self._active = False
+        self._message = ""
+        self._lock = threading.Lock()
+        self._thread = None
+
+    def show(self, message: str):
+        with self._lock:
+            self._message = message
+            if self._active:
+                return
+            self._active = True
+
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def update(self, message: str):
+        with self._lock:
+            self._message = message
+
+    def hide(self):
+        with self._lock:
+            self._active = False
+
+    def is_active(self) -> bool:
+        with self._lock:
+            return self._active
+
+    def _run(self):
+        try:
+            import tkinter as tk
+        except Exception as exc:
+            print(f"⚠️ overlay açılamadı (tkinter yok): {exc}")
+            return
+
+        root = tk.Tk()
+        root.configure(bg="black")
+        root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
+        root.title("Baylan Dijital Bilgi")
+
+        label = tk.Label(
+            root,
+            text="",
+            fg="white",
+            bg="black",
+            font=("Arial", 38, "bold"),
+            justify="center",
+            wraplength=1400,
+        )
+        label.place(relx=0.5, rely=0.5, anchor="center")
+
+        def refresh():
+            with self._lock:
+                active = self._active
+                message = self._message
+            if not active:
+                root.destroy()
+                return
+            label.config(text=message)
+            root.after(200, refresh)
+
+        root.after(50, refresh)
+        root.mainloop()
+
+
 class PlaybackController:
     def __init__(self):
         self.media_manager = MediaManager(cache_root=os.getenv("MEDIA_CACHE_DIR", "client/cache"))
         self.player = BorderlessFullscreenPlayer()
+        self.overlay = DownloadStatusOverlay()
         self._playlist: list[str] = self.media_manager.load_last_successful_playlist()
         self._version = None
         self._lock = threading.Lock()
         self._running = False
         self._worker = None
+        self._sync_in_progress = False
+        self._sync_percent = 0
+
+    def _on_sync_progress(self, progress: dict):
+        with self._lock:
+            self._sync_in_progress = progress.get("state") != "done"
+            self._sync_percent = int(progress.get("percent", 0))
+
+    def _overlay_text(self) -> str:
+        with self._lock:
+            percent = self._sync_percent
+        return f"Yeni içerikler indiriliyor %{percent}\nBaylan Dijital Bilgi hazırlanıyor..."
 
     def update_from_config(self, config: dict):
         videos = config.get("videos") or []
@@ -73,11 +153,18 @@ class PlaybackController:
         if self._version == playlist_version and self._playlist:
             return
 
-        local_playlist = self.media_manager.sync_playlist(videos, playlist_version, media_signatures)
+        local_playlist = self.media_manager.sync_playlist(
+            videos,
+            playlist_version,
+            media_signatures,
+            progress_callback=self._on_sync_progress,
+        )
         if local_playlist:
             with self._lock:
                 self._playlist = local_playlist
                 self._version = playlist_version
+                self._sync_in_progress = False
+                self._sync_percent = 100
             print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_playlist)}")
             return
 
@@ -85,6 +172,7 @@ class PlaybackController:
         if fallback:
             with self._lock:
                 self._playlist = fallback
+                self._sync_in_progress = False
             print("📦 Offline mode: last successful cache playlist ile devam ediliyor")
 
     def start(self):
@@ -96,9 +184,11 @@ class PlaybackController:
 
     def stop(self):
         self._running = False
+        self.overlay.hide()
         self.player.stop()
 
     def pause(self):
+        self.overlay.hide()
         self.player.stop()
 
     def _run(self):
@@ -106,6 +196,16 @@ class PlaybackController:
         while self._running:
             with self._lock:
                 playlist = list(self._playlist)
+                sync_in_progress = self._sync_in_progress
+
+            if sync_in_progress:
+                if not self.overlay.is_active():
+                    self.player.stop()
+                    self.overlay.show(self._overlay_text())
+                else:
+                    self.overlay.update(self._overlay_text())
+            elif self.overlay.is_active():
+                self.overlay.hide()
 
             if not playlist:
                 time.sleep(1)
