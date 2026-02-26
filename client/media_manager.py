@@ -46,8 +46,21 @@ class MediaManager:
 
     @staticmethod
     def _path_exists_safely(path: Path) -> bool:
+        # Avoid blocking startup on unreachable Windows network shares (UNC paths).
+        # These can raise WinError 53 or hang for a long time when disconnected.
+        if str(path).startswith("\\\\"):
+            return False
         try:
             return path.exists()
+        except OSError:
+            return False
+
+    @classmethod
+    def _is_file_safely(cls, path: Path) -> bool:
+        if not cls._path_exists_safely(path):
+            return False
+        try:
+            return path.is_file()
         except OSError:
             return False
 
@@ -133,7 +146,7 @@ class MediaManager:
                     )
                 else:
                     source_path = Path(source)
-                    if not source_path.exists() or not source_path.is_file():
+                    if not self._is_file_safely(source_path):
                         continue
                     checksum = self._sha256_file(source_path)
                     if signature and checksum != signature:
