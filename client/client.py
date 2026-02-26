@@ -1,9 +1,11 @@
 import json
 import os
+import platform
 import socket
+import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import socketio
 
@@ -25,6 +27,15 @@ hostname = socket.gethostname()
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 current_state = ClientState.ACTIVE
+emergency_active = False
+
+SUPPORTED_COMMANDS = {
+    "REFRESH_CONFIG",
+    "EMERGENCY_START",
+    "EMERGENCY_STOP",
+    "RESTART_AGENT",
+    "PING",
+}
 
 
 class _WindowManager:
@@ -87,6 +98,9 @@ class PlaybackController:
         self._running = False
         self.player.stop()
 
+    def pause(self):
+        self.player.stop()
+
     def _run(self):
         index = 0
         while self._running:
@@ -106,6 +120,82 @@ class PlaybackController:
 
 window_manager = _WindowManager()
 playback = PlaybackController()
+processed_command_ids = set()
+processed_lock = threading.Lock()
+
+
+def _parse_issued_at(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _validate_command(data):
+    required = {"type", "command_id", "issued_at", "ttl_sec", "payload", "priority"}
+    missing = [field for field in required if field not in data]
+    if missing:
+        return False, f"missing_fields={','.join(missing)}"
+    if data.get("type") not in SUPPORTED_COMMANDS:
+        return False, "unsupported_type"
+    return True, "ok"
+
+
+def _ack_command(command, status, detail="", duplicate=False):
+    sio.emit(
+        "command_ack",
+        {
+            "hostname": hostname,
+            "command_id": command.get("command_id"),
+            "type": command.get("type"),
+            "status": status,
+            "detail": detail,
+            "duplicate": duplicate,
+            "ack_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+def _command_expired(command):
+    issued_at = _parse_issued_at(command.get("issued_at"))
+    ttl_sec = command.get("ttl_sec")
+    if issued_at is None or not isinstance(ttl_sec, (int, float)):
+        return True
+    expires_at = issued_at + timedelta(seconds=float(ttl_sec))
+    return datetime.now(timezone.utc) > expires_at
+
+
+def _restart_agent():
+    if platform.system().lower().startswith("win"):
+        subprocess.Popen(["shutdown", "/r", "/t", "0"])
+        return "windows_reboot_requested"
+    subprocess.Popen(["reboot"])
+    return "reboot_requested"
+
+
+def _handle_command(command):
+    global emergency_active
+    cmd_type = command.get("type")
+
+    if cmd_type == "PING":
+        return "pong"
+    if cmd_type == "REFRESH_CONFIG":
+        sio.emit("pull_config", {"hostname": hostname})
+        return "config_pull_requested"
+    if cmd_type == "EMERGENCY_START":
+        emergency_active = True
+        playback.pause()
+        set_state(ClientState.EMERGENCY, "command=EMERGENCY_START")
+        return "emergency_started"
+    if cmd_type == "EMERGENCY_STOP":
+        emergency_active = False
+        set_state(ClientState.ACTIVE, "command=EMERGENCY_STOP")
+        return "emergency_stopped"
+    if cmd_type == "RESTART_AGENT":
+        return _restart_agent()
+    return "ignored"
 
 
 def log_state_transition(from_state: ClientState, to_state: ClientState, reason: str):
@@ -190,8 +280,44 @@ def on_command(data):
     print("⚡ COMMAND RECEIVED:")
     print(data)
 
+    if not isinstance(data, dict):
+        _ack_command({"command_id": None, "type": None}, "rejected", "invalid_payload")
+        return
+
+    valid, reason = _validate_command(data)
+    if not valid:
+        _ack_command(data, "rejected", reason)
+        return
+
+    command_id = data.get("command_id")
+    with processed_lock:
+        if command_id in processed_command_ids:
+            _ack_command(data, "duplicate", "already_processed", duplicate=True)
+            return
+
+    if _command_expired(data):
+        _ack_command(data, "expired", "ttl_exceeded")
+        return
+
+    try:
+        result = _handle_command(data)
+        with processed_lock:
+            processed_command_ids.add(command_id)
+            if len(processed_command_ids) > 2000:
+                processed_command_ids.clear()
+                processed_command_ids.add(command_id)
+        _ack_command(data, "processed", result)
+    except Exception as exc:
+        _ack_command(data, "failed", str(exc))
+
 
 def run_state_cycle():
+    if emergency_active:
+        if current_state != ClientState.EMERGENCY:
+            set_state(ClientState.EMERGENCY, "emergency_policy_enforced")
+        playback.pause()
+        return get_idle_seconds()
+
     idle_sec = get_idle_seconds()
 
     if current_state == ClientState.ACTIVE and idle_sec >= idle_timeout_sec:

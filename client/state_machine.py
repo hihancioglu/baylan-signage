@@ -6,3 +6,5 @@ class ClientState(str, Enum):
     IDLE_PENDING = "IDLE_PENDING"
     PLAYING = "PLAYING"
     RETURNING = "RETURNING"
+    EMERGENCY = "EMERGENCY"
+
