@@ -50,7 +50,9 @@ def ensure_sqlite_schema():
         },
         "device_groups": {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
-            "assigned_at": "DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL",
+            # SQLite cannot ALTER TABLE ... ADD COLUMN with CURRENT_TIMESTAMP
+            # defaults. Add as nullable first, then backfill existing rows.
+            "assigned_at": "DATETIME",
             "unassigned_at": "DATETIME",
         },
     }
@@ -70,3 +72,13 @@ def ensure_sqlite_schema():
                         f"ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+        # Backfill timestamps for legacy rows after assigned_at is introduced.
+        if "device_groups" in table_column_types:
+            connection.execute(
+                text(
+                    "UPDATE device_groups "
+                    "SET assigned_at = CURRENT_TIMESTAMP "
+                    "WHERE assigned_at IS NULL"
+                )
+            )
