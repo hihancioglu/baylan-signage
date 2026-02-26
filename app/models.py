@@ -69,3 +69,28 @@ class GroupPlaylist(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     playlist_id = Column(Integer, ForeignKey("playlists.id"))
+
+
+class CommandLog(Base):
+    __tablename__ = "command_logs"
+
+    id = Column(Integer, primary_key=True)
+    command_id = Column(String(64), unique=True, nullable=False)
+    command_type = Column(String(64), nullable=False)
+    target_type = Column(String(16), nullable=False)
+    target_value = Column(String(128), nullable=False)
+    ttl_sec = Column(Integer, default=30, nullable=False)
+    payload = Column(String(2048))
+    expected_count = Column(Integer, default=0, nullable=False)
+    sent_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommandAck(Base):
+    __tablename__ = "command_acks"
+
+    id = Column(Integer, primary_key=True)
+    command_id = Column(String(64), nullable=False)
+    hostname = Column(String(128), nullable=False)
+    status = Column(String(32), default="ok", nullable=False)
+    error_detail = Column(String(1024))
+    ack_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

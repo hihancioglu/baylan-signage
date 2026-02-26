@@ -81,8 +81,33 @@ def upgrade() -> None:
         sa.Column("unassigned_at", sa.DateTime(timezone=True), nullable=True),
     )
 
+    op.create_table(
+        "command_logs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("command_id", sa.String(length=64), nullable=False, unique=True),
+        sa.Column("command_type", sa.String(length=64), nullable=False),
+        sa.Column("target_type", sa.String(length=16), nullable=False),
+        sa.Column("target_value", sa.String(length=128), nullable=False),
+        sa.Column("ttl_sec", sa.Integer(), nullable=False, server_default="30"),
+        sa.Column("payload", sa.String(length=2048), nullable=True),
+        sa.Column("expected_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+
+    op.create_table(
+        "command_acks",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("command_id", sa.String(length=64), nullable=False),
+        sa.Column("hostname", sa.String(length=128), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="ok"),
+        sa.Column("error_detail", sa.String(length=1024), nullable=True),
+        sa.Column("ack_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("command_acks")
+    op.drop_table("command_logs")
     op.drop_table("device_groups")
     op.drop_table("playlist_items")
     op.drop_table("group_playlists")
