@@ -9,11 +9,15 @@ class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     VLC_VIDEO_TEMPLATE = (
         "{player} --fullscreen --play-and-exit --no-video-title-show "
-        "--no-qt-fs-controller --quiet {media}"
+        "--no-osd --no-mouse-events --no-keyboard-events --qt-start-minimized "
+        "--qt-fullscreen-screennumber=0 --video-on-top --no-qt-fs-controller "
+        "--no-snapshot-preview --no-interact --quiet {media}"
     )
     VLC_IMAGE_TEMPLATE = (
         "{player} --fullscreen --play-and-exit --no-video-title-show "
-        "--no-qt-fs-controller --image-duration={duration} --quiet {media}"
+        "--no-osd --no-mouse-events --no-keyboard-events --qt-start-minimized "
+        "--qt-fullscreen-screennumber=0 --video-on-top --no-qt-fs-controller "
+        "--no-snapshot-preview --no-interact --image-duration={duration} --quiet {media}"
     )
     MPV_VIDEO_TEMPLATE = "{player} --fs --border=no --force-window=yes --quiet {media}"
     MPV_IMAGE_TEMPLATE = (
