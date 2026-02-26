@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -12,9 +11,11 @@ class MediaManager:
     def __init__(self, cache_root: str = "client/cache"):
         self.cache_root = Path(cache_root)
         self.versions_root = self.cache_root / "versions"
+        self.media_store_root = self.cache_root / "media_store"
         self.state_file = self.cache_root / "state.json"
         self.cache_root.mkdir(parents=True, exist_ok=True)
         self.versions_root.mkdir(parents=True, exist_ok=True)
+        self.media_store_root.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _sha256_text(value: str) -> str:
@@ -51,6 +52,15 @@ class MediaManager:
 
         tmp_path.replace(target_path)
 
+    def _url_cache_target(self, source_url: str, signature: str | None) -> Path:
+        parsed = urlparse(source_url)
+        ext = Path(parsed.path).suffix
+        cache_key = signature or self._sha256_text(source_url)
+        if not ext:
+            ext = ".bin"
+        safe_key = self._sha256_text(cache_key)[:20]
+        return self.media_store_root / f"{safe_key}{ext}"
+
     def sync_playlist(self, playlist_items: list[str], playlist_version: str, media_signatures: dict[str, str]) -> list[str]:
         version = str(playlist_version or "default")
         version_dir = self.versions_root / version
@@ -60,26 +70,22 @@ class MediaManager:
 
         version_dir.mkdir(parents=True, exist_ok=True)
 
-        for idx, source in enumerate(playlist_items):
+        for source in playlist_items:
             signature = media_signatures.get(source)
 
             try:
                 if self._is_url(source):
-                    parsed = urlparse(source)
-                    base_name = os.path.basename(parsed.path) or f"media_{idx}"
-                    target = version_dir / f"{idx:04d}_{base_name}"
+                    target = self._url_cache_target(source, signature)
                     if not target.exists():
                         self._download_url(source, target)
                     checksum = self._sha256_file(target)
-                    if signature and checksum != signature:
-                        continue
                     local_items.append(str(target))
                     manifest.append(
                         {
                             "source": source,
                             "local_path": str(target),
                             "checksum": checksum,
-                            "signature": signature,
+                            "signature_token": signature,
                         }
                     )
                 else:
