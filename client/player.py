@@ -55,7 +55,7 @@ class BorderlessFullscreenPlayer:
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"Start-Process -LiteralPath '{escaped_path}' -Wait",
+                f"Start-Process -FilePath '{escaped_path}' -Wait",
             ],
             check=False,
         )
