@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  signage:
+    build: .
+    ports:
+      - "5080:5050"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Europe/Istanbul
+      - DATABASE_URL=sqlite:///data/signage.db
+      - SHARED_SECRET=${SHARED_SECRET}
+    restart: unless-stopped
