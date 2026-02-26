@@ -52,6 +52,19 @@ class PlaylistItem(Base):
     source_url = Column(String(1024))
 
 
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+
+    id = Column(Integer, primary_key=True)
+    original_name = Column(String(255), nullable=False)
+    stored_name = Column(String(255), nullable=False)
+    relative_path = Column(String(1024), unique=True, nullable=False)
+    content_type = Column(String(128))
+    file_size = Column(Integer)
+    checksum = Column(String(128))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class DeviceGroup(Base):
     __tablename__ = "device_groups"
 
