@@ -7,17 +7,23 @@ from pathlib import Path
 
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
-    WINDOWS_START_TEMPLATE = 'cmd /c start "" /wait {media}'
+    VLC_VIDEO_TEMPLATE = (
+        "{player} --fullscreen --play-and-exit --no-video-title-show "
+        "--no-qt-fs-controller --quiet {media}"
+    )
+    VLC_IMAGE_TEMPLATE = (
+        "{player} --fullscreen --play-and-exit --no-video-title-show "
+        "--no-qt-fs-controller --image-duration={duration} --quiet {media}"
+    )
+    MPV_VIDEO_TEMPLATE = "{player} --fs --border=no --force-window=yes --quiet {media}"
+    MPV_IMAGE_TEMPLATE = (
+        "{player} --fs --border=no --force-window=yes --quiet "
+        "--image-display-duration={duration} {media}"
+    )
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
-        default_video_command = "mpv --fs --border=no --force-window=yes --quiet {media}"
-        default_image_command = "mpv --fs --border=no --force-window=yes --quiet --image-display-duration={duration} {media}"
-
-        if os.name == "nt":
-            # Fallback to default Windows file association when mpv is not installed.
-            default_video_command = self.WINDOWS_START_TEMPLATE
-            default_image_command = self.WINDOWS_START_TEMPLATE
+        default_video_command, default_image_command = self._pick_default_player_commands()
 
         self.video_command = os.getenv(
             "PLAYER_VIDEO_COMMAND",
@@ -29,6 +35,43 @@ class BorderlessFullscreenPlayer:
         )
         self._process = None
 
+    def _pick_default_player_commands(self) -> tuple[str, str]:
+        player_candidates = []
+        if os.name == "nt":
+            player_candidates.extend(["vlc", "vlc.exe"])
+        player_candidates.extend(["vlc", "mpv"])
+
+        for player in player_candidates:
+            resolved = shutil.which(player)
+            if not resolved:
+                continue
+
+            player_quoted = shlex.quote(resolved)
+            if "vlc" in Path(resolved).name.lower():
+                return (
+                    self.VLC_VIDEO_TEMPLATE.format(player=player_quoted, media="{media}"),
+                    self.VLC_IMAGE_TEMPLATE.format(
+                        player=player_quoted,
+                        duration="{duration}",
+                        media="{media}",
+                    ),
+                )
+
+            return (
+                self.MPV_VIDEO_TEMPLATE.format(player=player_quoted, media="{media}"),
+                self.MPV_IMAGE_TEMPLATE.format(
+                    player=player_quoted,
+                    duration="{duration}",
+                    media="{media}",
+                ),
+            )
+
+        # Keep player unresolved when nothing exists in PATH.
+        return (
+            self.VLC_VIDEO_TEMPLATE.format(player="vlc", media="{media}"),
+            self.VLC_IMAGE_TEMPLATE.format(player="vlc", duration="{duration}", media="{media}"),
+        )
+
     def _is_video(self, media_path: str) -> bool:
         return Path(media_path).suffix.lower() in self.VIDEO_EXTENSIONS
 
@@ -37,29 +80,6 @@ class BorderlessFullscreenPlayer:
         command_text = template.format(media="{media}", duration=self.image_duration_sec)
         parts = shlex.split(command_text, posix=os.name != "nt")
         return [media_path if part == "{media}" else part for part in parts]
-
-    def _uses_windows_shell_fallback(self, media_path: str) -> bool:
-        template = self.video_command if self._is_video(media_path) else self.image_command
-        return os.name == "nt" and template.strip().lower() == self.WINDOWS_START_TEMPLATE.lower()
-
-    @staticmethod
-    def _play_with_windows_association(media_path: str) -> bool:
-        shell_exe = shutil.which("powershell") or shutil.which("pwsh")
-        if not shell_exe:
-            return False
-
-        escaped_path = media_path.replace("'", "''")
-        result = subprocess.run(
-            [
-                shell_exe,
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f"Start-Process -FilePath '{escaped_path}' -Wait",
-            ],
-            check=False,
-        )
-        return result.returncode == 0
 
     @staticmethod
     def _resolve_executable(command: list[str]) -> bool:
@@ -77,12 +97,6 @@ class BorderlessFullscreenPlayer:
         process = None
 
         try:
-            if self._uses_windows_shell_fallback(media_path):
-                ok = self._play_with_windows_association(media_path)
-                if not ok:
-                    print("⚠️ windows association ile oynatma başarısız")
-                return ok
-
             command = self._build_command(media_path)
             if not self._resolve_executable(command):
                 print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
