@@ -19,6 +19,7 @@ SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
 HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
+STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
@@ -479,19 +480,24 @@ def main():
             print("Connection failed, retrying...", e)
             time.sleep(3)
 
+    next_heartbeat_at = time.monotonic()
+
     while True:
         try:
             idle_sec = run_state_cycle()
-            sio.emit(
-                "heartbeat",
-                {
-                    "hostname": hostname,
-                    "current_state": current_state.value,
-                    "idle_seconds": round(idle_sec, 1),
-                },
-            )
-            print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
-            time.sleep(HEARTBEAT_INTERVAL_SEC)
+            now = time.monotonic()
+            if now >= next_heartbeat_at:
+                sio.emit(
+                    "heartbeat",
+                    {
+                        "hostname": hostname,
+                        "current_state": current_state.value,
+                        "idle_seconds": round(idle_sec, 1),
+                    },
+                )
+                print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
+                next_heartbeat_at = now + HEARTBEAT_INTERVAL_SEC
+            time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
         except KeyboardInterrupt:
             print("🛑 Client interrupted")
             break
