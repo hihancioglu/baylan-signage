@@ -19,12 +19,6 @@ def _existing_columns(connection, table_name):
 
 
 def ensure_sqlite_schema():
-    """
-    Apply additive, backward-compatible schema updates for SQLite deployments.
-
-    Some installations started without Alembic migrations. This helper makes sure
-    newly introduced nullable columns exist so ORM SELECTs do not fail.
-    """
     if not engine.dialect.name.startswith("sqlite"):
         return
 
@@ -50,14 +44,41 @@ def ensure_sqlite_schema():
         },
         "device_groups": {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
-            # SQLite cannot ALTER TABLE ... ADD COLUMN with CURRENT_TIMESTAMP
-            # defaults. Add as nullable first, then backfill existing rows.
             "assigned_at": "DATETIME",
             "unassigned_at": "DATETIME",
         },
     }
 
+    Base.metadata.create_all(bind=engine)
+
     with engine.begin() as connection:
+        if not _existing_columns(connection, "command_logs"):
+            connection.execute(text(
+                "CREATE TABLE command_logs ("
+                "id INTEGER PRIMARY KEY, "
+                "command_id VARCHAR(64) UNIQUE NOT NULL, "
+                "command_type VARCHAR(64) NOT NULL, "
+                "target_type VARCHAR(16) NOT NULL, "
+                "target_value VARCHAR(128) NOT NULL, "
+                "ttl_sec INTEGER DEFAULT 30 NOT NULL, "
+                "payload VARCHAR(2048), "
+                "expected_count INTEGER DEFAULT 0 NOT NULL, "
+                "sent_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL"
+                ")"
+            ))
+
+        if not _existing_columns(connection, "command_acks"):
+            connection.execute(text(
+                "CREATE TABLE command_acks ("
+                "id INTEGER PRIMARY KEY, "
+                "command_id VARCHAR(64) NOT NULL, "
+                "hostname VARCHAR(128) NOT NULL, "
+                "status VARCHAR(32) DEFAULT 'ok' NOT NULL, "
+                "error_detail VARCHAR(1024), "
+                "ack_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL"
+                ")"
+            ))
+
         for table_name, wanted_columns in table_column_types.items():
             existing_columns = _existing_columns(connection, table_name)
             if not existing_columns:
@@ -73,8 +94,7 @@ def ensure_sqlite_schema():
                     )
                 )
 
-        # Backfill timestamps for legacy rows after assigned_at is introduced.
-        if "device_groups" in table_column_types:
+        if _existing_columns(connection, "device_groups"):
             connection.execute(
                 text(
                     "UPDATE device_groups "

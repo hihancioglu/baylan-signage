@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signage Panel</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #0f172a; color: #e2e8f0; }
+    h2 { margin-top: 28px; }
+    .card { background: #1e293b; padding: 16px; border-radius: 10px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { border-bottom: 1px solid #334155; padding: 8px; text-align: left; }
+    .online { color: #22c55e; font-weight: bold; }
+    .offline { color: #ef4444; font-weight: bold; }
+    ul { list-style: none; padding: 0; }
+    li { background: #334155; margin: 6px 0; padding: 8px; border-radius: 6px; cursor: move; }
+    input, select, button, textarea { padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Signage Operasyon Paneli</h1>
+
+  <div class="card">
+    <h2>Cihazlar</h2>
+    <table>
+      <thead><tr><th>Hostname</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th></tr></thead>
+      <tbody id="devices-body"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Grup Bazlı Playlist Atama</h2>
+    <select id="group-select"></select>
+    <select id="playlist-select"></select>
+    <button onclick="assignPlaylist()">Ata</button>
+    <h3>Playlist Item Sıralama (Drag-Drop)</h3>
+    <select id="playlist-order-select" onchange="loadItems()"></select>
+    <ul id="playlist-items"></ul>
+    <button onclick="saveOrder()">Sıralamayı Kaydet</button>
+  </div>
+
+  <div class="card">
+    <h2>Acil Duyuru</h2>
+    <select id="announce-target" onchange="onTargetChange()">
+      <option value="all">Tüm Cihazlar</option>
+      <option value="group">Grup</option>
+      <option value="devices">Seçili Cihazlar</option>
+    </select>
+    <input id="announce-target-value" placeholder="grup id veya cihaz1,cihaz2" />
+    <input id="announce-ttl" type="number" value="120" min="10" />
+    <textarea id="announce-message" rows="3" placeholder="Duyuru metni"></textarea>
+    <div><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
+    <button onclick="pushAnnouncement()">Push</button>
+  </div>
+
+  <div class="card">
+    <h2>Operasyon Logları</h2>
+    <table>
+      <thead><tr><th>Komut</th><th>Hedef</th><th>Ack Oranı</th><th>Hata Detayı</th></tr></thead>
+      <tbody id="log-body"></tbody>
+    </table>
+  </div>
+
+<script>
+const SECRET = localStorage.getItem('panelSecret') || prompt('X-SECRET girin');
+localStorage.setItem('panelSecret', SECRET || '');
+const hdr = { 'Content-Type': 'application/json', 'X-SECRET': SECRET || '' };
+
+async function jget(url){ const r = await fetch(url, {headers: hdr}); return r.json(); }
+async function jpost(url, body){ const r = await fetch(url, {method:'POST', headers:hdr, body: JSON.stringify(body)}); return r.json(); }
+
+async function loadDevices(){
+  const devices = await jget('/api/devices');
+  const body = document.getElementById('devices-body');
+  body.innerHTML = '';
+  (devices||[]).forEach(d => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.last_state||''}</td><td>${d.group||'-'}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function loadGroupsPlaylists(){
+  const groups = await jget('/api/groups');
+  const playlists = await jget('/api/playlists');
+  const gs = document.getElementById('group-select');
+  const ps = document.getElementById('playlist-select');
+  const po = document.getElementById('playlist-order-select');
+  gs.innerHTML = (groups||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
+  ps.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  po.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  loadItems();
+}
+
+async function assignPlaylist(){
+  const g = document.getElementById('group-select').value;
+  const p = document.getElementById('playlist-select').value;
+  await jpost(`/api/groups/${g}/playlist/${p}`, {});
+  alert('Playlist atandı');
+}
+
+let dragId = null;
+async function loadItems(){
+  const pid = document.getElementById('playlist-order-select').value;
+  if(!pid) return;
+  const items = await jget(`/api/playlists/${pid}/items`);
+  const ul = document.getElementById('playlist-items');
+  ul.innerHTML = '';
+  (items||[]).forEach(i=>{
+    const li = document.createElement('li');
+    li.draggable = true;
+    li.dataset.id = i.id;
+    li.textContent = i.path;
+    li.addEventListener('dragstart',()=>dragId=i.id);
+    li.addEventListener('dragover',e=>e.preventDefault());
+    li.addEventListener('drop', e=>{
+      e.preventDefault();
+      const from = [...ul.children].find(x=>x.dataset.id==dragId);
+      const to = li;
+      if(from && to && from!==to){ ul.insertBefore(from, to); }
+    });
+    ul.appendChild(li);
+  });
+}
+
+async function saveOrder(){
+  const pid = document.getElementById('playlist-order-select').value;
+  const ids = [...document.querySelectorAll('#playlist-items li')].map(x=>Number(x.dataset.id));
+  await jpost(`/api/playlists/${pid}/items/reorder`, {item_ids: ids});
+  alert('Sıralama kaydedildi');
+}
+
+function onTargetChange(){}
+document.getElementById('announce-message').addEventListener('input', e=>{
+  document.getElementById('announce-preview').textContent = e.target.value;
+});
+
+async function pushAnnouncement(){
+  const targetType = document.getElementById('announce-target').value;
+  const rawVal = document.getElementById('announce-target-value').value;
+  let targetValue = rawVal;
+  if(targetType==='group') targetValue = Number(rawVal);
+  if(targetType==='devices') targetValue = rawVal.split(',').map(x=>x.trim()).filter(Boolean);
+  const ttl = Number(document.getElementById('announce-ttl').value||120);
+  const message = document.getElementById('announce-message').value;
+  const res = await jpost('/api/announcements/push', {
+    target: { type: targetType, value: targetValue },
+    ttl_sec: ttl,
+    message,
+    preview: message
+  });
+  alert(res.ok ? 'Duyuru gönderildi' : (res.error || 'hata'));
+  loadLogs();
+}
+
+async function loadLogs(){
+  const logs = await jget('/api/commands/logs');
+  const b = document.getElementById('log-body');
+  b.innerHTML = '';
+  (logs||[]).forEach(l=>{
+    const tr = document.createElement('tr');
+    const err = (l.errors||[]).map(e=>`${e.hostname}: ${e.detail||'-'}`).join(' | ');
+    tr.innerHTML = `<td>${l.type}<br/><small>${l.command_id}</small></td><td>${l.target.type}:${l.target.value}</td><td>${(l.ack_ratio*100).toFixed(0)}% (${l.ack_count}/${l.expected_count})</td><td>${err||'-'}</td>`;
+    b.appendChild(tr);
+  });
+}
+
+async function init(){
+  await loadDevices();
+  await loadGroupsPlaylists();
+  await loadLogs();
+  setInterval(loadDevices, 15000);
+  setInterval(loadLogs, 15000);
+}
+init();
+</script>
+</body>
+</html>
