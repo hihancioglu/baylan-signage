@@ -2,6 +2,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import hashlib
+import itertools
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -28,6 +29,15 @@ Base.metadata.create_all(bind=engine)
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
+command_seq = itertools.count(1)
+
+COMMAND_TYPES = {
+    "REFRESH_CONFIG",
+    "EMERGENCY_START",
+    "EMERGENCY_STOP",
+    "RESTART_AGENT",
+    "PING",
+}
 
 
 @app.route("/")
@@ -37,6 +47,34 @@ def index():
 
 def db_session():
     return SessionLocal()
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def build_command_contract(command_type: str, payload=None, ttl_sec=30, priority=5):
+    if command_type not in COMMAND_TYPES:
+        raise ValueError(f"unsupported command_type={command_type}")
+
+    return {
+        "type": command_type,
+        "command_id": f"cmd-{next(command_seq)}",
+        "issued_at": _utc_now_iso(),
+        "ttl_sec": int(ttl_sec),
+        "payload": payload or {},
+        "priority": int(priority),
+    }
+
+
+def join_group_rooms(db, sid, hostname):
+    device = db.query(Device).filter_by(hostname=hostname).first()
+    if not device:
+        return
+
+    memberships = db.query(DeviceGroup).filter_by(device_id=device.id).all()
+    for membership in memberships:
+        join_room(f"group:{membership.group_id}")
 
 
 # ------------------------------------------------
@@ -123,6 +161,8 @@ def handle_register(data):
 
         db.add(device)
         db.commit()
+
+        join_group_rooms(db, request.sid, hostname)
     finally:
         db.close()
 
@@ -162,6 +202,21 @@ def handle_disconnect():
             db.commit()
     finally:
         db.close()
+
+
+@socketio.on("pull_config")
+def handle_pull_config(data):
+    hostname = (data or {}).get("hostname")
+    if not hostname:
+        return
+
+    emit("config", build_config(hostname), room=request.sid)
+
+
+@socketio.on("command_ack")
+def handle_command_ack(data):
+    hostname = sid_to_host.get(request.sid)
+    print(f"🧾 command_ack hostname={hostname} data={data}")
 
 # ------------------------------------------------
 # OFFLINE CHECKER
@@ -261,6 +316,10 @@ def bind_device_group(hostname, group_id):
             db.add(DeviceGroup(device_id=device.id, group_id=group_id))
             db.commit()
 
+        sid = connected.get(hostname)
+        if sid:
+            socketio.server.enter_room(sid, f"group:{group_id}")
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -348,8 +407,48 @@ def push_refresh(hostname):
     if request.headers.get("X-SECRET") != SHARED_SECRET:
         return jsonify({"error": "unauthorized"}), 401
 
-    cfg = build_config(hostname)
-    socketio.emit("config", cfg, room=f"device:{hostname}")
+    cmd = build_command_contract("REFRESH_CONFIG", payload={}, ttl_sec=30, priority=3)
+    socketio.emit("command", cmd, room=f"device:{hostname}")
+    return jsonify({"ok": True, "command": cmd})
+
+
+@app.post("/api/command/device/<hostname>")
+def push_device_command(hostname):
+    if request.headers.get("X-SECRET") != SHARED_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.json or {}
+    command_type = body.get("type")
+    if command_type not in COMMAND_TYPES:
+        return jsonify({"error": "unsupported command type"}), 400
+
+    cmd = build_command_contract(
+        command_type=command_type,
+        payload=body.get("payload") or {},
+        ttl_sec=body.get("ttl_sec", 30),
+        priority=body.get("priority", 5),
+    )
+    socketio.emit("command", cmd, room=f"device:{hostname}")
+    return jsonify({"ok": True, "command": cmd})
+
+
+@app.post("/api/command/group/<int:group_id>")
+def push_group_command(group_id):
+    if request.headers.get("X-SECRET") != SHARED_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.json or {}
+    command_type = body.get("type")
+    if command_type not in COMMAND_TYPES:
+        return jsonify({"error": "unsupported command type"}), 400
+
+    cmd = build_command_contract(
+        command_type=command_type,
+        payload=body.get("payload") or {},
+        ttl_sec=body.get("ttl_sec", 30),
+        priority=body.get("priority", 5),
+    )
+    socketio.emit("command", cmd, room=f"group:{group_id}")
     return jsonify({"ok": True})
 
 
