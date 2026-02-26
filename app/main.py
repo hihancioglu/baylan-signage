@@ -4,11 +4,14 @@ eventlet.monkey_patch()
 import hashlib
 import itertools
 import json
+import os
 import threading
 import time
+import uuid
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory, url_for
 from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 
@@ -22,6 +25,7 @@ from .models import (
     GroupPlaylist,
     CommandLog,
     CommandAck,
+    MediaAsset,
 )
 from .config import SHARED_SECRET
 
@@ -30,6 +34,10 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 ensure_sqlite_schema()
+
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
@@ -44,6 +52,20 @@ COMMAND_TYPES = {
 }
 
 
+def _is_allowed_video(filename: str) -> bool:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix in ALLOWED_VIDEO_EXTENSIONS
+
+
+def _safe_media_filename(original_name: str) -> str:
+    ext = Path(original_name).suffix.lower()
+    return f"{uuid.uuid4().hex}{ext}"
+
+
+def _media_url(relative_path: str) -> str:
+    return url_for("serve_media", asset_path=relative_path, _external=True)
+
+
 @app.route("/")
 def index():
     return "Signage Server Running"
@@ -52,6 +74,11 @@ def index():
 @app.get("/panel")
 def panel():
     return render_template("panel.html")
+
+
+@app.get("/media/<path:asset_path>")
+def serve_media(asset_path):
+    return send_from_directory(MEDIA_ROOT, asset_path)
 
 
 def db_session():
@@ -179,7 +206,7 @@ def build_config(hostname):
             .all()
         )
 
-        videos = [i.path for i in items]
+        videos = [i.path for i in items if i.path]
         media_signatures = {
             path: hashlib.sha256(path.encode("utf-8")).hexdigest() for path in videos
         }
@@ -470,6 +497,78 @@ def create_playlist():
         db.close()
 
 
+@app.get("/api/media")
+def list_media_assets():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        assets = db.query(MediaAsset).order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc()).all()
+        return jsonify([
+            {
+                "id": a.id,
+                "name": a.original_name,
+                "content_type": a.content_type,
+                "file_size": a.file_size,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "url": _media_url(a.relative_path),
+                "relative_path": a.relative_path,
+            }
+            for a in assets
+        ])
+    finally:
+        db.close()
+
+
+@app.post("/api/media/upload")
+def upload_media_asset():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "file required"}), 400
+
+    if not _is_allowed_video(uploaded.filename):
+        return jsonify({"error": "unsupported file type"}), 400
+
+    stored_name = _safe_media_filename(uploaded.filename)
+    stored_path = MEDIA_ROOT / stored_name
+    uploaded.save(stored_path)
+
+    checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
+    file_size = stored_path.stat().st_size
+
+    db = db_session()
+    try:
+        asset = MediaAsset(
+            original_name=uploaded.filename,
+            stored_name=stored_name,
+            relative_path=stored_name,
+            content_type=uploaded.mimetype,
+            file_size=file_size,
+            checksum=checksum,
+        )
+        db.add(asset)
+        db.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "name": asset.original_name,
+                    "url": _media_url(asset.relative_path),
+                    "content_type": asset.content_type,
+                    "file_size": asset.file_size,
+                },
+            }
+        )
+    finally:
+        db.close()
+
+
 @app.get("/api/playlists/<int:playlist_id>/items")
 def list_playlist_items(playlist_id):
     if _auth_failed():
@@ -484,7 +583,12 @@ def list_playlist_items(playlist_id):
             .all()
         )
         return jsonify([
-            {"id": i.id, "path": i.path, "order_no": i.order_no}
+            {
+                "id": i.id,
+                "path": i.path,
+                "order_no": i.order_no,
+                "label": Path((i.path or "").split("?")[0]).name or i.path,
+            }
             for i in items
         ])
     finally:
@@ -496,15 +600,20 @@ def add_playlist_item(playlist_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    path = (request.json or {}).get("path")
-    order_no = (request.json or {}).get("order_no", 0)
+    body = request.json or {}
+    media_id = body.get("media_id")
+    order_no = body.get("order_no", 0)
 
     db = db_session()
     try:
-        item = PlaylistItem(playlist_id=playlist_id, path=path, order_no=order_no)
+        asset = db.query(MediaAsset).filter_by(id=media_id).first()
+        if not asset:
+            return jsonify({"error": "media not found"}), 404
+
+        item = PlaylistItem(playlist_id=playlist_id, path=_media_url(asset.relative_path), order_no=order_no)
         db.add(item)
         db.commit()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "id": item.id})
     finally:
         db.close()
 

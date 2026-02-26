@@ -16,6 +16,7 @@
     li { background: #334155; margin: 6px 0; padding: 8px; border-radius: 6px; cursor: move; }
     input, select, button, textarea { padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; }
     button { cursor: pointer; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   </style>
 </head>
 <body>
@@ -30,10 +31,28 @@
   </div>
 
   <div class="card">
-    <h2>Grup Bazlı Playlist Atama</h2>
-    <select id="group-select"></select>
-    <select id="playlist-select"></select>
-    <button onclick="assignPlaylist()">Ata</button>
+    <h2>Video Yükleme</h2>
+    <div class="row">
+      <input id="media-file" type="file" accept="video/*" />
+      <button onclick="uploadVideo()">Videoyu Yükle</button>
+    </div>
+    <small>Yüklenen videolar medya listesine eklenir ve playlistlere buradan atanır.</small>
+  </div>
+
+  <div class="card">
+    <h2>Playlist Yönetimi</h2>
+    <div class="row">
+      <select id="group-select"></select>
+      <select id="playlist-select"></select>
+      <button onclick="assignPlaylist()">Gruba Ata</button>
+    </div>
+    <h3>Playlist'e Video Ekle</h3>
+    <div class="row">
+      <select id="playlist-add-select"></select>
+      <select id="media-select"></select>
+      <button onclick="addMediaToPlaylist()">Ekle</button>
+    </div>
+
     <h3>Playlist Item Sıralama (Drag-Drop)</h3>
     <select id="playlist-order-select" onchange="loadItems()"></select>
     <ul id="playlist-items"></ul>
@@ -86,11 +105,62 @@ async function loadGroupsPlaylists(){
   const playlists = await jget('/api/playlists');
   const gs = document.getElementById('group-select');
   const ps = document.getElementById('playlist-select');
+  const pa = document.getElementById('playlist-add-select');
   const po = document.getElementById('playlist-order-select');
   gs.innerHTML = (groups||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   ps.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  pa.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   po.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   loadItems();
+}
+
+async function loadMedia(){
+  const assets = await jget('/api/media');
+  const ms = document.getElementById('media-select');
+  ms.innerHTML = (assets||[]).map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+}
+
+async function uploadVideo(){
+  const fileInput = document.getElementById('media-file');
+  if(!fileInput.files.length){
+    alert('Önce bir video seçin');
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+
+  const res = await fetch('/api/media/upload', {
+    method: 'POST',
+    headers: { 'X-SECRET': SECRET || '' },
+    body: fd
+  });
+  const body = await res.json();
+  if(!body.ok){
+    alert(body.error || 'Yükleme hatası');
+    return;
+  }
+  alert('Video yüklendi');
+  fileInput.value = '';
+  await loadMedia();
+}
+
+async function addMediaToPlaylist(){
+  const playlistId = Number(document.getElementById('playlist-add-select').value);
+  const mediaId = Number(document.getElementById('media-select').value);
+  if(!playlistId || !mediaId){
+    alert('Playlist ve video seçin');
+    return;
+  }
+  const resp = await jpost(`/api/playlists/${playlistId}/items`, { media_id: mediaId });
+  if(!resp.ok){
+    alert(resp.error || 'Ekleme hatası');
+    return;
+  }
+  alert('Video playlist eklendi');
+  if(String(playlistId) === document.getElementById('playlist-order-select').value){
+    await loadItems();
+  }
 }
 
 async function assignPlaylist(){
@@ -111,7 +181,7 @@ async function loadItems(){
     const li = document.createElement('li');
     li.draggable = true;
     li.dataset.id = i.id;
-    li.textContent = i.path;
+    li.textContent = i.label || i.path;
     li.addEventListener('dragstart',()=>dragId=i.id);
     li.addEventListener('dragover',e=>e.preventDefault());
     li.addEventListener('drop', e=>{
@@ -169,6 +239,7 @@ async function loadLogs(){
 async function init(){
   await loadDevices();
   await loadGroupsPlaylists();
+  await loadMedia();
   await loadLogs();
   setInterval(loadDevices, 15000);
   setInterval(loadLogs, 15000);
