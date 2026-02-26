@@ -338,29 +338,46 @@ def run_state_cycle():
     return idle_sec
 
 
-print("Connecting to:", SERVER_URL)
+def main():
+    print("Connecting to:", SERVER_URL)
 
-while True:
-    try:
-        sio.connect(SERVER_URL)
-        break
-    except Exception as e:
-        print("Connection failed, retrying...", e)
-        time.sleep(3)
+    while True:
+        try:
+            sio.connect(SERVER_URL)
+            break
+        except KeyboardInterrupt:
+            print("🛑 Client interrupted during connect")
+            return
+        except Exception as e:
+            print("Connection failed, retrying...", e)
+            time.sleep(3)
 
-while True:
+    while True:
+        try:
+            idle_sec = run_state_cycle()
+            sio.emit(
+                "heartbeat",
+                {
+                    "hostname": hostname,
+                    "current_state": current_state.value,
+                    "idle_seconds": round(idle_sec, 1),
+                },
+            )
+            print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
+            time.sleep(HEARTBEAT_INTERVAL_SEC)
+        except KeyboardInterrupt:
+            print("🛑 Client interrupted")
+            break
+        except Exception as e:
+            print("Heartbeat loop stopped:", e)
+            break
+
+    playback.stop()
     try:
-        idle_sec = run_state_cycle()
-        sio.emit(
-            "heartbeat",
-            {
-                "hostname": hostname,
-                "current_state": current_state.value,
-                "idle_seconds": round(idle_sec, 1),
-            },
-        )
-        print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
-        time.sleep(HEARTBEAT_INTERVAL_SEC)
-    except Exception as e:
-        print("Heartbeat loop stopped:", e)
-        break
+        sio.disconnect()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    main()
