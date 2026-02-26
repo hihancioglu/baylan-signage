@@ -44,6 +44,13 @@ class MediaManager:
         parsed = urlparse(path)
         return parsed.scheme in {"http", "https"}
 
+    @staticmethod
+    def _path_exists_safely(path: Path) -> bool:
+        try:
+            return path.exists()
+        except OSError:
+            return False
+
     def _download_url(self, source_url: str, target_path: Path):
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with urlopen(source_url, timeout=30) as res, tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -159,5 +166,5 @@ class MediaManager:
     def load_last_successful_playlist(self) -> list[str]:
         state = self._load_state()
         items = state.get("last_successful_playlist") or []
-        existing = [item for item in items if Path(item).exists()]
+        existing = [item for item in items if self._path_exists_safely(Path(item))]
         return existing
