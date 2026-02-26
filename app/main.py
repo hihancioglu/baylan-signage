@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 
-from .db import Base, engine, SessionLocal
+from .db import SessionLocal
 from .models import (
     Device,
     Group,
@@ -25,7 +25,6 @@ from .config import SHARED_SECRET
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-Base.metadata.create_all(bind=engine)
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname

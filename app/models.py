@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 from .db import Base
 
 
@@ -14,6 +13,10 @@ class Device(Base):
     department = Column(String(128))
     is_online = Column(Boolean, default=False)
     last_seen = Column(DateTime(timezone=True), server_default=func.now())
+    agent_version = Column(String(64))
+    os_version = Column(String(128))
+    last_error = Column(String(512))
+    last_state = Column(String(64))
 
 
 class Group(Base):
@@ -29,6 +32,11 @@ class Playlist(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(128), unique=True, nullable=False)
     enabled = Column(Boolean, default=True)
+    type = Column(String(32), default="normal", nullable=False)
+    valid_from = Column(DateTime(timezone=True))
+    valid_to = Column(DateTime(timezone=True))
+    priority = Column(Integer, default=0, nullable=False)
+    loop_mode = Column(String(32), default="sequential", nullable=False)
 
 
 class PlaylistItem(Base):
@@ -38,6 +46,10 @@ class PlaylistItem(Base):
     playlist_id = Column(Integer, ForeignKey("playlists.id"))
     path = Column(String(512))
     order_no = Column(Integer, default=0)
+    media_type = Column(String(64), default="video")
+    duration_sec = Column(Integer)
+    checksum = Column(String(128))
+    source_url = Column(String(1024))
 
 
 class DeviceGroup(Base):
@@ -46,6 +58,9 @@ class DeviceGroup(Base):
     id = Column(Integer, primary_key=True)
     device_id = Column(Integer, ForeignKey("devices.id"))
     group_id = Column(Integer, ForeignKey("groups.id"))
+    is_active = Column(Boolean, default=True, nullable=False)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    unassigned_at = Column(DateTime(timezone=True))
 
 
 class GroupPlaylist(Base):
