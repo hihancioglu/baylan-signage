@@ -10,13 +10,21 @@ class BorderlessFullscreenPlayer:
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
+        default_video_command = "mpv --fs --border=no --force-window=yes --quiet {media}"
+        default_image_command = "mpv --fs --border=no --force-window=yes --quiet --image-display-duration={duration} {media}"
+
+        if os.name == "nt":
+            # Fallback to default Windows file association when mpv is not installed.
+            default_video_command = 'cmd /c start "" /wait {media}'
+            default_image_command = 'cmd /c start "" /wait {media}'
+
         self.video_command = os.getenv(
             "PLAYER_VIDEO_COMMAND",
-            "mpv --fs --border=no --force-window=yes --quiet {media}",
+            default_video_command,
         )
         self.image_command = os.getenv(
             "PLAYER_IMAGE_COMMAND",
-            "mpv --fs --border=no --force-window=yes --quiet --image-display-duration={duration} {media}",
+            default_image_command,
         )
         self._process = None
 
