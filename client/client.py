@@ -134,6 +134,7 @@ class PlaybackController:
         self._fallback_media = Path(
             os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
         )
+        self._fallback_warning_emitted = False
         self._version = None
         self._lock = threading.Lock()
         self._running = False
@@ -154,8 +155,13 @@ class PlaybackController:
     def _effective_playlist(self, playlist: list[str]) -> list[str]:
         if playlist:
             return playlist
-        if self._fallback_media.exists():
+
+        if self._fallback_media.exists() and self.player.supports_media(str(self._fallback_media)):
             return [str(self._fallback_media)]
+
+        if self._fallback_media.exists() and not self._fallback_warning_emitted:
+            print(f"⚠️ fallback medya desteklenmiyor, oynatılmayacak: {self._fallback_media}")
+            self._fallback_warning_emitted = True
         return []
 
     def update_from_config(self, config: dict):
