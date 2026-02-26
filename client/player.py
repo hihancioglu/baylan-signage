@@ -85,13 +85,28 @@ class BorderlessFullscreenPlayer:
         template = self.video_command if self._is_video(media_path) else self.image_command
         command_text = template.format(media="{media}", duration=self.image_duration_sec)
         parts = shlex.split(command_text, posix=os.name != "nt")
-        return [media_path if part == "{media}" else part for part in parts]
+        command = [media_path if part == "{media}" else part for part in parts]
+
+        # Windows'ta shlex ile ayrıştırılan quoted executable path'ler ("C:\\...\\vlc.exe")
+        # doğrudan subprocess'e gönderildiğinde bulunamıyor. Dış quote'ları temizle.
+        return [self._strip_outer_quotes(part) for part in command]
+
+    @staticmethod
+    def _strip_outer_quotes(value: str) -> str:
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            return value[1:-1]
+        return value
 
     @staticmethod
     def _resolve_executable(command: list[str]) -> bool:
         if not command:
             return False
-        return shutil.which(command[0]) is not None
+
+        executable = BorderlessFullscreenPlayer._strip_outer_quotes(command[0])
+        if Path(executable).is_file():
+            return True
+
+        return shutil.which(executable) is not None
 
     def play_blocking(self, media_path: str) -> bool:
         if not Path(media_path).exists():
