@@ -7,17 +7,16 @@ from pathlib import Path
 
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
     VLC_VIDEO_TEMPLATE = (
-        "{player} --fullscreen --play-and-exit --no-video-title-show "
-        "--no-osd --no-mouse-events --no-keyboard-events --qt-start-minimized "
-        "--qt-fullscreen-screennumber=0 --video-on-top --no-qt-fs-controller "
-        "--no-snapshot-preview --no-interact --quiet {media}"
+        "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
+        "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "
+        "--video-on-top --no-interact --quiet {media}"
     )
     VLC_IMAGE_TEMPLATE = (
-        "{player} --fullscreen --play-and-exit --no-video-title-show "
-        "--no-osd --no-mouse-events --no-keyboard-events --qt-start-minimized "
-        "--qt-fullscreen-screennumber=0 --video-on-top --no-qt-fs-controller "
-        "--no-snapshot-preview --no-interact --image-duration={duration} --quiet {media}"
+        "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
+        "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "
+        "--video-on-top --no-interact --image-duration={duration} --quiet {media}"
     )
     MPV_VIDEO_TEMPLATE = "{player} --fs --border=no --force-window=yes --quiet {media}"
     MPV_IMAGE_TEMPLATE = (
@@ -85,6 +84,10 @@ class BorderlessFullscreenPlayer:
     def _is_video(self, media_path: str) -> bool:
         return Path(media_path).suffix.lower() in self.VIDEO_EXTENSIONS
 
+    def supports_media(self, media_path: str) -> bool:
+        ext = Path(media_path).suffix.lower()
+        return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS
+
     def _build_command(self, media_path: str) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command
         command_text = template.format(media="{media}", duration=self.image_duration_sec)
@@ -115,6 +118,10 @@ class BorderlessFullscreenPlayer:
     def play_blocking(self, media_path: str) -> bool:
         if not Path(media_path).exists():
             print(f"⚠️ medya bulunamadı: {media_path}")
+            return False
+
+        if not self.supports_media(media_path):
+            print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
             return False
 
         self.stop()
