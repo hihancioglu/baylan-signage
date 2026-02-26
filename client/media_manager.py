@@ -62,8 +62,6 @@ class MediaManager:
 
         for idx, source in enumerate(playlist_items):
             signature = media_signatures.get(source)
-            if signature and signature != self._sha256_text(source):
-                continue
 
             try:
                 if self._is_url(source):
@@ -73,6 +71,8 @@ class MediaManager:
                     if not target.exists():
                         self._download_url(source, target)
                     checksum = self._sha256_file(target)
+                    if signature and checksum != signature:
+                        continue
                     local_items.append(str(target))
                     manifest.append(
                         {
@@ -87,6 +87,8 @@ class MediaManager:
                     if not source_path.exists() or not source_path.is_file():
                         continue
                     checksum = self._sha256_file(source_path)
+                    if signature and checksum != signature:
+                        continue
                     local_items.append(str(source_path))
                     manifest.append(
                         {
