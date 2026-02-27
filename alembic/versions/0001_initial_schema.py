@@ -23,6 +23,7 @@ def upgrade() -> None:
         "devices",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("hostname", sa.String(length=128), nullable=False, unique=True),
+        sa.Column("alias", sa.String(length=128), nullable=True),
         sa.Column("ip", sa.String(length=64), nullable=True),
         sa.Column("username", sa.String(length=128), nullable=True),
         sa.Column("department", sa.String(length=128), nullable=True),
