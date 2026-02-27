@@ -73,11 +73,20 @@ class MediaManager:
 
     def _download_url(self, source_url: str, target_path: Path):
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        with urlopen(source_url, timeout=30) as res, tempfile.NamedTemporaryFile(delete=False) as tmp:
-            shutil.copyfileobj(res, tmp)
-            tmp_path = Path(tmp.name)
+        tmp_path = None
+        try:
+            # Create temp file in target directory to avoid cross-device rename issues
+            # (e.g. WinError 17 when %TEMP% and cache directory are on different drives).
+            with urlopen(source_url, timeout=30) as res, tempfile.NamedTemporaryFile(
+                dir=target_path.parent, delete=False
+            ) as tmp:
+                shutil.copyfileobj(res, tmp)
+                tmp_path = Path(tmp.name)
 
-        tmp_path.replace(target_path)
+            tmp_path.replace(target_path)
+        finally:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
 
     def _url_cache_target(self, source_url: str, signature: str | None) -> Path:
         parsed = urlparse(source_url)
