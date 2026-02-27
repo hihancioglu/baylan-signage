@@ -13,6 +13,7 @@ import traceback
 import faulthandler
 import builtins
 import shutil
+import tempfile
 from urllib import request as urllib_request
 from pathlib import Path
 import time
@@ -41,6 +42,7 @@ STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
 DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
+UPDATER_LAUNCHER_LOG_PATH = Path(os.getenv("UPDATER_LAUNCHER_LOG_PATH", "client/logs/updater_launcher.log"))
 EMBEDDED_BUILD_PATTERN = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
 
 
@@ -92,9 +94,28 @@ def print(*args, **kwargs):
         raise
 
 
+def _resolve_debug_log_path() -> Path:
+    candidates = [DEBUG_LOG_PATH]
+    temp_dir = Path(tempfile.gettempdir())
+    candidates.append(temp_dir / "baylan-client" / "client_debug.log")
+
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            with open(candidate, "a", encoding="utf-8"):
+                pass
+            return candidate
+        except OSError:
+            continue
+
+    return temp_dir / "client_debug_fallback.log"
+
+
+ACTIVE_DEBUG_LOG_PATH = _resolve_debug_log_path()
+
+
 def setup_debug_logging():
-    DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    handlers = [logging.FileHandler(DEBUG_LOG_PATH, encoding="utf-8")]
+    handlers = [logging.FileHandler(ACTIVE_DEBUG_LOG_PATH, encoding="utf-8")]
     if not platform.system().lower().startswith("win"):
         handlers.append(logging.StreamHandler(sys.stdout))
 
@@ -104,7 +125,7 @@ def setup_debug_logging():
         handlers=handlers,
     )
 
-    fault_log = open(DEBUG_LOG_PATH, "a", encoding="utf-8")
+    fault_log = open(ACTIVE_DEBUG_LOG_PATH, "a", encoding="utf-8")
     faulthandler.enable(file=fault_log, all_threads=True)
 
     def _close_fault_log():
@@ -136,7 +157,7 @@ def log_info(message: str):
 
 
 setup_debug_logging()
-log_info(f"🧾 debug logs: {DEBUG_LOG_PATH}")
+log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
 log_info(f"🏷️ client version: {CLIENT_VERSION}")
 
 sio = socketio.Client(reconnection=True)
@@ -773,7 +794,9 @@ def _apply_update_package(local_file: Path):
         current_exe = Path(sys.executable).resolve()
         work_dir = current_exe.parent
         launcher_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.cmd"
+        launcher_log_file = UPDATER_LAUNCHER_LOG_PATH.resolve()
         launcher_script.parent.mkdir(parents=True, exist_ok=True)
+        launcher_log_file.parent.mkdir(parents=True, exist_ok=True)
         escaped_dst_for_ps = str(current_exe).replace("'", "''")
         escaped_workdir_for_ps = str(work_dir).replace("'", "''")
         script = "\n".join(
@@ -783,7 +806,11 @@ def _apply_update_package(local_file: Path):
                 f"set \"SRC={local_file}\"",
                 f"set \"DST={current_exe}\"",
                 f"set \"WORK_DIR={work_dir}\"",
+                f"set \"LOG_FILE={launcher_log_file}\"",
                 f"set \"OLD_PID={os.getpid()}\"",
+                "echo ==== [%date% %time%] updater start ====>> \"%LOG_FILE%\"",
+                "echo SRC=%SRC%>> \"%LOG_FILE%\"",
+                "echo DST=%DST%>> \"%LOG_FILE%\"",
                 "set /a WAIT_ATTEMPTS=0",
                 ":wait_for_old_process",
                 "tasklist /FI \"PID eq %OLD_PID%\" 2>nul | find /I \"%OLD_PID%\" >nul",
@@ -800,24 +827,30 @@ def _apply_update_package(local_file: Path):
                 "copy /Y \"%SRC%\" \"%DST%\" >nul 2>&1",
                 "if errorlevel 1 (",
                 "  set /a COPY_ATTEMPTS+=1",
+                "  echo copy attempt %COPY_ATTEMPTS% failed>> \"%LOG_FILE%\"",
                 "  if %COPY_ATTEMPTS% LSS 30 (",
                 "    timeout /t 1 /nobreak >nul",
                 "    goto copy_retry",
                 "  )",
                 ")",
+                "if errorlevel 1 echo copy failed after retries>> \"%LOG_FILE%\"",
                 "start \"\" /D \"%WORK_DIR%\" \"%DST%\" >nul 2>&1",
                 "if errorlevel 1 (",
+                "  echo start failed, trying powershell fallback>> \"%LOG_FILE%\"",
                 "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '"
                 + escaped_dst_for_ps
                 + "' -WorkingDirectory '"
                 + escaped_workdir_for_ps
                 + "'\" >nul 2>&1",
+                "  if errorlevel 1 echo powershell fallback failed>> \"%LOG_FILE%\"",
                 ")",
+                "echo updater done>> \"%LOG_FILE%\"",
                 "del \"%SRC%\" >nul 2>&1",
                 "del \"%~f0\" >nul 2>&1",
             ]
         ) + "\n"
         launcher_script.write_text(script, encoding="utf-8")
+        log_info(f"🛠️ updater launcher log path: {launcher_log_file}")
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(
             ["cmd", "/c", str(launcher_script)],
