@@ -21,9 +21,13 @@ class BorderlessFullscreenPlayer:
         "--no-interact --quiet --loop --image-duration={duration} "
         "--avcodec-hw=none {media}"
     )
-    MPV_VIDEO_TEMPLATE = "{player} --fs --border=no --force-window=yes --ontop --quiet {media}"
+    MPV_COMMON_FLAGS = (
+        "--fs --border=no --force-window=immediate --ontop --quiet "
+        "--background-color=0/0/0 --osc=no --osd-level=0 --input-cursor=no"
+    )
+    MPV_VIDEO_TEMPLATE = "{player} " + MPV_COMMON_FLAGS + " {media}"
     MPV_IMAGE_TEMPLATE = (
-        "{player} --fs --border=no --force-window=yes --ontop --quiet "
+        "{player} " + MPV_COMMON_FLAGS + " "
         "--image-display-duration={duration} {media}"
     )
     PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".json"}

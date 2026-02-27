@@ -38,6 +38,19 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         self.assertTrue(player.supports_media("/tmp/slides.json"))
 
+    def test_build_mpv_video_command_hides_controls_and_sets_black_background(self):
+        with patch.dict(
+            "os.environ",
+            {"PLAYER_VIDEO_COMMAND": "mpv --fs --border=no --force-window=immediate --ontop --quiet --background-color=0/0/0 --osc=no --osd-level=0 --input-cursor=no {media}"},
+            clear=False,
+        ):
+            player = self._build_player()
+        cmd = player._build_command("/tmp/example.mp4")
+        self.assertIn("--osc=no", cmd)
+        self.assertIn("--osd-level=0", cmd)
+        self.assertIn("--background-color=0/0/0", cmd)
+        self.assertIn("--force-window=immediate", cmd)
+
     def test_build_mpv_image_command(self):
         player = self._build_player()
         cmd = player._build_mpv_image_command("/tmp/example.jpg", image_duration_sec=5)
