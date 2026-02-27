@@ -728,6 +728,27 @@ def bind_group_playlist(group_id, playlist_id):
         db.close()
 
 
+@app.delete("/api/groups/<int:group_id>/playlist")
+def unbind_group_playlist(group_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        group = db.query(Group).filter_by(id=group_id).first()
+        if not group:
+            return jsonify({"error": "group not found"}), 404
+
+        db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
+        db.commit()
+
+        _emit_config_update(_hostnames_for_group(db, group_id))
+
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
 @app.get("/api/playlists")
 def list_playlists():
     if _auth_failed():
@@ -1005,6 +1026,30 @@ def update_playlist(playlist_id):
         db.commit()
 
         _emit_config_update(_hostnames_for_playlist(db, playlist_id))
+
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/playlists/<int:playlist_id>")
+def delete_playlist(playlist_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        playlist = db.query(Playlist).filter_by(id=playlist_id).first()
+        if not playlist:
+            return jsonify({"error": "playlist not found"}), 404
+
+        impacted_hosts = _hostnames_for_playlist(db, playlist_id)
+        db.query(GroupPlaylist).filter_by(playlist_id=playlist_id).delete()
+        db.query(PlaylistItem).filter_by(playlist_id=playlist_id).delete()
+        db.delete(playlist)
+        db.commit()
+
+        _emit_config_update(impacted_hosts)
 
         return jsonify({"ok": True})
     finally:

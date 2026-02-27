@@ -86,59 +86,15 @@
             <div class="card panel-card">
               <div class="card-body">
                 <h2 class="h4 mb-3">Grup Yönetimi</h2>
-                <p class="text-secondary mb-4">Grup işlemleri ve cihaz atamaları bu bölümde, playlist işlemleri ayrı menüde konumlandırıldı.</p>
-                <div class="row g-3">
-                  <div class="col-12 col-xl-6">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Yeni Grup</h3>
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-8"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="col-12 col-xl-6">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Grup Düzenle</h3>
-                        <div class="row g-2 mb-2 align-items-center">
-                          <div class="col-12 col-md-6"><select id="group-edit-select" class="form-select" onchange="syncGroupEditField()"></select></div>
-                          <div class="col-12 col-md-6"><input id="group-new-name" class="form-control" placeholder="Grup adı" /></div>
-                        </div>
-                        <div class="d-flex gap-2 flex-wrap">
-                          <button class="btn btn-primary" onclick="updateGroup()">Güncelle</button>
-                          <button class="btn btn-danger" onclick="deleteGroup()">Sil</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="col-12 col-xl-6">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Gruba Playlist Ata</h3>
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-5"><select id="group-select" class="form-select"></select></div>
-                          <div class="col-12 col-md-5"><select id="playlist-select" class="form-select"></select></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="assignPlaylist()">Playlist Ata</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="col-12 col-xl-6">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Cihazı Gruba Ata</h3>
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-5"><select id="device-select" class="form-select"></select></div>
-                          <div class="col-12 col-md-5"><select id="device-group-select" class="form-select"></select></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="assignDeviceToGroup()">Ata</button></div>
-                          <div class="col-auto"><button class="btn btn-outline-danger" onclick="removeDeviceFromGroup()">Çıkar</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                <div class="row g-2 mb-3 align-items-center">
+                  <div class="col-12 col-md-5"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
+                  <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>Grup</th><th>Aktif Playlist</th><th>İşlem</th></tr></thead>
+                    <tbody id="groups-body"></tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -148,31 +104,15 @@
             <div class="card panel-card">
               <div class="card-body">
                 <h2 class="h4 mb-3">Playlist Yönetimi</h2>
-                <div class="row g-3">
-                  <div class="col-12 col-xl-5">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Yeni Playlist</h3>
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-8"><input id="new-playlist-name" class="form-control" placeholder="Yeni playlist adı" /></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="createPlaylist()">Playlist Ekle</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="col-12 col-xl-7">
-                    <div class="card mini-card h-100">
-                      <div class="card-body">
-                        <h3 class="h6">Playlist Bilgisi</h3>
-                        <div class="row g-2 mb-2 align-items-center">
-                          <div class="col-12 col-md-5"><select id="playlist-edit-select" class="form-select" onchange="syncPlaylistEditFields()"></select></div>
-                          <div class="col-12 col-md-4"><input id="playlist-new-name" class="form-control" placeholder="Playlist adı" /></div>
-                          <div class="col-auto form-check mt-2 ms-2"><input id="playlist-enabled" class="form-check-input" type="checkbox" checked /> <label class="form-check-label" for="playlist-enabled">Aktif</label></div>
-                        </div>
-                        <button class="btn btn-primary" onclick="updatePlaylist()">Kaydet</button>
-                      </div>
-                    </div>
-                  </div>
+                <div class="row g-2 mb-3 align-items-center">
+                  <div class="col-12 col-md-5"><input id="new-playlist-name" class="form-control" placeholder="Yeni playlist adı" /></div>
+                  <div class="col-auto"><button class="btn btn-primary" onclick="createPlaylist()">Playlist Ekle</button></div>
+                </div>
+                <div class="table-responsive mb-3">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>Playlist</th><th>Durum</th><th>İşlem</th></tr></thead>
+                    <tbody id="playlists-body"></tbody>
+                  </table>
                 </div>
 
                 <div class="card mini-card mt-3">
@@ -194,6 +134,40 @@
                     </div>
                     <div class="form-text">Item seçmek için listeden bir medyaya tıklayın.</div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal fade" id="group-edit-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Grup Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+                <div class="modal-body">
+                  <input type="hidden" id="modal-group-id" />
+                  <div class="mb-3"><label class="form-label">Grup Adı</label><input id="modal-group-name" class="form-control" /></div>
+                  <div><label class="form-label">Aktif Playlist</label><select id="modal-group-playlist" class="form-select"></select></div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                  <button type="button" class="btn btn-primary" onclick="saveGroupModal()">Kaydet</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal fade" id="playlist-edit-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Playlist Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+                <div class="modal-body">
+                  <input type="hidden" id="modal-playlist-id" />
+                  <div class="mb-3"><label class="form-label">Playlist Adı</label><input id="modal-playlist-name" class="form-control" /></div>
+                  <div class="form-check"><input id="modal-playlist-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-playlist-enabled">Aktif</label></div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                  <button type="button" class="btn btn-primary" onclick="savePlaylistModal()">Kaydet</button>
                 </div>
               </div>
             </div>
@@ -288,27 +262,18 @@ async function loadGroupsPlaylists(){
   cachedPlaylists = playlists || [];
   cachedGroups = groups || [];
 
-  const gs = document.getElementById('group-select');
-  const gedit = document.getElementById('group-edit-select');
-  const dgs = document.getElementById('device-group-select');
-  const ps = document.getElementById('playlist-select');
-  const pe = document.getElementById('playlist-edit-select');
+  const pOpts = '<option value="">Playlist yok</option>' + (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
+  const modalPlaylistSelect = document.getElementById('modal-group-playlist');
+  modalPlaylistSelect.innerHTML = pOpts;
+
   const pa = document.getElementById('playlist-add-select');
   const po = document.getElementById('playlist-order-select');
+  const rawOpts = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
+  pa.innerHTML = rawOpts;
+  po.innerHTML = rawOpts;
 
-  const gOpts = (groups||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
-  const pOpts = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
-
-  gs.innerHTML = gOpts;
-  if(gedit) gedit.innerHTML = gOpts;
-  if(dgs) dgs.innerHTML = gOpts;
-  ps.innerHTML = pOpts;
-  pe.innerHTML = pOpts;
-  pa.innerHTML = pOpts;
-  po.innerHTML = pOpts;
-
-  syncPlaylistEditFields();
-  syncGroupEditField();
+  renderGroupsTable();
+  renderPlaylistsTable();
   loadItems();
 }
 
@@ -402,6 +367,27 @@ function clearFallbackSelection(){
   if(select) select.value = '';
 }
 
+function renderGroupsTable(){
+  const body = document.getElementById('groups-body');
+  body.innerHTML = '';
+  (cachedGroups || []).forEach(g => {
+    const tr = document.createElement('tr');
+    const playlistName = g.playlist?.name || '-';
+    tr.innerHTML = `<td>${g.name}</td><td>${playlistName}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
+    body.appendChild(tr);
+  });
+}
+
+function renderPlaylistsTable(){
+  const body = document.getElementById('playlists-body');
+  body.innerHTML = '';
+  (cachedPlaylists || []).forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.name}</td><td>${p.enabled ? 'Aktif' : 'Pasif'}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openPlaylistEditModal(${p.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deletePlaylist(${p.id})">Sil</button></div></td>`;
+    body.appendChild(tr);
+  });
+}
+
 async function createGroup(){
   const name = document.getElementById('new-group-name').value.trim();
   if(!name){ alert('Grup adı girin'); return; }
@@ -412,75 +398,64 @@ async function createGroup(){
   await loadGroupsPlaylists();
 }
 
-
-function syncGroupEditField(){
-  const groupId = Number(document.getElementById('group-edit-select')?.value);
-  const g = cachedGroups.find(x => x.id === groupId);
-  document.getElementById('group-new-name').value = g ? g.name : '';
+function openGroupEditModal(groupId){
+  const group = cachedGroups.find(x => x.id === Number(groupId));
+  if(!group) return;
+  document.getElementById('modal-group-id').value = group.id;
+  document.getElementById('modal-group-name').value = group.name;
+  document.getElementById('modal-group-playlist').value = group.playlist?.id ? String(group.playlist.id) : '';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('group-edit-modal')).show();
 }
 
-async function updateGroup(){
-  const groupId = Number(document.getElementById('group-edit-select').value);
-  const name = document.getElementById('group-new-name').value.trim();
+async function saveGroupModal(){
+  const groupId = Number(document.getElementById('modal-group-id').value);
+  const name = document.getElementById('modal-group-name').value.trim();
+  const playlistId = Number(document.getElementById('modal-group-playlist').value);
   if(!groupId || !name){
-    alert('Grup ve yeni ad zorunlu');
+    alert('Grup adı zorunlu');
     return;
   }
-  const resp = await jpatch(`/api/groups/${groupId}`, {name});
-  if(!resp.ok){
-    alert(resp.error || 'Grup güncellenemedi');
+
+  const updateResp = await jpatch(`/api/groups/${groupId}`, {name});
+  if(!updateResp.ok){
+    alert(updateResp.error || 'Grup güncellenemedi');
     return;
   }
-  alert('Grup adı güncellendi');
+
+  const group = cachedGroups.find(x => x.id === groupId);
+  const currentPlaylistId = group?.playlist?.id || null;
+  if(playlistId && playlistId !== currentPlaylistId){
+    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistId}`, {});
+    if(!assignResp.ok){
+      alert(assignResp.error || 'Playlist atanamadı');
+      return;
+    }
+  }
+  if(!playlistId && currentPlaylistId){
+    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist`);
+    if(!unbindResp.ok){
+      alert(unbindResp.error || 'Playlist kaldırma hatası');
+      return;
+    }
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('group-edit-modal')).hide();
   await loadGroupsPlaylists();
   await loadDevices();
 }
 
-async function deleteGroup(){
-  const groupId = Number(document.getElementById('group-edit-select').value);
+async function deleteGroup(groupId){
   if(!groupId){
     alert('Silinecek grubu seçin');
     return;
   }
-  if(!confirm('Grup silinecek. Bu gruba bağlı cihazlar gruptan çıkarılacak. Devam edilsin mi?')) return;
+  if(!confirm('Grup silinecek. Devam edilsin mi?')) return;
   const resp = await jdelete(`/api/groups/${groupId}`);
   if(!resp.ok){
     alert(resp.error || 'Grup silinemedi');
     return;
   }
-  alert('Grup silindi');
   await loadGroupsPlaylists();
-  await loadDevices();
-}
-
-async function assignDeviceToGroup(){
-  const hostname = document.getElementById('device-select').value;
-  const groupId = Number(document.getElementById('device-group-select').value);
-  if(!hostname || !groupId){
-    alert('Cihaz ve grup seçin');
-    return;
-  }
-  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}`, {});
-  if(!resp.ok){
-    alert(resp.error || 'Cihaz gruba atanamadı');
-    return;
-  }
-  alert('Cihaz gruba atandı');
-  await loadDevices();
-}
-
-async function removeDeviceFromGroup(){
-  const hostname = document.getElementById('device-select').value;
-  if(!hostname){
-    alert('Cihaz seçin');
-    return;
-  }
-  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}/group`);
-  if(!resp.ok){
-    alert(resp.error || 'Cihaz gruptan çıkarılamadı');
-    return;
-  }
-  alert('Cihaz gruptan çıkarıldı');
   await loadDevices();
 }
 
@@ -489,17 +464,25 @@ async function createPlaylist(){
   if(!name){ alert('Playlist adı girin'); return; }
   const resp = await jpost('/api/playlists', {name, enabled: true});
   if(!resp.ok){ alert(resp.error || 'Playlist oluşturulamadı'); return; }
-  alert('Playlist oluşturuldu');
   document.getElementById('new-playlist-name').value = '';
   await loadGroupsPlaylists();
 }
 
-async function updatePlaylist(){
-  const playlistId = Number(document.getElementById('playlist-edit-select').value);
-  const name = document.getElementById('playlist-new-name').value.trim();
-  const enabled = document.getElementById('playlist-enabled').checked;
+function openPlaylistEditModal(playlistId){
+  const playlist = cachedPlaylists.find(x => x.id === Number(playlistId));
+  if(!playlist) return;
+  document.getElementById('modal-playlist-id').value = playlist.id;
+  document.getElementById('modal-playlist-name').value = playlist.name;
+  document.getElementById('modal-playlist-enabled').checked = !!playlist.enabled;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('playlist-edit-modal')).show();
+}
+
+async function savePlaylistModal(){
+  const playlistId = Number(document.getElementById('modal-playlist-id').value);
+  const name = document.getElementById('modal-playlist-name').value.trim();
+  const enabled = document.getElementById('modal-playlist-enabled').checked;
   if(!playlistId || !name){
-    alert('Playlist ve ad bilgisi zorunlu');
+    alert('Playlist adı zorunlu');
     return;
   }
   const resp = await jpatch(`/api/playlists/${playlistId}`, {name, enabled});
@@ -507,15 +490,22 @@ async function updatePlaylist(){
     alert(resp.error || 'Playlist güncellenemedi');
     return;
   }
-  alert('Playlist güncellendi');
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('playlist-edit-modal')).hide();
   await loadGroupsPlaylists();
 }
 
-function syncPlaylistEditFields(){
-  const playlistId = Number(document.getElementById('playlist-edit-select').value);
-  const p = cachedPlaylists.find(x => x.id === playlistId);
-  document.getElementById('playlist-new-name').value = p ? p.name : '';
-  document.getElementById('playlist-enabled').checked = p ? !!p.enabled : true;
+async function deletePlaylist(playlistId){
+  if(!playlistId){
+    alert('Silinecek playlist seçin');
+    return;
+  }
+  if(!confirm('Playlist silinecek. Devam edilsin mi?')) return;
+  const resp = await jdelete(`/api/playlists/${playlistId}`);
+  if(!resp.ok){
+    alert(resp.error || 'Playlist silinemedi');
+    return;
+  }
+  await loadGroupsPlaylists();
 }
 
 async function addMediaToPlaylist(){
@@ -534,17 +524,6 @@ async function addMediaToPlaylist(){
   if(String(playlistId) === document.getElementById('playlist-order-select').value){
     await loadItems();
   }
-}
-
-async function assignPlaylist(){
-  const g = document.getElementById('group-select').value;
-  const p = document.getElementById('playlist-select').value;
-  const resp = await jpost(`/api/groups/${g}/playlist/${p}`, {});
-  if(!resp.ok){
-    alert(resp.error || 'Playlist atama hatası');
-    return;
-  }
-  alert('Playlist atandı');
 }
 
 let dragId = null;
