@@ -86,6 +86,13 @@ def _media_url(relative_path: str) -> str:
     return url_for("serve_media", asset_path=relative_path, _external=True)
 
 
+def _media_kind_from_path(path: str) -> str:
+    suffix = Path((path or "").split("?")[0]).suffix.lower()
+    if suffix in ALLOWED_IMAGE_EXTENSIONS:
+        return "image"
+    return "video"
+
+
 def _get_setting(db, key: str, default: str | None = None) -> str | None:
     row = db.query(AppSetting).filter_by(key=key).first()
     return row.value if row else default
@@ -341,6 +348,7 @@ def build_config(hostname):
             "videos": [],
             "fallback_media": fallback_media,
             "fallback_media_version": fallback_version,
+            "loop_mode": "sequential",
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -366,12 +374,24 @@ def build_config(hostname):
             .all()
         )
 
-        videos = [i.path for i in items if i.path]
+        videos = [
+            {
+                "path": i.path,
+                "media_type": i.media_type or _media_kind_from_path(i.path),
+                "duration_sec": i.duration_sec,
+                "order_no": i.order_no,
+            }
+            for i in items
+            if i.path
+        ]
         media_signatures = {
-            path: hashlib.sha256(path.encode("utf-8")).hexdigest() for path in videos
+            item["path"]: hashlib.sha256(item["path"].encode("utf-8")).hexdigest() for item in videos
         }
+        playlist_fingerprint = "|".join(
+            f"{item['path']}:{item.get('duration_sec') or 0}:{item.get('media_type') or ''}" for item in videos
+        )
         playlist_version = hashlib.sha256(
-            f"{playlist.id}:{'|'.join(videos)}".encode("utf-8")
+            f"{playlist.id}:{playlist.loop_mode}:{playlist_fingerprint}".encode("utf-8")
         ).hexdigest()[:16]
 
         return {
@@ -380,6 +400,7 @@ def build_config(hostname):
             "videos": videos,
             "playlist_version": playlist_version,
             "media_signatures": media_signatures,
+            "loop_mode": playlist.loop_mode or "sequential",
         }
 
     finally:
@@ -758,7 +779,7 @@ def list_playlists():
     try:
         playlists = db.query(Playlist).all()
         return jsonify([
-            {"id": p.id, "name": p.name, "enabled": bool(p.enabled)}
+            {"id": p.id, "name": p.name, "enabled": bool(p.enabled), "loop_mode": p.loop_mode or "sequential"}
             for p in playlists
         ])
     finally:
@@ -772,10 +793,13 @@ def create_playlist():
 
     name = (request.json or {}).get("name")
     enabled = (request.json or {}).get("enabled", True)
+    loop_mode = str((request.json or {}).get("loop_mode", "sequential") or "sequential").strip().lower()
+    if loop_mode not in {"sequential", "random"}:
+        return jsonify({"error": "invalid loop_mode"}), 400
 
     db = db_session()
     try:
-        pl = Playlist(name=name, enabled=enabled)
+        pl = Playlist(name=name, enabled=enabled, loop_mode=loop_mode)
         db.add(pl)
         db.commit()
         return jsonify({"ok": True, "id": pl.id})
@@ -880,6 +904,8 @@ def list_playlist_items(playlist_id):
                 "id": i.id,
                 "path": i.path,
                 "order_no": i.order_no,
+                "media_type": i.media_type or _media_kind_from_path(i.path),
+                "duration_sec": i.duration_sec,
                 "label": Path((i.path or "").split("?")[0]).name or i.path,
             }
             for i in items
@@ -946,6 +972,7 @@ def add_playlist_item(playlist_id):
     body = request.json or {}
     media_id = body.get("media_id")
     order_no = body.get("order_no", 0)
+    duration_sec = body.get("duration_sec")
 
     db = db_session()
     try:
@@ -953,7 +980,18 @@ def add_playlist_item(playlist_id):
         if not asset:
             return jsonify({"error": "media not found"}), 404
 
-        item = PlaylistItem(playlist_id=playlist_id, path=_media_url(asset.relative_path), order_no=order_no)
+        media_path = _media_url(asset.relative_path)
+        media_type = _media_kind_from_path(media_path)
+        duration = None
+        if media_type == "image":
+            try:
+                duration = int(duration_sec) if duration_sec is not None else 8
+            except (TypeError, ValueError):
+                return jsonify({"error": "invalid duration_sec"}), 400
+            if duration <= 0:
+                return jsonify({"error": "duration_sec must be > 0"}), 400
+
+        item = PlaylistItem(playlist_id=playlist_id, path=media_path, order_no=order_no, media_type=media_type, duration_sec=duration)
         db.add(item)
         db.commit()
 
@@ -1022,6 +1060,11 @@ def update_playlist(playlist_id):
             playlist.name = body["name"]
         if "enabled" in body:
             playlist.enabled = bool(body.get("enabled"))
+        if "loop_mode" in body:
+            loop_mode = str(body.get("loop_mode") or "sequential").strip().lower()
+            if loop_mode not in {"sequential", "random"}:
+                return jsonify({"error": "invalid loop_mode"}), 400
+            playlist.loop_mode = loop_mode
 
         db.commit()
 

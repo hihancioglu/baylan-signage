@@ -110,27 +110,35 @@
                 </div>
                 <div class="table-responsive mb-3">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Playlist</th><th>Durum</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>Playlist</th><th>Durum</th><th>Sıra Modu</th><th>İşlem</th></tr></thead>
                     <tbody id="playlists-body"></tbody>
                   </table>
                 </div>
 
                 <div class="card mini-card mt-3">
                   <div class="card-body">
-                    <h3 class="h6">Playlist İçeriği</h3>
-                    <div class="row g-2 mb-3 align-items-center">
+                    <h3 class="h6">Playliste Medya Ekle</h3>
+                    <div class="row g-2 mb-2 align-items-center">
                       <div class="col-12 col-md-4"><select id="playlist-add-select" class="form-select"></select></div>
                       <div class="col-12 col-md-4"><select id="media-select" class="form-select"></select></div>
+                      <div class="col-12 col-md-3"><input id="playlist-image-duration" class="form-control" type="number" min="1" value="8" placeholder="Görsel süre (sn)" /></div>
                       <div class="col-auto"><button class="btn btn-primary" onclick="addMediaToPlaylist()">Medya Ekle</button></div>
                     </div>
+                    <div class="form-text">Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.</div>
+                  </div>
+                </div>
 
+                <div class="card mini-card mt-3">
+                  <div class="card-body">
+                    <h3 class="h6">Playlist Sıralama ve Oynatma Modu</h3>
                     <div class="row g-2 mb-3">
                       <div class="col-12 col-md-5"><select id="playlist-order-select" class="form-select" onchange="loadItems()"></select></div>
+                      <div class="col-12 col-md-3"><select id="playlist-loop-mode" class="form-select" onchange="savePlaylistLoopMode()"><option value="sequential">Sıralı</option><option value="random">Rastgele</option></select></div>
                     </div>
                     <ul id="playlist-items" class="list-group mb-3"></ul>
                     <div class="d-flex gap-2 flex-wrap">
                       <button class="btn btn-primary" onclick="saveOrder()">Sıralamayı Kaydet</button>
-                      <button class="btn btn-danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
+                      <button class="btn btn-danger" onclick="removeSelectedPlaylistItem()">Seçili İçeriği Çıkar</button>
                     </div>
                     <div class="form-text">Item seçmek için listeden bir medyaya tıklayın.</div>
                   </div>
@@ -163,7 +171,7 @@
                 <div class="modal-body">
                   <input type="hidden" id="modal-playlist-id" />
                   <div class="mb-3"><label class="form-label">Playlist Adı</label><input id="modal-playlist-name" class="form-control" /></div>
-                  <div class="form-check"><input id="modal-playlist-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-playlist-enabled">Aktif</label></div>
+                  <div class="form-check mb-3"><input id="modal-playlist-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-playlist-enabled">Aktif</label></div><div><label class="form-label">Oynatma Sırası</label><select id="modal-playlist-loop-mode" class="form-select"><option value="sequential">Sıralı</option><option value="random">Rastgele</option></select></div>
                 </div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
@@ -213,6 +221,7 @@ const hdr = { 'Content-Type': 'application/json' };
 let cachedPlaylists = [];
 let cachedGroups = [];
 let selectedPlaylistItemId = null;
+let cachedMediaAssets = [];
 
 function activateSection(sectionId){
   document.querySelectorAll('.tab-section').forEach(section => section.classList.toggle('d-none', section.id !== sectionId));
@@ -274,11 +283,17 @@ async function loadGroupsPlaylists(){
 
   renderGroupsTable();
   renderPlaylistsTable();
+  const selectedOrderingPlaylistId = document.getElementById('playlist-order-select').value;
+  if(selectedOrderingPlaylistId){
+    const activePlaylist = (cachedPlaylists || []).find(p => String(p.id) === String(selectedOrderingPlaylistId));
+    document.getElementById('playlist-loop-mode').value = activePlaylist?.loop_mode || "sequential";
+  }
   loadItems();
 }
 
 async function loadMedia(){
   const assets = await jget('/api/media');
+  cachedMediaAssets = assets || [];
   const ms = document.getElementById('media-select');
   ms.innerHTML = (assets||[]).map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
 
@@ -383,7 +398,7 @@ function renderPlaylistsTable(){
   body.innerHTML = '';
   (cachedPlaylists || []).forEach(p => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${p.name}</td><td>${p.enabled ? 'Aktif' : 'Pasif'}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openPlaylistEditModal(${p.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deletePlaylist(${p.id})">Sil</button></div></td>`;
+    tr.innerHTML = `<td>${p.name}</td><td>${p.enabled ? 'Aktif' : 'Pasif'}</td><td>${(p.loop_mode || 'sequential') === 'random' ? 'Rastgele' : 'Sıralı'}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openPlaylistEditModal(${p.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deletePlaylist(${p.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
 }
@@ -474,6 +489,7 @@ function openPlaylistEditModal(playlistId){
   document.getElementById('modal-playlist-id').value = playlist.id;
   document.getElementById('modal-playlist-name').value = playlist.name;
   document.getElementById('modal-playlist-enabled').checked = !!playlist.enabled;
+  document.getElementById('modal-playlist-loop-mode').value = playlist.loop_mode || "sequential";
   bootstrap.Modal.getOrCreateInstance(document.getElementById('playlist-edit-modal')).show();
 }
 
@@ -481,11 +497,12 @@ async function savePlaylistModal(){
   const playlistId = Number(document.getElementById('modal-playlist-id').value);
   const name = document.getElementById('modal-playlist-name').value.trim();
   const enabled = document.getElementById('modal-playlist-enabled').checked;
+  const loopMode = document.getElementById('modal-playlist-loop-mode').value || "sequential";
   if(!playlistId || !name){
     alert('Playlist adı zorunlu');
     return;
   }
-  const resp = await jpatch(`/api/playlists/${playlistId}`, {name, enabled});
+  const resp = await jpatch(`/api/playlists/${playlistId}`, {name, enabled, loop_mode: loopMode});
   if(!resp.ok){
     alert(resp.error || 'Playlist güncellenemedi');
     return;
@@ -515,7 +532,20 @@ async function addMediaToPlaylist(){
     alert('Playlist ve medya seçin');
     return;
   }
-  const resp = await jpost(`/api/playlists/${playlistId}/items`, { media_id: mediaId });
+
+  const selectedMedia = (cachedMediaAssets || []).find(a => a.id === mediaId);
+  const isImage = (selectedMedia?.content_type || '').startsWith('image/');
+  const payload = { media_id: mediaId };
+  if(isImage){
+    const durationSec = Number(document.getElementById('playlist-image-duration').value || 8);
+    if(!durationSec || durationSec <= 0){
+      alert('Görsel süresi 1 sn veya daha büyük olmalı');
+      return;
+    }
+    payload.duration_sec = durationSec;
+  }
+
+  const resp = await jpost(`/api/playlists/${playlistId}/items`, payload);
   if(!resp.ok){
     alert(resp.error || 'Ekleme hatası');
     return;
@@ -526,11 +556,15 @@ async function addMediaToPlaylist(){
   }
 }
 
+
 let dragId = null;
 async function loadItems(){
   const pid = document.getElementById('playlist-order-select').value;
   if(!pid) return;
   selectedPlaylistItemId = null;
+  const activePlaylist = (cachedPlaylists || []).find(p => String(p.id) === String(pid));
+  document.getElementById('playlist-loop-mode').value = activePlaylist?.loop_mode || 'sequential';
+
   const items = await jget(`/api/playlists/${pid}/items`);
   const ul = document.getElementById('playlist-items');
   ul.innerHTML = '';
@@ -539,7 +573,8 @@ async function loadItems(){
     li.className = 'list-group-item playlist-item';
     li.draggable = true;
     li.dataset.id = i.id;
-    li.textContent = i.label || i.path;
+    const durationText = (i.media_type === 'image' && i.duration_sec) ? ` (${i.duration_sec} sn)` : '';
+    li.textContent = `${i.label || i.path}${durationText}`;
     li.addEventListener('click',()=>{
       selectedPlaylistItemId = i.id;
       [...ul.children].forEach(x => x.classList.remove('active'));
@@ -556,6 +591,19 @@ async function loadItems(){
     ul.appendChild(li);
   });
 }
+
+async function savePlaylistLoopMode(){
+  const playlistId = Number(document.getElementById('playlist-order-select').value);
+  const loopMode = document.getElementById('playlist-loop-mode').value || 'sequential';
+  if(!playlistId) return;
+  const resp = await jpatch(`/api/playlists/${playlistId}`, {loop_mode: loopMode});
+  if(!resp.ok){
+    alert(resp.error || 'Sıra modu kaydedilemedi');
+    return;
+  }
+  await loadGroupsPlaylists();
+}
+
 
 async function removeSelectedPlaylistItem(){
   const pid = Number(document.getElementById('playlist-order-select').value);

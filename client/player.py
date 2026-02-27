@@ -45,6 +45,7 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = False
         self._python_image_viewer_supported = self._detect_python_image_viewer_support()
         self._python_image_viewer_runtime_enabled = True
+        self._last_interrupted = False
 
     def _detect_python_image_viewer_support(self) -> bool:
         if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
@@ -205,12 +206,19 @@ class BorderlessFullscreenPlayer:
 
         return shutil.which(executable) is not None
 
-    def play_blocking(self, media_path: str, image_duration_sec: int | None = None) -> bool:
+    def play_blocking(
+        self,
+        media_path: str,
+        image_duration_sec: int | None = None,
+        start_position_sec: float | None = None,
+    ) -> bool:
         if not Path(media_path).exists():
+            self._last_interrupted = False
             print(f"⚠️ medya bulunamadı: {media_path}")
             return False
 
         if not self.supports_media(media_path):
+            self._last_interrupted = False
             print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
             return False
 
@@ -220,6 +228,12 @@ class BorderlessFullscreenPlayer:
 
         try:
             command = self._build_command(media_path, image_duration_sec=image_duration_sec)
+            if start_position_sec and self._is_video(media_path):
+                exe_name = Path(self._strip_outer_quotes(command[0])).name.lower() if command else ""
+                if "vlc" in exe_name:
+                    command.insert(1, f"--start-time={max(0, float(start_position_sec)):.3f}")
+                elif "mpv" in exe_name:
+                    command.insert(1, f"--start={max(0, float(start_position_sec)):.3f}")
             used_python_image_viewer = False
             if self._should_use_python_image_viewer(media_path):
                 command = self._build_python_image_command(
@@ -263,8 +277,10 @@ class BorderlessFullscreenPlayer:
                     process.wait()
 
             interrupted = self._stop_requested
+            self._last_interrupted = interrupted
             return process.returncode == 0 or interrupted
         except Exception as exc:
+            self._last_interrupted = False
             print(f"⚠️ medya oynatma hatası: {exc}")
             return False
         finally:
@@ -280,3 +296,7 @@ class BorderlessFullscreenPlayer:
             except subprocess.TimeoutExpired:
                 self._process.kill()
         self._process = None
+
+
+    def last_play_was_interrupted(self) -> bool:
+        return self._last_interrupted
