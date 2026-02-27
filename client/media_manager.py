@@ -137,16 +137,32 @@ class MediaManager:
         media_signatures: dict[str, str],
         progress_callback=None,
     ) -> list[str]:
+        entries = self.sync_playlist_entries(
+            playlist_items,
+            playlist_version,
+            media_signatures,
+            progress_callback=progress_callback,
+        )
+        return [entry["local_path"] for entry in entries]
+
+    def sync_playlist_entries(
+        self,
+        playlist_items: list,
+        playlist_version: str,
+        media_signatures: dict[str, str],
+        progress_callback=None,
+    ) -> list[dict]:
         version = str(playlist_version or "default")
         version_dir = self.versions_root / version
         manifest_path = version_dir / "manifest.json"
-        local_items: list[str] = []
+        local_entries: list[dict] = []
         manifest = []
 
         version_dir.mkdir(parents=True, exist_ok=True)
 
         downloadable_items = []
-        for source in playlist_items:
+        for raw_item in playlist_items:
+            source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
             normalized_source = self._normalize_source(source)
             signature = media_signatures.get(source) or media_signatures.get(normalized_source)
             if self._is_url(normalized_source):
@@ -173,7 +189,10 @@ class MediaManager:
 
         report_progress("start")
 
-        for source in playlist_items:
+        for raw_item in playlist_items:
+            source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
+            duration_sec = raw_item.get("duration_sec") if isinstance(raw_item, dict) else None
+            media_type = raw_item.get("media_type") if isinstance(raw_item, dict) else None
             normalized_source = self._normalize_source(source)
             signature = media_signatures.get(source) or media_signatures.get(normalized_source)
 
@@ -189,13 +208,21 @@ class MediaManager:
                         downloaded_count += 1
                         report_progress("downloaded", normalized_source)
                     checksum = self._sha256_file(target)
-                    local_items.append(str(target))
+                    local_entry = {
+                        "source": normalized_source,
+                        "local_path": str(target),
+                        "duration_sec": duration_sec,
+                        "media_type": media_type,
+                    }
+                    local_entries.append(local_entry)
                     manifest.append(
                         {
                             "source": normalized_source,
                             "local_path": str(target),
                             "checksum": checksum,
                             "signature_token": signature,
+                            "duration_sec": duration_sec,
+                            "media_type": media_type,
                         }
                     )
                 else:
@@ -205,13 +232,21 @@ class MediaManager:
                     checksum = self._sha256_file(source_path)
                     if signature and checksum != signature:
                         continue
-                    local_items.append(str(source_path))
+                    local_entry = {
+                        "source": normalized_source,
+                        "local_path": str(source_path),
+                        "duration_sec": duration_sec,
+                        "media_type": media_type,
+                    }
+                    local_entries.append(local_entry)
                     manifest.append(
                         {
                             "source": normalized_source,
                             "local_path": str(source_path),
                             "checksum": checksum,
                             "signature": signature,
+                            "duration_sec": duration_sec,
+                            "media_type": media_type,
                         }
                     )
             except Exception as exc:
@@ -220,19 +255,45 @@ class MediaManager:
 
         report_progress("done")
 
-        if local_items:
+        if local_entries:
             with open(manifest_path, "w", encoding="utf-8") as fh:
                 json.dump({"items": manifest}, fh, ensure_ascii=False, indent=2)
 
             state = self._load_state()
             state["current_version"] = version
-            state["last_successful_playlist"] = local_items
+            state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
+            state["last_successful_playlist_entries"] = local_entries
             self._save_state(state)
 
-        return local_items
+        return local_entries
 
     def load_last_successful_playlist(self) -> list[str]:
         state = self._load_state()
         items = state.get("last_successful_playlist") or []
         existing = [item for item in items if self._path_exists_safely(Path(item))]
         return existing
+
+    def load_last_successful_playlist_entries(self) -> list[dict]:
+        state = self._load_state()
+        entries = state.get("last_successful_playlist_entries") or []
+        existing_entries = []
+        for entry in entries:
+            local_path = str((entry or {}).get("local_path") or "")
+            if local_path and self._path_exists_safely(Path(local_path)):
+                existing_entries.append(
+                    {
+                        "local_path": local_path,
+                        "duration_sec": (entry or {}).get("duration_sec"),
+                        "media_type": (entry or {}).get("media_type"),
+                    }
+                )
+        return existing_entries
+
+    def load_playback_state(self) -> dict:
+        state = self._load_state()
+        return state.get("playback_state") or {}
+
+    def save_playback_state(self, playback_state: dict):
+        state = self._load_state()
+        state["playback_state"] = playback_state or {}
+        self._save_state(state)

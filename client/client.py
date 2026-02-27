@@ -171,20 +171,28 @@ class PlaybackController:
         self.media_manager = MediaManager(cache_root=os.getenv("MEDIA_CACHE_DIR", "client/cache"))
         self.player = BorderlessFullscreenPlayer()
         self.overlay = DownloadStatusOverlay()
-        self._playlist: list[str] = self.media_manager.load_last_successful_playlist()
+        cached_entries = self.media_manager.load_last_successful_playlist_entries()
+        self._playlist_entries: list[dict] = cached_entries or [
+            {"local_path": p, "duration_sec": None, "media_type": None}
+            for p in self.media_manager.load_last_successful_playlist()
+        ]
         self._fallback_media = Path(
             os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
         )
         self._fallback_warning_emitted = False
-        self._configured_fallback: list[str] = []
+        self._configured_fallback: list[dict] = []
         self._fallback_only_mode = False
         self._version = None
+        self._loop_mode = "sequential"
         self._lock = threading.Lock()
         self._running = False
         self._worker = None
         self._sync_in_progress = False
         self._sync_percent = 0
         self._waiting_for_media_logged = False
+        self._active_item_started_at = None
+        self._active_item = None
+        self._playback_state = self.media_manager.load_playback_state()
 
     def _on_sync_progress(self, progress: dict):
         with self._lock:
@@ -196,23 +204,55 @@ class PlaybackController:
             percent = self._sync_percent
         return f"Yeni içerikler indiriliyor %{percent}\nBaylan Dijital Bilgi hazırlanıyor..."
 
-    def _effective_playlist(self, playlist: list[str]) -> list[str]:
+    def _effective_playlist(self, playlist_entries: list[dict]) -> list[dict]:
         if self._fallback_only_mode and self._configured_fallback:
             return list(self._configured_fallback)
 
-        if playlist:
-            return playlist
+        if playlist_entries:
+            return playlist_entries
 
         if self._configured_fallback:
             return list(self._configured_fallback)
 
         if self._fallback_media.exists() and self.player.supports_media(str(self._fallback_media)):
-            return [str(self._fallback_media)]
+            return [{"local_path": str(self._fallback_media), "duration_sec": None, "media_type": "image"}]
 
         if self._fallback_media.exists() and not self._fallback_warning_emitted:
             print(f"⚠️ fallback medya desteklenmiyor, oynatılmayacak: {self._fallback_media}")
             self._fallback_warning_emitted = True
         return []
+
+    @staticmethod
+    def _playlist_key(entries: list[dict], loop_mode: str) -> str:
+        return f"{loop_mode}::" + "|".join(str(e.get("local_path") or "") for e in entries)
+
+    def _restore_or_init_runtime_state(self, entries: list[dict], loop_mode: str) -> dict:
+        key = self._playlist_key(entries, loop_mode)
+        paths = [str(e.get("local_path")) for e in entries]
+        state = self._playback_state if isinstance(self._playback_state, dict) else {}
+        if state.get("playlist_key") != key:
+            state = {"playlist_key": key}
+
+        if loop_mode == "random":
+            order = state.get("random_order")
+            if not isinstance(order, list) or sorted(order) != sorted(paths):
+                import random
+
+                order = list(paths)
+                random.shuffle(order)
+                state["random_order"] = order
+                state["random_pos"] = 0
+                state["resume_sec"] = 0
+            state["random_pos"] = int(state.get("random_pos") or 0)
+        else:
+            state["index"] = int(state.get("index") or 0)
+            state["resume_sec"] = float(state.get("resume_sec") or 0)
+
+        self._playback_state = state
+        return state
+
+    def _persist_playback_state(self):
+        self.media_manager.save_playback_state(self._playback_state)
 
     def update_from_config(self, config: dict):
         enabled = bool(config.get("enabled", True))
@@ -221,24 +261,26 @@ class PlaybackController:
         media_signatures = config.get("media_signatures") or {}
         fallback_media = config.get("fallback_media")
         fallback_version = config.get("fallback_media_version") or "0"
-
+        loop_mode = str(config.get("loop_mode") or "sequential").strip().lower()
+        if loop_mode not in {"sequential", "random"}:
+            loop_mode = "sequential"
 
         fallback_playlist = []
         if fallback_media:
-            fallback_playlist = self.media_manager.sync_playlist(
-                [fallback_media],
+            fallback_entries = self.media_manager.sync_playlist_entries(
+                [{"path": fallback_media, "media_type": "image", "duration_sec": None}],
                 f"fallback-{fallback_version}",
                 {},
                 progress_callback=None,
             )
+            fallback_playlist = fallback_entries
         with self._lock:
             self._configured_fallback = fallback_playlist
             self._fallback_only_mode = not enabled
+            self._loop_mode = loop_mode
 
-            # Sunucu yayın modunu kapattığında (enabled=False), son başarılı playlist'e
-            # dönmek yerine doğrudan fallback medyayı göstermeliyiz.
             if self._fallback_only_mode:
-                self._playlist = []
+                self._playlist_entries = []
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
@@ -246,28 +288,35 @@ class PlaybackController:
         if self._fallback_only_mode:
             return
 
-        if self._version == playlist_version and self._playlist:
+        if self._version == playlist_version and self._playlist_entries:
             return
 
-        local_playlist = self.media_manager.sync_playlist(
-            videos,
+        normalized_items = []
+        for item in videos:
+            if isinstance(item, dict):
+                normalized_items.append(item)
+            elif item:
+                normalized_items.append({"path": item, "media_type": None, "duration_sec": None})
+
+        local_entries = self.media_manager.sync_playlist_entries(
+            normalized_items,
             playlist_version,
             media_signatures,
             progress_callback=self._on_sync_progress,
         )
-        if local_playlist:
+        if local_entries:
             with self._lock:
-                self._playlist = local_playlist
+                self._playlist_entries = local_entries
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
-            print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_playlist)}")
+            print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_entries)}")
             return
 
-        fallback = self.media_manager.load_last_successful_playlist()
+        fallback = self.media_manager.load_last_successful_playlist_entries()
         if fallback:
             with self._lock:
-                self._playlist = fallback
+                self._playlist_entries = fallback
                 self._sync_in_progress = False
             print("📦 Offline mode: last successful cache playlist ile devam ediliyor")
 
@@ -289,15 +338,20 @@ class PlaybackController:
 
     def pause(self):
         self.overlay.hide()
+        if self._active_item and self._active_item_started_at:
+            elapsed = max(0.0, time.monotonic() - self._active_item_started_at)
+            if self.player._is_video(self._active_item.get("local_path") or ""):
+                self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
+                self._persist_playback_state()
         self.player.stop()
 
     def _run(self):
-        index = 0
         try:
             while self._running:
                 with self._lock:
-                    playlist = self._effective_playlist(list(self._playlist))
+                    playlist_entries = self._effective_playlist(list(self._playlist_entries))
                     sync_in_progress = self._sync_in_progress
+                    loop_mode = self._loop_mode
 
                 if sync_in_progress:
                     if not self.overlay.is_active():
@@ -308,7 +362,7 @@ class PlaybackController:
                 elif self.overlay.is_active():
                     self.overlay.hide()
 
-                if not playlist:
+                if not playlist_entries:
                     if not self._waiting_for_media_logged:
                         print("⚠️ oynatılacak medya yok, içerik bekleniyor")
                         self._waiting_for_media_logged = True
@@ -316,15 +370,65 @@ class PlaybackController:
                     continue
 
                 self._waiting_for_media_logged = False
-                media_path = playlist[index % len(playlist)]
-                single_image_playlist = len(playlist) == 1 and self.player.is_image(media_path)
-                image_duration_sec = (
-                    self.player.static_image_duration_sec if single_image_playlist else None
+                runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
+
+                if loop_mode == "random":
+                    order = runtime_state.get("random_order") or []
+                    pos = int(runtime_state.get("random_pos") or 0)
+                    if not order:
+                        time.sleep(0.2)
+                        continue
+                    if pos >= len(order):
+                        import random
+
+                        random.shuffle(order)
+                        pos = 0
+                    target_path = order[pos]
+                    item = next((x for x in playlist_entries if x.get("local_path") == target_path), playlist_entries[0])
+                else:
+                    index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+                    item = playlist_entries[index]
+
+                media_path = str(item.get("local_path") or "")
+                if not media_path:
+                    time.sleep(0.2)
+                    continue
+
+                duration_sec = item.get("duration_sec")
+                image_duration_sec = None
+                if self.player.is_image(media_path):
+                    if isinstance(duration_sec, int) and duration_sec > 0:
+                        image_duration_sec = duration_sec
+                    elif len(playlist_entries) == 1:
+                        image_duration_sec = self.player.static_image_duration_sec
+
+                resume_sec = float(runtime_state.get("resume_sec") or 0)
+                self._active_item = item
+                started_at = time.monotonic()
+                self._active_item_started_at = started_at
+                ok = self.player.play_blocking(
+                    media_path,
+                    image_duration_sec=image_duration_sec,
+                    start_position_sec=resume_sec if resume_sec > 0 and self.player._is_video(media_path) else None,
                 )
-                ok = self.player.play_blocking(media_path, image_duration_sec=image_duration_sec)
+                interrupted = self.player.last_play_was_interrupted()
+                self._active_item = None
+                self._active_item_started_at = None
+
                 if not ok:
                     print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
-                index = (index + 1) % len(playlist)
+
+                if interrupted and self.player._is_video(media_path):
+                    elapsed = max(0.0, time.monotonic() - started_at)
+                    runtime_state["resume_sec"] = resume_sec + elapsed
+                else:
+                    runtime_state["resume_sec"] = 0
+                    if loop_mode == "random":
+                        runtime_state["random_pos"] = int(runtime_state.get("random_pos") or 0) + 1
+                    else:
+                        runtime_state["index"] = (int(runtime_state.get("index") or 0) + 1) % len(playlist_entries)
+
+                self._persist_playback_state()
         except Exception as exc:
             print(f"❌ playback worker crashed: {exc}")
         finally:
