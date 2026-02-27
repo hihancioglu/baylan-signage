@@ -79,6 +79,14 @@ def ensure_sqlite_schema():
                 ")"
             ))
 
+        if not _existing_columns(connection, "app_settings"):
+            connection.execute(text(
+                "CREATE TABLE app_settings ("
+                "key VARCHAR(128) PRIMARY KEY, "
+                "value VARCHAR(2048)"
+                ")"
+            ))
+
         for table_name, wanted_columns in table_column_types.items():
             existing_columns = _existing_columns(connection, table_name)
             if not existing_columns:

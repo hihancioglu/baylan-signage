@@ -26,6 +26,7 @@ from .models import (
     CommandLog,
     CommandAck,
     MediaAsset,
+    AppSetting,
 )
 from .config import SHARED_SECRET
 
@@ -37,6 +38,7 @@ ensure_sqlite_schema()
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
 connected = {}      # hostname -> sid
@@ -52,9 +54,9 @@ COMMAND_TYPES = {
 }
 
 
-def _is_allowed_video(filename: str) -> bool:
+def _is_allowed_media(filename: str) -> bool:
     suffix = Path(filename or "").suffix.lower()
-    return suffix in ALLOWED_VIDEO_EXTENSIONS
+    return suffix in ALLOWED_VIDEO_EXTENSIONS or suffix in ALLOWED_IMAGE_EXTENSIONS
 
 
 def _safe_media_filename(original_name: str) -> str:
@@ -65,6 +67,18 @@ def _safe_media_filename(original_name: str) -> str:
 def _media_url(relative_path: str) -> str:
     return url_for("serve_media", asset_path=relative_path, _external=True)
 
+
+def _get_setting(db, key: str, default: str | None = None) -> str | None:
+    row = db.query(AppSetting).filter_by(key=key).first()
+    return row.value if row else default
+
+
+def _set_setting(db, key: str, value: str | None):
+    row = db.query(AppSetting).filter_by(key=key).first()
+    if not row:
+        row = AppSetting(key=key)
+    row.value = value
+    db.add(row)
 
 
 @app.route("/")
@@ -215,21 +229,31 @@ def join_group_rooms(db, sid, hostname):
 def build_config(hostname):
     db = db_session()
     try:
+        fallback_media = _get_setting(db, "fallback_media_url")
+        fallback_version = _get_setting(db, "fallback_media_version", "0")
+
+        base_config = {
+            "enabled": False,
+            "videos": [],
+            "fallback_media": fallback_media,
+            "fallback_media_version": fallback_version,
+        }
+
         device = db.query(Device).filter_by(hostname=hostname).first()
         if not device:
-            return {"enabled": False, "videos": []}
+            return base_config
 
         dg = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).first()
         if not dg:
-            return {"enabled": False, "videos": []}
+            return base_config
 
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
-            return {"enabled": False, "videos": []}
+            return base_config
 
         playlist = db.query(Playlist).filter_by(id=gp.playlist_id).first()
         if not playlist or not playlist.enabled:
-            return {"enabled": False, "videos": []}
+            return base_config
 
         items = (
             db.query(PlaylistItem)
@@ -247,6 +271,7 @@ def build_config(hostname):
         ).hexdigest()[:16]
 
         return {
+            **base_config,
             "enabled": True,
             "videos": videos,
             "playlist_version": playlist_version,
@@ -666,7 +691,7 @@ def upload_media_asset():
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "file required"}), 400
 
-    if not _is_allowed_video(uploaded.filename):
+    if not _is_allowed_media(uploaded.filename):
         return jsonify({"error": "unsupported file type"}), 400
 
     stored_name = _safe_media_filename(uploaded.filename)
@@ -727,6 +752,56 @@ def list_playlist_items(playlist_id):
             }
             for i in items
         ])
+    finally:
+        db.close()
+
+
+
+
+@app.get("/api/settings/fallback-media")
+def get_fallback_media_setting():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        media_url = _get_setting(db, "fallback_media_url")
+        media_name = _get_setting(db, "fallback_media_name")
+        media_id = _get_setting(db, "fallback_media_id")
+        return jsonify({
+            "media_url": media_url,
+            "media_name": media_name,
+            "media_id": int(media_id) if media_id and media_id.isdigit() else None,
+        })
+    finally:
+        db.close()
+
+
+@app.post("/api/settings/fallback-media")
+def set_fallback_media_setting():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    media_id = (request.json or {}).get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id required"}), 400
+
+    db = db_session()
+    try:
+        asset = db.query(MediaAsset).filter_by(id=media_id).first()
+        if not asset:
+            return jsonify({"error": "media not found"}), 404
+
+        _set_setting(db, "fallback_media_id", str(asset.id))
+        _set_setting(db, "fallback_media_url", _media_url(asset.relative_path))
+        _set_setting(db, "fallback_media_name", asset.original_name)
+        _set_setting(db, "fallback_media_version", str(int(time.time())))
+        db.commit()
+
+        hostnames = [row[0] for row in db.query(Device.hostname).all()]
+        _emit_config_update(hostnames)
+
+        return jsonify({"ok": True, "media_url": _media_url(asset.relative_path), "media_name": asset.original_name})
     finally:
         db.close()
 
@@ -856,6 +931,15 @@ def delete_media_asset(media_id):
             .filter(PlaylistItem.path == media_url)
             .delete(synchronize_session=False)
         )
+
+        fallback_media_id = _get_setting(db, "fallback_media_id")
+        if fallback_media_id and str(fallback_media_id) == str(media_id):
+            _set_setting(db, "fallback_media_id", None)
+            _set_setting(db, "fallback_media_url", None)
+            _set_setting(db, "fallback_media_name", None)
+            _set_setting(db, "fallback_media_version", str(int(time.time())))
+            all_hosts = [row[0] for row in db.query(Device.hostname).all()]
+            impacted_hosts.extend(all_hosts)
 
         db.delete(asset)
         db.commit()
