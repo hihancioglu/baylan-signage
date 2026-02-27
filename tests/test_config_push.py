@@ -1,6 +1,8 @@
 import importlib
+import io
 import os
 import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -143,6 +145,31 @@ class TestConfigPush(unittest.TestCase):
         self.assertIsNotNone(target)
         self.assertEqual(target.get("agent_version"), "build-20260101120000")
 
+
+    def test_resolve_update_version_prefers_embedded_build_marker(self):
+        marker = b"BAYLAN_CLIENT_BUILD:build-20260227091530"
+        temp_file = Path(self._tmpdir.name) / "embedded-version.bin"
+        temp_file.write_bytes(b"prefix" + marker + b"suffix")
+
+        version = self.main._resolve_update_version("", "client.exe", temp_file)
+        self.assertEqual(version, "build-20260227091530")
+
+    def test_upload_client_update_detects_embedded_build_version(self):
+        client = self.main.app.test_client()
+        payload = b"abcBAYLAN_CLIENT_BUILD:build-20260227093045xyz"
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = client.post(
+                "/api/updater/upload",
+                data={"file": (io.BytesIO(payload), "client-update.exe")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json() or {}
+        self.assertTrue(body.get("ok"))
+        release = body.get("release") or {}
+        self.assertEqual(release.get("version"), "build-20260227093045")
 
 
 if __name__ == "__main__":

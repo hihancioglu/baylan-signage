@@ -101,9 +101,30 @@ def _safe_update_filename(original_name: str) -> str:
     return f"{uuid.uuid4().hex}{ext}"
 
 
-def _resolve_update_version(explicit_version: str, filename: str) -> str:
+def _extract_embedded_build_version(file_path: Path) -> str | None:
+    pattern = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
+    try:
+        payload = file_path.read_bytes()
+    except Exception:
+        return None
+
+    match = pattern.search(payload)
+    if not match:
+        return None
+    try:
+        return match.group(1).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _resolve_update_version(explicit_version: str, filename: str, file_path: Path | None = None) -> str:
     if explicit_version:
         return explicit_version
+
+    if file_path:
+        embedded_version = _extract_embedded_build_version(file_path)
+        if embedded_version:
+            return embedded_version
 
     stem = Path(filename or "").stem
     if stem:
@@ -1096,19 +1117,23 @@ def upload_client_update():
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "file required"}), 400
 
-    version = _resolve_update_version(requested_version, uploaded.filename)
-
     stored_name = _safe_update_filename(uploaded.filename)
+    temp_name = f".tmp-{uuid.uuid4().hex}{Path(stored_name).suffix}"
+    temp_path = UPDATE_ROOT / temp_name
+    uploaded.save(temp_path)
+
+    version = _resolve_update_version(requested_version, uploaded.filename, temp_path)
     relative_path = f"{version}/{stored_name}"
     stored_path = UPDATE_ROOT / relative_path
     stored_path.parent.mkdir(parents=True, exist_ok=True)
-    uploaded.save(stored_path)
+    temp_path.replace(stored_path)
 
     try:
         checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
         file_size = stored_path.stat().st_size
         published_at = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
+        temp_path.unlink(missing_ok=True)
         stored_path.unlink(missing_ok=True)
         return jsonify({"error": str(exc)}), 400
 
