@@ -740,12 +740,34 @@ def _download_release(update_info: dict) -> Path:
 
 def _apply_update_package(local_file: Path):
     if platform.system().lower().startswith("win"):
-        if local_file.suffix.lower() == ".exe":
-            subprocess.Popen([str(local_file), "/S"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            time.sleep(3)
-            subprocess.Popen(["shutdown", "/r", "/t", "0"])
-            return "windows_installer_started"
-        return "windows_update_downloaded_manual_install"
+        if local_file.suffix.lower() != ".exe":
+            return "windows_update_downloaded_manual_install"
+
+        if not getattr(sys, "frozen", False):
+            return "windows_update_downloaded_manual_install"
+
+        current_exe = Path(sys.executable).resolve()
+        work_dir = current_exe.parent
+        updater_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.bat"
+        script = "\n".join([
+            "@echo off",
+            "setlocal",
+            f"set \"SRC={local_file}\"",
+            f"set \"DST={current_exe}\"",
+            "timeout /t 2 /nobreak >nul",
+            "copy /Y \"%SRC%\" \"%DST%\" >nul",
+            "start \"\" \"%DST%\"",
+            "del \"%SRC%\" >nul 2>&1",
+            "del \"%~f0\" >nul 2>&1",
+        ]) + "\n"
+        updater_script.write_text(script, encoding="utf-8")
+        subprocess.Popen(
+            ["cmd", "/c", str(updater_script)],
+            cwd=str(work_dir),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        shutdown_event.set()
+        os._exit(0)
     return "update_downloaded_manual_install"
 
 

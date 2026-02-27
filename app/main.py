@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -98,6 +99,19 @@ def _media_kind_from_path(path: str) -> str:
 def _safe_update_filename(original_name: str) -> str:
     ext = Path(original_name or "").suffix.lower() or ".bin"
     return f"{uuid.uuid4().hex}{ext}"
+
+
+def _resolve_update_version(explicit_version: str, filename: str) -> str:
+    if explicit_version:
+        return explicit_version
+
+    stem = Path(filename or "").stem
+    if stem:
+        match = re.search(r"(\d+(?:[._-]\d+)*)$", stem)
+        if match:
+            return match.group(1).replace("_", ".").replace("-", ".")
+
+    return str(int(time.time()))
 
 
 def _build_updater_payload(db):
@@ -1077,12 +1091,12 @@ def upload_client_update():
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    version = str(request.form.get("version") or "").strip()
+    requested_version = str(request.form.get("version") or "").strip()
     uploaded = request.files.get("file")
-    if not version:
-        return jsonify({"error": "version required"}), 400
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "file required"}), 400
+
+    version = _resolve_update_version(requested_version, uploaded.filename)
 
     stored_name = _safe_update_filename(uploaded.filename)
     relative_path = f"{version}/{stored_name}"
