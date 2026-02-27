@@ -250,6 +250,8 @@ def _serialize_device(db, device):
         "last_state": device.last_state,
         "state_display": _format_device_state(device),
         "last_content_name": device.last_content_name,
+        "idle_mode_enabled": device.idle_mode_enabled,
+        "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
     }
 
@@ -365,6 +367,8 @@ def build_config(hostname):
             "fallback_media_version": fallback_version,
             "loop_mode": "sequential",
             "idle_timeout_sec": None,
+            "idle_mode_enabled": True,
+            "content_enabled": True,
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -376,8 +380,18 @@ def build_config(hostname):
             return base_config
 
         group = db.query(Group).filter_by(id=dg.group_id).first()
-        if group and isinstance(group.idle_timeout_sec, int) and group.idle_timeout_sec > 0:
-            base_config["idle_timeout_sec"] = group.idle_timeout_sec
+        if group:
+            if isinstance(group.idle_timeout_sec, int) and group.idle_timeout_sec > 0:
+                base_config["idle_timeout_sec"] = group.idle_timeout_sec
+            if group.idle_mode_enabled is not None:
+                base_config["idle_mode_enabled"] = bool(group.idle_mode_enabled)
+            if group.content_enabled is not None:
+                base_config["content_enabled"] = bool(group.content_enabled)
+
+        if device.idle_mode_enabled is not None:
+            base_config["idle_mode_enabled"] = bool(device.idle_mode_enabled)
+        if device.content_enabled is not None:
+            base_config["content_enabled"] = bool(device.content_enabled)
 
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
@@ -597,6 +611,45 @@ def update_device_alias(hostname):
         db.close()
 
 
+@app.patch("/api/devices/<hostname>/settings")
+def update_device_settings(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    idle_mode_enabled = payload.get("idle_mode_enabled")
+    content_enabled = payload.get("content_enabled")
+
+    if idle_mode_enabled is not None and not isinstance(idle_mode_enabled, bool):
+        return jsonify({"error": "idle_mode_enabled must be a boolean"}), 400
+    if content_enabled is not None and not isinstance(content_enabled, bool):
+        return jsonify({"error": "content_enabled must be a boolean"}), 400
+
+    if idle_mode_enabled is None and content_enabled is None:
+        return jsonify({"error": "at least one setting required"}), 400
+
+    db = db_session()
+    try:
+        device = db.query(Device).filter_by(hostname=hostname).first()
+        if not device:
+            return jsonify({"error": "device not found"}), 404
+
+        changed = False
+        if idle_mode_enabled is not None and device.idle_mode_enabled != idle_mode_enabled:
+            device.idle_mode_enabled = idle_mode_enabled
+            changed = True
+        if content_enabled is not None and device.content_enabled != content_enabled:
+            device.content_enabled = content_enabled
+            changed = True
+
+        if changed:
+            db.commit()
+            _emit_config_update([hostname])
+        return jsonify({"ok": True, "device": _serialize_device(db, device)})
+    finally:
+        db.close()
+
+
 @app.post("/api/devices/<hostname>/group/<int:group_id>")
 def bind_device_group(hostname, group_id):
     if _auth_failed():
@@ -687,6 +740,8 @@ def list_groups():
                     "id": g.id,
                     "name": g.name,
                     "idle_timeout_sec": g.idle_timeout_sec,
+                    "idle_mode_enabled": bool(g.idle_mode_enabled) if g.idle_mode_enabled is not None else True,
+                    "content_enabled": bool(g.content_enabled) if g.content_enabled is not None else True,
                     "playlist": {
                         "id": active_playlist[0],
                         "name": active_playlist[1],
@@ -709,9 +764,17 @@ def create_group():
         return jsonify({"error": "name required"}), 400
 
     idle_timeout_sec = payload.get("idle_timeout_sec")
+    idle_mode_enabled = payload.get("idle_mode_enabled")
+    content_enabled = payload.get("content_enabled")
     if idle_timeout_sec is not None:
         if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
             return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
+
+    if idle_mode_enabled is not None and not isinstance(idle_mode_enabled, bool):
+        return jsonify({"error": "idle_mode_enabled must be a boolean"}), 400
+
+    if content_enabled is not None and not isinstance(content_enabled, bool):
+        return jsonify({"error": "content_enabled must be a boolean"}), 400
 
     db = db_session()
     try:
@@ -719,7 +782,12 @@ def create_group():
         if existing:
             return jsonify({"ok": True, "id": existing.id, "already_exists": True})
 
-        g = Group(name=name, idle_timeout_sec=idle_timeout_sec)
+        g = Group(
+            name=name,
+            idle_timeout_sec=idle_timeout_sec,
+            idle_mode_enabled=True if idle_mode_enabled is None else idle_mode_enabled,
+            content_enabled=True if content_enabled is None else content_enabled,
+        )
         db.add(g)
         db.commit()
         return jsonify({"ok": True, "id": g.id, "already_exists": False})
@@ -738,9 +806,17 @@ def update_group(group_id):
         return jsonify({"error": "name required"}), 400
 
     idle_timeout_sec = payload.get("idle_timeout_sec")
+    idle_mode_enabled = payload.get("idle_mode_enabled")
+    content_enabled = payload.get("content_enabled")
     if idle_timeout_sec is not None:
         if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
             return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
+
+    if idle_mode_enabled is not None and not isinstance(idle_mode_enabled, bool):
+        return jsonify({"error": "idle_mode_enabled must be a boolean"}), 400
+
+    if content_enabled is not None and not isinstance(content_enabled, bool):
+        return jsonify({"error": "content_enabled must be a boolean"}), 400
 
     db = db_session()
     try:
@@ -753,12 +829,22 @@ def update_group(group_id):
             return jsonify({"error": "group name already exists"}), 409
 
         previous_idle_timeout_sec = group.idle_timeout_sec
+        previous_idle_mode_enabled = group.idle_mode_enabled
+        previous_content_enabled = group.content_enabled
 
         group.name = name
         group.idle_timeout_sec = idle_timeout_sec
+        if idle_mode_enabled is not None:
+            group.idle_mode_enabled = idle_mode_enabled
+        if content_enabled is not None:
+            group.content_enabled = content_enabled
         db.commit()
 
-        if previous_idle_timeout_sec != idle_timeout_sec:
+        if (
+            previous_idle_timeout_sec != idle_timeout_sec
+            or previous_idle_mode_enabled != group.idle_mode_enabled
+            or previous_content_enabled != group.content_enabled
+        ):
             _emit_config_update(_hostnames_for_group(db, group_id))
 
         return jsonify({"ok": True})

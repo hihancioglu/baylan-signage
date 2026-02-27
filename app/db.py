@@ -30,6 +30,8 @@ def ensure_sqlite_schema():
             "last_error": "VARCHAR(512)",
             "last_state": "VARCHAR(64)",
             "last_content_name": "VARCHAR(255)",
+            "idle_mode_enabled": "BOOLEAN",
+            "content_enabled": "BOOLEAN",
         },
         "playlists": {
             "type": "VARCHAR(32) DEFAULT 'normal' NOT NULL",
@@ -51,6 +53,8 @@ def ensure_sqlite_schema():
         },
         "groups": {
             "idle_timeout_sec": "INTEGER",
+            "idle_mode_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
+            "content_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
         },
     }
 

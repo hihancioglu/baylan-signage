@@ -62,6 +62,50 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_emit.assert_called_once_with(["pc-lobby"])
 
+    def test_update_group_flags_emit_config_for_group_devices(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Store", idle_timeout_sec=30, idle_mode_enabled=True, content_enabled=True)
+            device = self.main.Device(hostname="pc-store")
+            db.add_all([group, device])
+            db.commit()
+
+            membership = self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True)
+            db.add(membership)
+            db.commit()
+            group_id = group.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            with patch("app.main._emit_config_update") as mock_emit:
+                resp = self.main.app.test_client().patch(
+                    f"/api/groups/{group_id}",
+                    json={"name": "Store", "idle_timeout_sec": 30, "idle_mode_enabled": False, "content_enabled": False},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_emit.assert_called_once_with(["pc-store"])
+
+    def test_update_device_settings_emits_config(self):
+        db = self.main.db_session()
+        try:
+            device = self.main.Device(hostname="pc-device-settings")
+            db.add(device)
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            with patch("app.main._emit_config_update") as mock_emit:
+                resp = self.main.app.test_client().patch(
+                    "/api/devices/pc-device-settings/settings",
+                    json={"idle_mode_enabled": False, "content_enabled": False},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_emit.assert_called_once_with(["pc-device-settings"])
+
 
 
 if __name__ == "__main__":
