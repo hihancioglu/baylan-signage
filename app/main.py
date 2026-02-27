@@ -36,11 +36,16 @@ from .config import (
     AD_DOMAIN,
     AD_USER_DN_TEMPLATE,
     AD_USE_SSL,
+    AD_BASE_DN,
+    AD_BIND_DN,
+    AD_BIND_PASSWORD,
+    AD_USER_SEARCH_FILTER,
+    AD_CONNECT_TIMEOUT,
 )
 
 
 try:
-    from ldap3 import Server, Connection, SIMPLE
+    from ldap3 import Server, Connection, SIMPLE, SUBTREE
 except ImportError:  # optional dependency during early setup
     Server = None
     Connection = None
@@ -163,15 +168,65 @@ def _is_panel_authenticated() -> bool:
 def _ad_signin(username: str, password: str) -> bool:
     if not (Server and Connection):
         return False
-    if not AD_SERVER_URI or not AD_DOMAIN or not username or not password:
+    if not AD_SERVER_URI or not username or not password:
         return False
 
-    account_name = username if "\\" in username or "@" in username else f"{AD_DOMAIN}\\{username}"
-    user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else account_name
+    server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None, connect_timeout=AD_CONNECT_TIMEOUT)
 
-    server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None)
-    conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE, auto_bind=False)
-    return bool(conn.bind())
+    if AD_BASE_DN:
+        bind_user = AD_BIND_DN or None
+        bind_password = AD_BIND_PASSWORD or None
+        lookup = Connection(
+            server,
+            user=bind_user,
+            password=bind_password,
+            authentication=SIMPLE,
+            auto_bind=False,
+            raise_exceptions=False,
+        )
+        if not lookup.bind():
+            return False
+
+        user_filter = AD_USER_SEARCH_FILTER.format(username=username)
+        if not lookup.search(AD_BASE_DN, user_filter, search_scope=SUBTREE, attributes=["distinguishedName"]):
+            lookup.unbind()
+            return False
+
+        if not lookup.entries:
+            lookup.unbind()
+            return False
+
+        user_dn = lookup.entries[0].entry_dn
+        lookup.unbind()
+
+        user_conn = Connection(
+            server,
+            user=user_dn,
+            password=password,
+            authentication=SIMPLE,
+            auto_bind=False,
+            raise_exceptions=False,
+        )
+        ok = bool(user_conn.bind())
+        user_conn.unbind()
+        return ok
+
+    account_name = username
+    if "\\" not in account_name and "@" not in account_name and AD_DOMAIN:
+        account_name = f"{AD_DOMAIN}\\{username}"
+
+    user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else account_name
+    conn = Connection(
+        server,
+        user=user_dn,
+        password=password,
+        authentication=SIMPLE,
+        auto_bind=False,
+        raise_exceptions=False,
+    )
+    ok = bool(conn.bind())
+    conn.unbind()
+    return ok
 
 
 def _panel_auth_failed():
