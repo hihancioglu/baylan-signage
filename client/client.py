@@ -797,17 +797,16 @@ def _apply_update_package(local_file: Path):
         launcher_log_file = UPDATER_LAUNCHER_LOG_PATH.resolve()
         launcher_script.parent.mkdir(parents=True, exist_ok=True)
         launcher_log_file.parent.mkdir(parents=True, exist_ok=True)
-        escaped_dst_for_ps = str(current_exe).replace("'", "''")
-        escaped_workdir_for_ps = str(work_dir).replace("'", "''")
         script = "\n".join(
             [
                 "@echo off",
-                "setlocal EnableExtensions",
+                "setlocal EnableExtensions EnableDelayedExpansion",
                 f"set \"SRC={local_file}\"",
                 f"set \"DST={current_exe}\"",
                 f"set \"WORK_DIR={work_dir}\"",
                 f"set \"LOG_FILE={launcher_log_file}\"",
                 f"set \"OLD_PID={os.getpid()}\"",
+                "set \"LAUNCH_TARGET=%DST%\"",
                 "echo ==== [%date% %time%] updater start ====>> \"%LOG_FILE%\"",
                 "echo SRC=%SRC%>> \"%LOG_FILE%\"",
                 "echo DST=%DST%>> \"%LOG_FILE%\"",
@@ -818,34 +817,31 @@ def _apply_update_package(local_file: Path):
                 "goto copy_start",
                 ":wait_loop",
                 "set /a WAIT_ATTEMPTS+=1",
-                "if %WAIT_ATTEMPTS% GEQ 90 goto copy_start",
+                "if !WAIT_ATTEMPTS! GEQ 90 goto copy_start",
                 "timeout /t 1 /nobreak >nul",
                 "goto wait_for_old_process",
                 ":copy_start",
                 "set /a COPY_ATTEMPTS=0",
                 ":copy_retry",
                 "copy /Y \"%SRC%\" \"%DST%\" >nul 2>&1",
-                "if errorlevel 1 (",
-                "  set /a COPY_ATTEMPTS+=1",
-                "  echo copy attempt %COPY_ATTEMPTS% failed>> \"%LOG_FILE%\"",
-                "  if %COPY_ATTEMPTS% LSS 30 (",
-                "    timeout /t 1 /nobreak >nul",
-                "    goto copy_retry",
-                "  )",
+                "if not errorlevel 1 goto launch_app",
+                "set /a COPY_ATTEMPTS+=1",
+                "echo copy attempt !COPY_ATTEMPTS! failed>> \"%LOG_FILE%\"",
+                "if !COPY_ATTEMPTS! LSS 30 (",
+                "  timeout /t 1 /nobreak >nul",
+                "  goto copy_retry",
                 ")",
-                "if errorlevel 1 echo copy failed after retries>> \"%LOG_FILE%\"",
-                "start \"\" /D \"%WORK_DIR%\" \"%DST%\" >nul 2>&1",
+                "echo copy failed after retries, launching downloaded binary>> \"%LOG_FILE%\"",
+                "set \"LAUNCH_TARGET=%SRC%\"",
+                ":launch_app",
+                "start \"\" /D \"%WORK_DIR%\" \"%LAUNCH_TARGET%\" >nul 2>&1",
                 "if errorlevel 1 (",
                 "  echo start failed, trying powershell fallback>> \"%LOG_FILE%\"",
-                "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '"
-                + escaped_dst_for_ps
-                + "' -WorkingDirectory '"
-                + escaped_workdir_for_ps
-                + "'\" >nul 2>&1",
+                "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '%LAUNCH_TARGET%' -WorkingDirectory '%WORK_DIR%'\" >nul 2>&1",
                 "  if errorlevel 1 echo powershell fallback failed>> \"%LOG_FILE%\"",
                 ")",
                 "echo updater done>> \"%LOG_FILE%\"",
-                "del \"%SRC%\" >nul 2>&1",
+                "if /I not \"%LAUNCH_TARGET%\"==\"%SRC%\" del \"%SRC%\" >nul 2>&1",
                 "del \"%~f0\" >nul 2>&1",
             ]
         ) + "\n"
