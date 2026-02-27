@@ -772,14 +772,33 @@ def _apply_update_package(local_file: Path):
         current_exe = Path(sys.executable).resolve()
         work_dir = current_exe.parent
         updater_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.bat"
+        escaped_dst_for_ps = str(current_exe).replace("'", "''")
+        escaped_workdir_for_ps = str(work_dir).replace("'", "''")
         script = "\n".join([
             "@echo off",
-            "setlocal",
+            "setlocal EnableExtensions",
             f"set \"SRC={local_file}\"",
             f"set \"DST={current_exe}\"",
+            f"set \"WORK_DIR={work_dir}\"",
+            "set /a COPY_ATTEMPTS=0",
             "timeout /t 2 /nobreak >nul",
-            "copy /Y \"%SRC%\" \"%DST%\" >nul",
-            "start \"\" \"%DST%\"",
+            ":copy_retry",
+            "copy /Y \"%SRC%\" \"%DST%\" >nul 2>&1",
+            "if errorlevel 1 (",
+            "  set /a COPY_ATTEMPTS+=1",
+            "  if %COPY_ATTEMPTS% LSS 20 (",
+            "    timeout /t 1 /nobreak >nul",
+            "    goto copy_retry",
+            "  )",
+            ")",
+            "start \"\" /D \"%WORK_DIR%\" \"%DST%\" >nul 2>&1",
+            "if errorlevel 1 (",
+            "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '"
+            + escaped_dst_for_ps
+            + "' -WorkingDirectory '"
+            + escaped_workdir_for_ps
+            + "'\" >nul 2>&1",
+            ")",
             "del \"%SRC%\" >nul 2>&1",
             "del \"%~f0\" >nul 2>&1",
         ]) + "\n"
