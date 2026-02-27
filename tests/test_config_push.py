@@ -37,6 +37,32 @@ class TestConfigPush(unittest.TestCase):
             self.main.connected.clear()
             self.main.connected.update(original_connected)
 
+    def test_update_group_idle_timeout_emits_config_for_group_devices(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Lobby", idle_timeout_sec=30)
+            device = self.main.Device(hostname="pc-lobby")
+            db.add_all([group, device])
+            db.commit()
+
+            membership = self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True)
+            db.add(membership)
+            db.commit()
+            group_id = group.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            with patch("app.main._emit_config_update") as mock_emit:
+                resp = self.main.app.test_client().patch(
+                    f"/api/groups/{group_id}",
+                    json={"name": "Lobby", "idle_timeout_sec": 45},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_emit.assert_called_once_with(["pc-lobby"])
+
+
 
 if __name__ == "__main__":
     unittest.main()
