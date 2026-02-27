@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import platform
 import socket
@@ -6,6 +7,8 @@ import subprocess
 import sys
 import threading
 import ctypes
+import traceback
+import faulthandler
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
@@ -32,6 +35,53 @@ MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
+DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
+
+
+def setup_debug_logging():
+    DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
+        handlers=[
+            logging.FileHandler(DEBUG_LOG_PATH, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+    fault_log = open(DEBUG_LOG_PATH, "a", encoding="utf-8")
+    faulthandler.enable(file=fault_log, all_threads=True)
+
+    def _close_fault_log():
+        try:
+            fault_log.close()
+        except Exception:
+            pass
+
+    import atexit
+
+    atexit.register(_close_fault_log)
+
+    def _log_unhandled(exc_type, exc_value, exc_tb):
+        logging.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_tb))
+
+    def _log_thread_unhandled(args):
+        logging.critical(
+            "Unhandled thread exception",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    sys.excepthook = _log_unhandled
+    threading.excepthook = _log_thread_unhandled
+
+
+def log_info(message: str):
+    print(message)
+    logging.info(message)
+
+
+setup_debug_logging()
+log_info(f"🧾 debug logs: {DEBUG_LOG_PATH}")
 
 sio = socketio.Client(reconnection=True)
 hostname = socket.gethostname()
@@ -440,7 +490,8 @@ class PlaybackController:
 
                 self._persist_playback_state()
         except Exception as exc:
-            print(f"❌ playback worker crashed: {exc}")
+            logging.exception("Playback worker crashed")
+            print(f"❌ playback worker crashed: {exc}\n{traceback.format_exc()}")
         finally:
             self._running = False
 
@@ -856,7 +907,8 @@ def main():
             print("🛑 Client interrupted")
             break
         except Exception as e:
-            print(f"⚠️ Heartbeat loop error, retrying: {e}")
+            logging.exception("Heartbeat loop error")
+            print(f"⚠️ Heartbeat loop error, retrying: {e}\n{traceback.format_exc()}")
             time.sleep(max(RECONNECT_RETRY_SEC, STATE_CHECK_INTERVAL_SEC))
             continue
 
