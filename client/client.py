@@ -177,6 +177,7 @@ class PlaybackController:
         )
         self._fallback_warning_emitted = False
         self._configured_fallback: list[str] = []
+        self._fallback_only_mode = False
         self._version = None
         self._lock = threading.Lock()
         self._running = False
@@ -196,6 +197,9 @@ class PlaybackController:
         return f"Yeni içerikler indiriliyor %{percent}\nBaylan Dijital Bilgi hazırlanıyor..."
 
     def _effective_playlist(self, playlist: list[str]) -> list[str]:
+        if self._fallback_only_mode and self._configured_fallback:
+            return list(self._configured_fallback)
+
         if playlist:
             return playlist
 
@@ -211,6 +215,7 @@ class PlaybackController:
         return []
 
     def update_from_config(self, config: dict):
+        enabled = bool(config.get("enabled", True))
         videos = config.get("videos") or []
         playlist_version = config.get("playlist_version") or "default"
         media_signatures = config.get("media_signatures") or {}
@@ -228,6 +233,18 @@ class PlaybackController:
             )
         with self._lock:
             self._configured_fallback = fallback_playlist
+            self._fallback_only_mode = not enabled
+
+            # Sunucu yayın modunu kapattığında (enabled=False), son başarılı playlist'e
+            # dönmek yerine doğrudan fallback medyayı göstermeliyiz.
+            if self._fallback_only_mode:
+                self._playlist = []
+                self._version = playlist_version
+                self._sync_in_progress = False
+                self._sync_percent = 100
+
+        if self._fallback_only_mode:
+            return
 
         if self._version == playlist_version and self._playlist:
             return
