@@ -29,6 +29,7 @@ def ensure_sqlite_schema():
             "os_version": "VARCHAR(128)",
             "last_error": "VARCHAR(512)",
             "last_state": "VARCHAR(64)",
+            "last_state_at": "DATETIME",
             "last_content_name": "VARCHAR(255)",
             "idle_mode_enabled": "BOOLEAN",
             "content_enabled": "BOOLEAN",

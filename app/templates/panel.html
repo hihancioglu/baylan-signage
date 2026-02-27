@@ -262,7 +262,19 @@ async function loadDevices(){
   (cachedDevices||[]).forEach(d => {
     const tr = document.createElement('tr');
     const safeHostname = encodeURIComponent(d.hostname || '');
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.state_display||d.last_state||''}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
+    const normalizedState = (d.last_state || '').toUpperCase();
+    let stateText = d.state_display || d.last_state || '';
+    if (normalizedState === 'IDLE') {
+      if (typeof d.idle_minutes === 'number') {
+        stateText = `IDLE (${d.idle_minutes} dk)`;
+      } else {
+        stateText = 'IDLE';
+      }
+    } else if (normalizedState) {
+      stateText = 'AKTİF';
+    }
+
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
     body.appendChild(tr);
   });
 

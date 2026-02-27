@@ -220,6 +220,22 @@ def _format_device_state(device) -> str:
     return device.last_state or ""
 
 
+def _idle_minutes_since_last_state(device):
+    state = (device.last_state or "").upper()
+    if state != "IDLE" or not device.last_state_at:
+        return None
+
+    now = datetime.utcnow()
+    last_state_at = device.last_state_at
+    if getattr(last_state_at, "tzinfo", None) is not None:
+        last_state_at = last_state_at.replace(tzinfo=None)
+
+    elapsed = now - last_state_at
+    if elapsed.total_seconds() < 0:
+        return 0
+    return int(elapsed.total_seconds() // 60)
+
+
 def _canonical_ad_username(username: str) -> str:
     normalized = (username or "").strip().lower()
     if not normalized:
@@ -248,6 +264,8 @@ def _serialize_device(db, device):
         "is_online": bool(device.is_online),
         "last_seen": device.last_seen.isoformat() if device.last_seen else None,
         "last_state": device.last_state,
+        "last_state_at": device.last_state_at.isoformat() if device.last_state_at else None,
+        "idle_minutes": _idle_minutes_since_last_state(device),
         "state_display": _format_device_state(device),
         "last_content_name": device.last_content_name,
         "idle_mode_enabled": device.idle_mode_enabled,
@@ -464,7 +482,10 @@ def handle_register(data):
         device.ip = data.get("ip")
         device.username = data.get("username")
         device.department = data.get("department")
-        device.last_state = data.get("state") or data.get("current_state") or device.last_state
+        incoming_state = data.get("state") or data.get("current_state")
+        if incoming_state:
+            device.last_state = incoming_state
+            device.last_state_at = datetime.utcnow()
         device.os_version = data.get("os_name") or device.os_version
         device.last_content_name = data.get("content_name") or ""
         device.is_online = True
@@ -491,7 +512,10 @@ def handle_heartbeat(data):
         device = db.query(Device).filter_by(hostname=hostname).first()
         if device:
             device.last_seen = datetime.utcnow()
-            device.last_state = data.get("state") or data.get("current_state") or device.last_state
+            incoming_state = data.get("state") or data.get("current_state")
+            if incoming_state:
+                device.last_state = incoming_state
+                device.last_state_at = datetime.utcnow()
             device.os_version = data.get("os_name") or device.os_version
             device.last_content_name = data.get("content_name") or ""
             device.is_online = True

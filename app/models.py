@@ -18,6 +18,7 @@ class Device(Base):
     os_version = Column(String(128))
     last_error = Column(String(512))
     last_state = Column(String(64))
+    last_state_at = Column(DateTime(timezone=True))
     last_content_name = Column(String(255))
     idle_mode_enabled = Column(Boolean)
     content_enabled = Column(Boolean)
