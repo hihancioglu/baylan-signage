@@ -5,6 +5,9 @@ import hashlib
 import itertools
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -39,6 +42,7 @@ ensure_sqlite_schema()
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
+ALLOWED_PPT_EXTENSIONS = {".ppt", ".pptx"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
 connected = {}      # hostname -> sid
@@ -56,7 +60,7 @@ COMMAND_TYPES = {
 
 def _is_allowed_media(filename: str) -> bool:
     suffix = Path(filename or "").suffix.lower()
-    return suffix in ALLOWED_VIDEO_EXTENSIONS or suffix in ALLOWED_IMAGE_EXTENSIONS
+    return suffix in ALLOWED_VIDEO_EXTENSIONS or suffix in ALLOWED_IMAGE_EXTENSIONS or suffix in ALLOWED_PPT_EXTENSIONS
 
 
 def _safe_media_filename(original_name: str) -> str:
@@ -68,6 +72,70 @@ def _media_url(relative_path: str) -> str:
     return url_for("serve_media", asset_path=relative_path, _external=True)
 
 
+
+
+def _ppt_slide_duration_sec() -> int:
+    try:
+        return max(1, int(os.getenv("PPT_SLIDE_DURATION_SEC", "8")))
+    except Exception:
+        return 8
+
+
+def _convert_ppt_to_slide_images(ppt_path: Path, output_dir: Path) -> list[Path]:
+    if output_dir.exists():
+        shutil.rmtree(output_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        raise RuntimeError("LibreOffice bulunamadı (soffice gerekli)")
+
+    cmd = [
+        soffice,
+        "--headless",
+        "--convert-to",
+        "png",
+        "--outdir",
+        str(output_dir),
+        str(ppt_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"PPT PNG dönüşümü başarısız: {detail}")
+
+    slide_files = sorted(output_dir.glob("*.png"))
+    if not slide_files:
+        raise RuntimeError("PPT içinde dönüştürülebilir slayt bulunamadı")
+
+    normalized_slides = []
+    for idx, slide in enumerate(slide_files, start=1):
+        target = output_dir / f"slide_{idx:03d}.png"
+        if slide != target:
+            slide.replace(target)
+        normalized_slides.append(target)
+
+    return normalized_slides
+
+
+def _build_ppt_manifest(stored_name: str, slide_files: list[Path], duration_sec: int) -> tuple[str, str]:
+    slides_dir = Path(stored_name).with_suffix("")
+    manifest_relative = f"slides/{slides_dir.name}.json"
+    manifest_path = MEDIA_ROOT / manifest_relative
+
+    payload = {
+        "type": "ppt_slideshow",
+        "slides": [
+            {
+                "image": f"{slides_dir.name}/{slide.name}",
+                "duration_sec": duration_sec,
+            }
+            for slide in slide_files
+        ],
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_relative, json.dumps(payload, ensure_ascii=False)
 def _get_setting(db, key: str, default: str | None = None) -> str | None:
     row = db.query(AppSetting).filter_by(key=key).first()
     return row.value if row else default
@@ -694,20 +762,40 @@ def upload_media_asset():
     if not _is_allowed_media(uploaded.filename):
         return jsonify({"error": "unsupported file type"}), 400
 
+    ext = Path(uploaded.filename).suffix.lower()
     stored_name = _safe_media_filename(uploaded.filename)
     stored_path = MEDIA_ROOT / stored_name
     uploaded.save(stored_path)
 
-    checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
-    file_size = stored_path.stat().st_size
+    try:
+        if ext in ALLOWED_PPT_EXTENSIONS:
+            duration_sec = int(request.form.get("slide_duration_sec", _ppt_slide_duration_sec()))
+            duration_sec = max(1, duration_sec)
+            slides_dir = MEDIA_ROOT / "slides" / Path(stored_name).with_suffix("").name
+            slide_files = _convert_ppt_to_slide_images(stored_path, slides_dir)
+            relative_path, manifest_raw = _build_ppt_manifest(stored_name, slide_files, duration_sec)
+            checksum = hashlib.sha256(manifest_raw.encode("utf-8")).hexdigest()
+            file_size = len(manifest_raw.encode("utf-8"))
+            content_type = "application/json"
+            display_name = f"{Path(uploaded.filename).stem}.json"
+            stored_relative_path = relative_path
+        else:
+            checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
+            file_size = stored_path.stat().st_size
+            content_type = uploaded.mimetype
+            display_name = uploaded.filename
+            stored_relative_path = stored_name
+    except Exception as exc:
+        stored_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
 
     db = db_session()
     try:
         asset = MediaAsset(
-            original_name=uploaded.filename,
+            original_name=display_name,
             stored_name=stored_name,
-            relative_path=stored_name,
-            content_type=uploaded.mimetype,
+            relative_path=stored_relative_path,
+            content_type=content_type,
             file_size=file_size,
             checksum=checksum,
         )
@@ -949,6 +1037,15 @@ def delete_media_asset(media_id):
         file_path = MEDIA_ROOT / relative_path
         if file_path.exists():
             file_path.unlink()
+
+        if relative_path.startswith("slides/") and relative_path.endswith(".json"):
+            slides_folder = MEDIA_ROOT / "slides" / Path(relative_path).stem
+            if slides_folder.exists():
+                shutil.rmtree(slides_folder, ignore_errors=True)
+
+        original_upload = MEDIA_ROOT / asset.stored_name
+        if original_upload.exists() and original_upload != file_path:
+            original_upload.unlink()
 
         return jsonify({"ok": True, "removed_playlist_item_count": removed_playlist_item_count})
     finally:

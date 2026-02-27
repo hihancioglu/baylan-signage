@@ -9,6 +9,7 @@ from pathlib import Path
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
+    SLIDESHOW_EXTENSIONS = {".json"}
     VLC_VIDEO_TEMPLATE = (
         "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
         "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "
@@ -24,7 +25,7 @@ class BorderlessFullscreenPlayer:
         "{player} --fs --border=no --force-window=yes --quiet "
         "--image-display-duration={duration} {media}"
     )
-    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".json"}
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
@@ -53,19 +54,13 @@ class BorderlessFullscreenPlayer:
             return False
 
         try:
-            import tkinter as tk
-        except Exception as exc:
-            print(f"⚠️ Python image viewer pasif: tkinter kullanılamıyor ({exc})")
-            return False
+            import pygame
 
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            root.update_idletasks()
-            root.destroy()
+            pygame.display.init()
+            pygame.display.quit()
             return True
         except Exception as exc:
-            print(f"⚠️ Python image viewer pasif: pencere açılamadı ({exc})")
+            print(f"⚠️ Python image viewer pasif: pygame kullanılamıyor ({exc})")
             return False
 
     @staticmethod
@@ -145,7 +140,7 @@ class BorderlessFullscreenPlayer:
 
     def supports_media(self, media_path: str) -> bool:
         ext = Path(media_path).suffix.lower()
-        return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS
+        return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS or ext in self.SLIDESHOW_EXTENSIONS
 
     def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command

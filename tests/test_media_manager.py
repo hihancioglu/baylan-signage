@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from io import BytesIO
@@ -27,6 +28,46 @@ class TestMediaManagerDownload(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"abc123")
             leftovers = [p for p in target.parent.iterdir() if p.name != target.name]
             self.assertEqual(leftovers, [])
+
+    def test_sync_playlist_downloads_manifest_and_slide_images(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            source_manifest = "http://example.com/slides/deck.json"
+            manifest_payload = {
+                "type": "ppt_slideshow",
+                "slides": [
+                    {"image": "slide_001.png", "duration_sec": 3},
+                    {"image": "slide_002.png", "duration_sec": 4},
+                ],
+            }
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            def fake_urlopen(url, timeout=30):
+                if url.endswith("deck.json"):
+                    return DummyResponse(json.dumps(manifest_payload).encode("utf-8"))
+                if url.endswith("slide_001.png"):
+                    return DummyResponse(b"png-1")
+                if url.endswith("slide_002.png"):
+                    return DummyResponse(b"png-2")
+                raise AssertionError(f"unexpected url: {url}")
+
+            with patch("client.media_manager.urlopen", side_effect=fake_urlopen):
+                items = manager.sync_playlist([source_manifest], "v1", {source_manifest: "sig-1"})
+
+            self.assertEqual(len(items), 1)
+            manifest_path = Path(items[0])
+            self.assertTrue(manifest_path.exists())
+
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["slides"]), 2)
+            for slide in payload["slides"]:
+                self.assertTrue(Path(slide["image"]).exists())
 
 
 if __name__ == "__main__":

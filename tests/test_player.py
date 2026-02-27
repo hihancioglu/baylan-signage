@@ -18,6 +18,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch.dict("os.environ", {"PYTHON_IMAGE_VIEWER_ENABLED": "1"}, clear=False):
             self.assertTrue(player._should_use_python_image_viewer("/tmp/a.png"))
             self.assertFalse(player._should_use_python_image_viewer("/tmp/a.webp"))
+            self.assertTrue(player._should_use_python_image_viewer("/tmp/slides.json"))
 
     def test_build_python_image_command(self):
         player = self._build_player()
@@ -31,6 +32,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(player._should_use_python_image_viewer("/tmp/a.jpg"))
         player._python_image_viewer_runtime_enabled = False
         self.assertFalse(player._should_use_python_image_viewer("/tmp/a.jpg"))
+
+
+    def test_supports_slideshow_manifest(self):
+        player = self._build_player()
+        self.assertTrue(player.supports_media("/tmp/slides.json"))
 
     def test_build_mpv_image_command(self):
         player = self._build_player()

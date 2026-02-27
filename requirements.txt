@@ -6,3 +6,4 @@ SQLAlchemy==2.0.32
 Alembic==1.13.2
 
 Pillow==10.4.0
+pygame==2.6.1
