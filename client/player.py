@@ -16,9 +16,10 @@ class BorderlessFullscreenPlayer:
         "--video-on-top --no-interact --quiet {media}"
     )
     VLC_IMAGE_TEMPLATE = (
-        "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
+        "{player} --intf dummy --dummy-quiet --fullscreen "
         "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "
-        "--video-on-top --no-interact --image-duration={duration} --quiet {media}"
+        "--no-interact --quiet --loop --image-duration={duration} "
+        "--avcodec-hw=none {media}"
     )
     MPV_VIDEO_TEMPLATE = "{player} --fs --border=no --force-window=yes --quiet {media}"
     MPV_IMAGE_TEMPLATE = (
@@ -201,7 +202,10 @@ class BorderlessFullscreenPlayer:
             process.wait()
 
             if process.returncode != 0 and self._should_use_python_image_viewer(media_path):
-                print("⚠️ Python image viewer başarısız oldu, medya player fallback deneniyor")
+                print(
+                    "⚠️ Python image viewer başarısız oldu "
+                    f"(exit={process.returncode}, media={media_path}), medya player fallback deneniyor"
+                )
                 self._python_image_viewer_runtime_enabled = False
                 fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
                 allow_vlc_image_fallback = os.getenv("ALLOW_VLC_IMAGE_FALLBACK", "0").strip().lower() in {

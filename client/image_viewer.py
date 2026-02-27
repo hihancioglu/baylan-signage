@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pygame
+from PIL import Image
 
 
 BACKGROUND_COLOR = (0, 0, 0)
@@ -53,6 +54,20 @@ def _draw_image(screen, image_surface):
     pygame.display.flip()
 
 
+def _load_image_surface(image_path: Path):
+    try:
+        img = Image.open(image_path)
+        img = img.convert("RGB")
+        mode = img.mode
+        size = img.size
+        data = img.tobytes()
+        return pygame.image.fromstring(data, size, mode).convert()
+    except Exception as pil_exc:
+        print(f"⚠️ PIL ile image açılamadı, pygame fallback deneniyor: {image_path} | {pil_exc}")
+
+    return pygame.image.load(str(image_path)).convert()
+
+
 def main() -> int:
     if len(sys.argv) < 3:
         print("Usage: python image_viewer.py <image_or_manifest_path> <duration_sec>")
@@ -86,7 +101,7 @@ def main() -> int:
     try:
         for image_path, duration_sec in slides:
             try:
-                image_surface = pygame.image.load(str(image_path)).convert()
+                image_surface = _load_image_surface(image_path)
             except Exception as exc:
                 print(f"⚠️ image açılamadı: {image_path} | {exc}")
                 continue
