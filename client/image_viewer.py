@@ -68,10 +68,23 @@ def _load_image_surface(image_path: Path):
     return pygame.image.load(str(image_path)).convert()
 
 
+def _run_agent_fallback() -> int:
+    """Fallback: when built with wrong entrypoint, run the real agent instead of exiting."""
+    try:
+        from client import main as run_agent
+    except Exception as exc:
+        print("Usage: python image_viewer.py <image_or_manifest_path> <duration_sec>")
+        print(f"⚠️ agent fallback başlatılamadı: {exc}")
+        return 2
+
+    print("⚠️ image_viewer argümanı verilmedi, agent başlatılıyor...")
+    run_agent()
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 3:
-        print("Usage: python image_viewer.py <image_or_manifest_path> <duration_sec>")
-        return 2
+        return _run_agent_fallback()
 
     source_path = Path(sys.argv[1]).resolve()
     default_duration_sec = int(float(sys.argv[2]))
