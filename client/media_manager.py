@@ -3,7 +3,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
 
 
@@ -88,6 +88,39 @@ class MediaManager:
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 
+
+
+    def _download_slideshow_manifest(self, source_url: str, target_manifest_path: Path, signature: str | None):
+        self._download_url(source_url, target_manifest_path)
+
+        with open(target_manifest_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+
+        slides = payload.get("slides") or []
+        resolved_slides = []
+        for idx, slide in enumerate(slides, start=1):
+            image_source = str((slide or {}).get("image", "")).strip()
+            if not image_source:
+                continue
+
+            image_url = urljoin(source_url, image_source)
+            image_signature = self._sha256_text(f"{signature or source_url}:{idx}:{image_url}")
+            local_image = self._url_cache_target(image_url, image_signature)
+            if not local_image.exists():
+                self._download_url(image_url, local_image)
+
+            resolved_slides.append(
+                {
+                    "image": str(local_image),
+                    "duration_sec": int((slide or {}).get("duration_sec", 8) or 8),
+                }
+            )
+
+        if resolved_slides:
+            payload["slides"] = resolved_slides
+            with open(target_manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+
     def _url_cache_target(self, source_url: str, signature: str | None) -> Path:
         parsed = urlparse(source_url)
         ext = Path(parsed.path).suffix
@@ -149,7 +182,10 @@ class MediaManager:
                     target = self._url_cache_target(normalized_source, signature)
                     if not target.exists():
                         report_progress("downloading", normalized_source)
-                        self._download_url(normalized_source, target)
+                        if Path(target).suffix.lower() == ".json":
+                            self._download_slideshow_manifest(normalized_source, target, signature)
+                        else:
+                            self._download_url(normalized_source, target)
                         downloaded_count += 1
                         report_progress("downloaded", normalized_source)
                     checksum = self._sha256_file(target)
