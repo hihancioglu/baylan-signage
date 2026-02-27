@@ -2,6 +2,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -23,6 +24,7 @@ class BorderlessFullscreenPlayer:
         "{player} --fs --border=no --force-window=yes --quiet "
         "--image-display-duration={duration} {media}"
     )
+    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
@@ -39,6 +41,16 @@ class BorderlessFullscreenPlayer:
         )
         self._process = None
         self._stop_requested = False
+
+    def _should_use_python_image_viewer(self, media_path: str) -> bool:
+        if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+            return False
+        return Path(media_path).suffix.lower() in self.PYTHON_IMAGE_EXTENSIONS
+
+    def _build_python_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
+        duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
+        viewer_path = Path(__file__).with_name("image_viewer.py")
+        return [sys.executable, str(viewer_path), media_path, str(duration)]
 
     def _pick_default_player_commands(self) -> tuple[str, str]:
         player_candidates = []
@@ -136,6 +148,12 @@ class BorderlessFullscreenPlayer:
 
         try:
             command = self._build_command(media_path, image_duration_sec=image_duration_sec)
+            if self._should_use_python_image_viewer(media_path):
+                command = self._build_python_image_command(
+                    media_path,
+                    image_duration_sec=image_duration_sec,
+                )
+
             if not self._resolve_executable(command):
                 print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
                 return False
@@ -144,6 +162,15 @@ class BorderlessFullscreenPlayer:
             process = subprocess.Popen(command)
             self._process = process
             process.wait()
+
+            if process.returncode != 0 and self._should_use_python_image_viewer(media_path):
+                print("⚠️ Python image viewer başarısız oldu, medya player fallback deneniyor")
+                fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
+                if self._resolve_executable(fallback_command):
+                    process = subprocess.Popen(fallback_command)
+                    self._process = process
+                    process.wait()
+
             interrupted = self._stop_requested
             return process.returncode == 0 or interrupted
         except Exception as exc:
