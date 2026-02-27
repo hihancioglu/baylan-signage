@@ -3,6 +3,7 @@ import os
 import platform
 import socket
 import subprocess
+import sys
 import threading
 import ctypes
 from pathlib import Path
@@ -10,6 +11,10 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import socketio
+
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 
 from idle import get_idle_seconds
 from media_manager import MediaManager
