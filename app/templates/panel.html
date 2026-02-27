@@ -185,6 +185,21 @@
             </div>
           </div>
 
+          <div class="modal fade" id="media-preview-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="media-preview-title">Medya Önizleme</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="media-preview-body"></div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="tab-section d-none" id="section-announcement">
             <div class="card panel-card">
               <div class="card-body">
@@ -227,6 +242,10 @@ let cachedGroups = [];
 let cachedDevices = [];
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
+
+function escapeHtml(value){
+  return String(value || '').replace(/[&<>\"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+}
 
 function activateSection(sectionId){
   document.querySelectorAll('.tab-section').forEach(section => section.classList.toggle('d-none', section.id !== sectionId));
@@ -343,10 +362,48 @@ async function loadMedia(){
   (assets || []).forEach(a => {
     const tr = document.createElement('tr');
     const mb = a.file_size ? `${(a.file_size / (1024*1024)).toFixed(1)} MB` : '-';
-    tr.innerHTML = `<td>${a.name}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></td>`;
+    tr.innerHTML = `<td>${escapeHtml(a.name)}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="previewMedia(${a.id})">Preview</button><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></div></td>`;
     body.appendChild(tr);
   });
 }
+
+function previewMedia(mediaId){
+  const asset = (cachedMediaAssets || []).find(a => a.id === Number(mediaId));
+  if(!asset){
+    alert('Medya bulunamadı');
+    return;
+  }
+
+  const title = document.getElementById('media-preview-title');
+  const body = document.getElementById('media-preview-body');
+  title.textContent = `Önizleme: ${asset.name || 'Medya'}`;
+  body.innerHTML = '';
+
+  const mediaType = asset.content_type || '';
+  if(mediaType.startsWith('image/')){
+    const img = document.createElement('img');
+    img.src = asset.url;
+    img.alt = asset.name || 'Medya görseli';
+    img.className = 'img-fluid rounded';
+    body.appendChild(img);
+  }else if(mediaType.startsWith('video/')){
+    const video = document.createElement('video');
+    video.src = asset.url;
+    video.controls = true;
+    video.autoplay = true;
+    video.className = 'w-100 rounded';
+    body.appendChild(video);
+  }else{
+    body.innerHTML = `<p class="mb-2">Bu dosya türü tarayıcıda gömülü önizlenemiyor.</p><a href="${asset.url}" target="_blank" rel="noopener" class="btn btn-outline-primary">Yeni sekmede aç</a>`;
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('media-preview-modal')).show();
+}
+
+document.getElementById('media-preview-modal').addEventListener('hidden.bs.modal', () => {
+  const body = document.getElementById('media-preview-body');
+  body.innerHTML = '';
+});
 
 async function uploadVideo(){
   const fileInput = document.getElementById('media-file');
