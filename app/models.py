@@ -17,6 +17,7 @@ class Device(Base):
     os_version = Column(String(128))
     last_error = Column(String(512))
     last_state = Column(String(64))
+    last_content_name = Column(String(255))
 
 
 class Group(Base):

@@ -28,6 +28,7 @@ def ensure_sqlite_schema():
             "os_version": "VARCHAR(128)",
             "last_error": "VARCHAR(512)",
             "last_state": "VARCHAR(64)",
+            "last_content_name": "VARCHAR(255)",
         },
         "playlists": {
             "type": "VARCHAR(32) DEFAULT 'normal' NOT NULL",

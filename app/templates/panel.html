@@ -255,7 +255,7 @@ async function loadDevices(){
   body.innerHTML = '';
   (devices||[]).forEach(d => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.last_state||''}</td><td>${d.group||'-'}</td>`;
+    tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.state_display||d.last_state||''}</td><td>${d.group||'-'}</td>`;
     body.appendChild(tr);
   });
 
