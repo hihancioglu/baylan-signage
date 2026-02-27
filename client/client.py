@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 import os
 import platform
@@ -10,6 +11,8 @@ import ctypes
 import traceback
 import faulthandler
 import builtins
+import shutil
+from urllib import request as urllib_request
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
@@ -53,6 +56,8 @@ def resolve_client_version() -> str:
 
 
 CLIENT_VERSION = resolve_client_version()
+AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+UPDATER_DOWNLOAD_DIR = Path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 
 
 def print(*args, **kwargs):
@@ -686,6 +691,83 @@ class SystemTrayController:
 systray = SystemTrayController()
 
 
+
+
+def _is_newer_version(incoming: str, current: str) -> bool:
+    incoming = (incoming or "").strip()
+    current = (current or "").strip()
+    if not incoming:
+        return False
+    if incoming == current:
+        return False
+
+    def _tokenize(value: str):
+        out = []
+        for part in value.replace("-", ".").split("."):
+            if part.isdigit():
+                out.append((0, int(part)))
+            elif part:
+                out.append((1, part))
+        return out
+
+    try:
+        return _tokenize(incoming) > _tokenize(current)
+    except Exception:
+        return incoming != current
+
+
+def _download_release(update_info: dict) -> Path:
+    url = update_info.get("url")
+    file_name = update_info.get("file_name") or Path(url or "update.bin").name
+    version = update_info.get("version") or "unknown"
+    safe_name = f"{version}_{file_name}".replace("/", "_").replace("\\", "_")
+    UPDATER_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    target = UPDATER_DOWNLOAD_DIR / safe_name
+
+    with urllib_request.urlopen(url, timeout=90) as resp:
+        with open(target, "wb") as fh:
+            shutil.copyfileobj(resp, fh)
+
+    expected_sha = (update_info.get("sha256") or "").strip().lower()
+    if expected_sha:
+        file_sha = hashlib.sha256(target.read_bytes()).hexdigest().lower()
+        if file_sha != expected_sha:
+            target.unlink(missing_ok=True)
+            raise RuntimeError("update_checksum_mismatch")
+
+    return target
+
+
+def _apply_update_package(local_file: Path):
+    if platform.system().lower().startswith("win"):
+        if local_file.suffix.lower() == ".exe":
+            subprocess.Popen([str(local_file), "/S"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            time.sleep(3)
+            subprocess.Popen(["shutdown", "/r", "/t", "0"])
+            return "windows_installer_started"
+        return "windows_update_downloaded_manual_install"
+    return "update_downloaded_manual_install"
+
+
+def _maybe_run_auto_update(config_data):
+    if not AUTO_UPDATER_ENABLED or not isinstance(config_data, dict):
+        return
+
+    update_info = config_data.get("updater") or {}
+    incoming_version = str(update_info.get("version") or "").strip()
+    if not incoming_version:
+        return
+    if not _is_newer_version(incoming_version, CLIENT_VERSION):
+        return
+
+    log_info(f"⬆️ Yeni client sürümü bulundu: {incoming_version} (current={CLIENT_VERSION})")
+    try:
+        local_file = _download_release(update_info)
+        result = _apply_update_package(local_file)
+        log_info(f"✅ Auto update sonucu: {result} | file={local_file}")
+    except Exception as exc:
+        log_info(f"❌ Auto update başarısız: {exc}")
+
 def _parse_issued_at(value):
     if not isinstance(value, str):
         return None
@@ -842,6 +924,7 @@ def on_config(data):
 
     if isinstance(data, dict):
         playback.update_from_config(data)
+        _maybe_run_auto_update(data)
 
     print(f"🕒 idle_timeout_sec = {idle_timeout_sec} | idle_mode_enabled={idle_mode_enabled} | content_enabled={content_enabled}")
 

@@ -33,6 +33,7 @@
           <button class="nav-link text-start" data-section="section-playlists" type="button">Playlist Yönetimi</button>
           <button class="nav-link text-start" data-section="section-announcement" type="button">Acil Duyuru</button>
           <button class="nav-link text-start" data-section="section-logs" type="button">Operasyon Logları</button>
+          <button class="nav-link text-start" data-section="section-updater" type="button">Updater</button>
         </div>
       </aside>
 
@@ -212,6 +213,34 @@
                 <textarea id="announce-message" rows="3" class="form-control mb-2" placeholder="Duyuru metni"></textarea>
                 <div class="mb-2"><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
                 <button class="btn btn-danger" onclick="pushAnnouncement()">Push</button>
+              </div>
+            </div>
+          </div>
+
+          
+
+          <div class="tab-section d-none" id="section-updater">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Client Updater</h2>
+                <div class="row g-2 align-items-end mb-3">
+                  <div class="col-12 col-md-4">
+                    <label class="form-label">Versiyon</label>
+                    <input id="updater-version" class="form-control" placeholder="ör. 1.2.3" />
+                  </div>
+                  <div class="col-12 col-md-5">
+                    <label class="form-label">Kurulum Dosyası</label>
+                    <input id="updater-file" class="form-control" type="file" accept=".exe,.msi,.zip,.bin" />
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-primary" onclick="uploadClientUpdate()">Versiyon Yükle</button>
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-outline-secondary" onclick="loadUpdater()">Yenile</button>
+                  </div>
+                </div>
+                <div class="text-secondary small" id="updater-current">Yayınlanan sürüm: -</div>
+                <p class="text-secondary small mt-2 mb-0">Yeni versiyon yüklendiğinde online clientlar config güncellemesi alır ve otomatik update akışı tetiklenir.</p>
               </div>
             </div>
           </div>
@@ -817,6 +846,45 @@ async function pushAnnouncement(){
   loadLogs();
 }
 
+async function loadUpdater(){
+  const resp = await jget('/api/updater');
+  const current = document.getElementById('updater-current');
+  const release = resp?.release;
+  if(!current) return;
+  if(!release){
+    current.textContent = 'Yayınlanan sürüm: yok';
+    return;
+  }
+  current.textContent = `Yayınlanan sürüm: ${release.version} | Dosya: ${release.file_name} | Boyut: ${((release.size||0)/(1024*1024)).toFixed(1)} MB`;
+}
+
+async function uploadClientUpdate(){
+  const version = (document.getElementById('updater-version').value || '').trim();
+  const fileInput = document.getElementById('updater-file');
+  if(!version){
+    alert('Versiyon girin');
+    return;
+  }
+  if(!fileInput.files.length){
+    alert('Kurulum dosyası seçin');
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('version', version);
+  fd.append('file', fileInput.files[0]);
+
+  const res = await fetch('/api/updater/upload', { method: 'POST', body: fd });
+  const body = await res.json();
+  if(!body.ok){
+    alert(body.error || 'Updater yükleme hatası');
+    return;
+  }
+  alert('Yeni versiyon yayınlandı. Clientlar otomatik güncelleme alacak.');
+  fileInput.value = '';
+  await loadUpdater();
+}
+
 async function loadLogs(){
   const logs = await jget('/api/commands/logs');
   const b = document.getElementById('log-body');
@@ -836,6 +904,7 @@ async function init(){
   await loadMedia();
   await loadLogs();
   await loadFallbackMediaSetting();
+  await loadUpdater();
   setInterval(loadDevices, 15000);
   setInterval(loadLogs, 15000);
 }
