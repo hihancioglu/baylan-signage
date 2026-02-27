@@ -87,24 +87,44 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_emit.assert_called_once_with(["pc-store"])
 
-    def test_update_device_settings_emits_config(self):
+    def test_update_device_settings_is_disabled(self):
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().patch(
+                "/api/devices/pc-device-settings/settings",
+                json={"idle_mode_enabled": False, "content_enabled": False},
+            )
+
+        self.assertEqual(resp.status_code, 410)
+        self.assertEqual(resp.get_json().get("error"), "device-level settings are disabled; use group settings")
+
+    def test_build_config_uses_group_flags_without_device_override(self):
         db = self.main.db_session()
         try:
-            device = self.main.Device(hostname="pc-device-settings")
-            db.add(device)
+            group = self.main.Group(name="HQ", idle_mode_enabled=False, content_enabled=False)
+            playlist = self.main.Playlist(name="HQ Playlist", enabled=True)
+            db.add_all([group, playlist])
+            db.commit()
+
+            item = self.main.PlaylistItem(
+                playlist_id=playlist.id,
+                path="https://example.com/video.mp4",
+                media_type="video",
+                duration_sec=15,
+                order_no=1,
+            )
+            device = self.main.Device(hostname="pc-hq", idle_mode_enabled=True, content_enabled=True)
+            db.add_all([item, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
             db.commit()
         finally:
             db.close()
 
-        with patch("app.main._auth_failed", return_value=False):
-            with patch("app.main._emit_config_update") as mock_emit:
-                resp = self.main.app.test_client().patch(
-                    "/api/devices/pc-device-settings/settings",
-                    json={"idle_mode_enabled": False, "content_enabled": False},
-                )
-
-        self.assertEqual(resp.status_code, 200)
-        mock_emit.assert_called_once_with(["pc-device-settings"])
+        cfg = self.main.build_config("pc-hq")
+        self.assertEqual(cfg["idle_mode_enabled"], False)
+        self.assertEqual(cfg["content_enabled"], False)
 
 
 
