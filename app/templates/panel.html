@@ -44,7 +44,7 @@
                 <h2 class="h4 mb-3">Cihazlar</h2>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Hostname</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th></tr></thead>
+                    <thead class="table-light"><tr><th>Alias</th><th>Hostname</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th><th>İşlem</th></tr></thead>
                     <tbody id="devices-body"></tbody>
                   </table>
                 </div>
@@ -257,7 +257,8 @@ async function loadDevices(){
   body.innerHTML = '';
   (cachedDevices||[]).forEach(d => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.state_display||d.last_state||''}</td><td>${d.group||'-'}</td>`;
+    const safeHostname = encodeURIComponent(d.hostname || '');
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.state_display||d.last_state||''}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
     body.appendChild(tr);
   });
 
@@ -265,6 +266,22 @@ async function loadDevices(){
   if(deviceSelect){
     deviceSelect.innerHTML = (devices||[]).map(d=>`<option value="${d.hostname}">${d.hostname}</option>`).join('');
   }
+}
+
+async function saveDeviceAlias(encodedHostname){
+  const hostname = decodeURIComponent(encodedHostname || '');
+  if(!hostname) return;
+
+  const input = document.getElementById(`device-alias-${encodeURIComponent(hostname)}`);
+  if(!input) return;
+
+  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias`, { alias: input.value || '' });
+  if(!resp.ok){
+    alert(resp.error || 'Alias kaydedilemedi');
+    return;
+  }
+
+  await loadDevices();
 }
 
 async function loadGroupsPlaylists(){

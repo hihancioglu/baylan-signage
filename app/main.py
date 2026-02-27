@@ -241,6 +241,7 @@ def _serialize_device(db, device):
     )
     return {
         "hostname": device.hostname,
+        "alias": device.alias,
         "ip": device.ip,
         "department": device.department,
         "username": device.username,
@@ -564,6 +565,29 @@ def list_devices():
     try:
         devices = db.query(Device).all()
         return jsonify([_serialize_device(db, d) for d in devices])
+    finally:
+        db.close()
+
+
+@app.patch("/api/devices/<hostname>/alias")
+def update_device_alias(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    alias = (payload.get("alias") or "").strip()
+    if len(alias) > 128:
+        return jsonify({"error": "alias too long (max 128)"}), 400
+
+    db = db_session()
+    try:
+        device = db.query(Device).filter_by(hostname=hostname).first()
+        if not device:
+            return jsonify({"error": "device not found"}), 404
+
+        device.alias = alias or None
+        db.commit()
+        return jsonify({"ok": True, "device": _serialize_device(db, device)})
     finally:
         db.close()
 
