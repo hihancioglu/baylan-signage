@@ -31,6 +31,8 @@ sio = socketio.Client(reconnection=True)
 hostname = socket.gethostname()
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
+idle_mode_enabled = True
+content_enabled = True
 current_state = ClientState.ACTIVE
 emergency_active = False
 playing_started_at = 0.0
@@ -590,12 +592,14 @@ def on_hello(data):
 
 @sio.on("config")
 def on_config(data):
-    global idle_timeout_sec
+    global idle_timeout_sec, idle_mode_enabled, content_enabled
 
     print("📥 CONFIG RECEIVED:")
     print(data)
 
     config_timeout = data.get("idle_timeout_sec") if isinstance(data, dict) else None
+    idle_mode_enabled = bool(data.get("idle_mode_enabled", True)) if isinstance(data, dict) else True
+    content_enabled = bool(data.get("content_enabled", True)) if isinstance(data, dict) else True
     if isinstance(config_timeout, (int, float)) and config_timeout > 0:
         idle_timeout_sec = int(config_timeout)
     else:
@@ -604,7 +608,7 @@ def on_config(data):
     if isinstance(data, dict):
         playback.update_from_config(data)
 
-    print(f"🕒 idle_timeout_sec = {idle_timeout_sec}")
+    print(f"🕒 idle_timeout_sec = {idle_timeout_sec} | idle_mode_enabled={idle_mode_enabled} | content_enabled={content_enabled}")
 
 
 @sio.on("command")
@@ -650,7 +654,20 @@ def run_state_cycle():
         playback.pause()
         return get_idle_seconds()
 
+    if not content_enabled:
+        if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING}:
+            playback.stop()
+            set_state(ClientState.ACTIVE, "content_disabled")
+        return get_idle_seconds()
+
     idle_sec = get_idle_seconds()
+
+    if not idle_mode_enabled:
+        if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING, ClientState.RETURNING}:
+            playback.stop()
+            return_to_erp_window()
+            set_state(ClientState.ACTIVE, "idle_mode_disabled")
+        return idle_sec
 
     if current_state == ClientState.ACTIVE and idle_sec >= idle_timeout_sec:
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")

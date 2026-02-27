@@ -19,6 +19,8 @@ class Device(Base):
     last_error = Column(String(512))
     last_state = Column(String(64))
     last_content_name = Column(String(255))
+    idle_mode_enabled = Column(Boolean)
+    content_enabled = Column(Boolean)
 
 
 class Group(Base):
@@ -27,6 +29,8 @@ class Group(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(128), unique=True, nullable=False)
     idle_timeout_sec = Column(Integer)
+    idle_mode_enabled = Column(Boolean, default=True, nullable=False)
+    content_enabled = Column(Boolean, default=True, nullable=False)
 
 
 class Playlist(Base):
