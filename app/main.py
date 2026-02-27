@@ -752,9 +752,15 @@ def update_group(group_id):
         if existing:
             return jsonify({"error": "group name already exists"}), 409
 
+        previous_idle_timeout_sec = group.idle_timeout_sec
+
         group.name = name
         group.idle_timeout_sec = idle_timeout_sec
         db.commit()
+
+        if previous_idle_timeout_sec != idle_timeout_sec:
+            _emit_config_update(_hostnames_for_group(db, group_id))
+
         return jsonify({"ok": True})
     finally:
         db.close()
