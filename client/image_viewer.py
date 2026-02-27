@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import traceback
 import os
 import subprocess
 import sys
@@ -11,6 +12,24 @@ from PIL import Image
 
 
 BACKGROUND_COLOR = (0, 0, 0)
+
+
+def _debug_log(message: str):
+    log_target = os.getenv("BAYLAN_DEBUG_LOG", "")
+    if log_target.strip():
+        log_path = Path(log_target).expanduser()
+    elif getattr(sys, "frozen", False):
+        log_path = Path(sys.executable).resolve().with_name("baylan_agent_debug.log")
+    else:
+        log_path = Path(__file__).resolve().with_name("baylan_agent_debug.log")
+
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] [image_viewer] {message}\n")
+    except Exception:
+        pass
 
 
 def _fit_size(img_w: int, img_h: int, max_w: int, max_h: int) -> tuple[int, int]:
@@ -73,6 +92,7 @@ def _load_image_surface(image_path: Path):
 
 def _run_agent_fallback() -> int:
     """Fallback: when built with wrong entrypoint, run the real agent instead of exiting."""
+    _debug_log(f"fallback başladı | argv={sys.argv!r} | frozen={getattr(sys, 'frozen', False)}")
     agent_main = None
 
     client_py = Path(__file__).with_name("client.py")
@@ -86,6 +106,7 @@ def _run_agent_fallback() -> int:
                 if callable(candidate):
                     agent_main = candidate
         except Exception:
+            _debug_log(f"client.py üzerinden import başarısız: {traceback.format_exc().strip()}")
             agent_main = None
 
     if agent_main is None:
@@ -97,6 +118,7 @@ def _run_agent_fallback() -> int:
                     agent_main = candidate
                     break
             except Exception:
+                _debug_log(f"{module_name} import başarısız: {traceback.format_exc().strip()}")
                 continue
 
     if agent_main is None and getattr(sys, "frozen", False):
@@ -106,9 +128,10 @@ def _run_agent_fallback() -> int:
             env = dict(os.environ)
             env.setdefault("BAYLAN_IMAGE_VIEWER_FALLBACK", "1")
             try:
+                _debug_log(f"sidecar client.py çalıştırılıyor: {sidecar}")
                 return subprocess.call([sys.executable, str(sidecar)], env=env)
             except Exception:
-                pass
+                _debug_log(f"sidecar çağrısı başarısız: {traceback.format_exc().strip()}")
 
     try:
         run_agent = agent_main
@@ -117,14 +140,18 @@ def _run_agent_fallback() -> int:
     except Exception as exc:
         print("Usage: python image_viewer.py <image_or_manifest_path> <duration_sec>")
         print(f"⚠️ agent fallback başlatılamadı: {exc}")
+        _debug_log(f"agent fallback başlatılamadı: {traceback.format_exc().strip()}")
         return 2
 
     print("⚠️ image_viewer argümanı verilmedi, agent başlatılıyor...")
+    _debug_log("agent_main() çağrılıyor")
     run_agent()
+    _debug_log("agent_main() tamamlandı")
     return 0
 
 
 def main() -> int:
+    _debug_log(f"main başladı | argv={sys.argv!r}")
     if len(sys.argv) < 3:
         return _run_agent_fallback()
 
@@ -133,16 +160,19 @@ def main() -> int:
 
     if not source_path.exists():
         print(f"⚠️ dosya bulunamadı: {source_path}")
+        _debug_log(f"source bulunamadı: {source_path}")
         return 2
 
     try:
         slides = _load_slides(source_path, default_duration_sec)
     except Exception as exc:
         print(f"⚠️ slayt manifest okunamadı: {exc}")
+        _debug_log(f"slayt manifest okunamadı: {traceback.format_exc().strip()}")
         return 3
 
     if not slides:
         print("⚠️ gösterilecek slayt bulunamadı")
+        _debug_log("gösterilecek slayt bulunamadı")
         return 3
 
     pygame.init()
@@ -159,6 +189,7 @@ def main() -> int:
                 image_surface = _load_image_surface(image_path)
             except Exception as exc:
                 print(f"⚠️ image açılamadı: {image_path} | {exc}")
+                _debug_log(f"image açılamadı: {image_path} | {traceback.format_exc().strip()}")
                 continue
 
             target_w, target_h = _fit_size(
@@ -179,9 +210,11 @@ def main() -> int:
                         return 0
                 clock.tick(30)
     except KeyboardInterrupt:
+        _debug_log("keyboard interrupt")
         return 0
     finally:
         pygame.quit()
+        _debug_log("pygame quit")
 
     return 0
 
