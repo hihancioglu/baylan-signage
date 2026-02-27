@@ -851,8 +851,9 @@ def main():
             print("🛑 Client interrupted")
             break
         except Exception as e:
-            print("Heartbeat loop stopped:", e)
-            break
+            print(f"⚠️ Heartbeat loop error, retrying: {e}")
+            time.sleep(max(RECONNECT_RETRY_SEC, STATE_CHECK_INTERVAL_SEC))
+            continue
 
     playback.stop()
     try:
