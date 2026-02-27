@@ -9,6 +9,7 @@ import threading
 import ctypes
 import traceback
 import faulthandler
+import builtins
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
@@ -38,15 +39,25 @@ ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().l
 DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
 
 
+def print(*args, **kwargs):
+    try:
+        builtins.print(*args, **kwargs)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 6:
+            return
+        raise
+
+
 def setup_debug_logging():
     DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handlers = [logging.FileHandler(DEBUG_LOG_PATH, encoding="utf-8")]
+    if not platform.system().lower().startswith("win"):
+        handlers.append(logging.StreamHandler(sys.stdout))
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
-        handlers=[
-            logging.FileHandler(DEBUG_LOG_PATH, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=handlers,
     )
 
     fault_log = open(DEBUG_LOG_PATH, "a", encoding="utf-8")
