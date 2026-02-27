@@ -300,7 +300,11 @@ class PlaybackController:
 
                 self._waiting_for_media_logged = False
                 media_path = playlist[index % len(playlist)]
-                ok = self.player.play_blocking(media_path)
+                single_image_playlist = len(playlist) == 1 and self.player.is_image(media_path)
+                image_duration_sec = (
+                    self.player.static_image_duration_sec if single_image_playlist else None
+                )
+                ok = self.player.play_blocking(media_path, image_duration_sec=image_duration_sec)
                 if not ok:
                     print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
                 index = (index + 1) % len(playlist)
