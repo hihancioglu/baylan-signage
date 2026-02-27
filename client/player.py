@@ -26,6 +26,7 @@ class BorderlessFullscreenPlayer:
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
+        self.static_image_duration_sec = int(os.getenv("STATIC_IMAGE_DURATION_SEC", "86400"))
         default_video_command, default_image_command = self._pick_default_player_commands()
 
         self.video_command = os.getenv(
@@ -37,6 +38,7 @@ class BorderlessFullscreenPlayer:
             default_image_command,
         )
         self._process = None
+        self._stop_requested = False
 
     def _pick_default_player_commands(self) -> tuple[str, str]:
         player_candidates = []
@@ -84,13 +86,17 @@ class BorderlessFullscreenPlayer:
     def _is_video(self, media_path: str) -> bool:
         return Path(media_path).suffix.lower() in self.VIDEO_EXTENSIONS
 
+    def is_image(self, media_path: str) -> bool:
+        return Path(media_path).suffix.lower() in self.IMAGE_EXTENSIONS
+
     def supports_media(self, media_path: str) -> bool:
         ext = Path(media_path).suffix.lower()
         return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS
 
-    def _build_command(self, media_path: str) -> list[str]:
+    def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command
-        command_text = template.format(media="{media}", duration=self.image_duration_sec)
+        duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
+        command_text = template.format(media="{media}", duration=duration)
         parts = shlex.split(command_text, posix=os.name != "nt")
         command = [media_path if part == "{media}" else part for part in parts]
 
@@ -115,7 +121,7 @@ class BorderlessFullscreenPlayer:
 
         return shutil.which(executable) is not None
 
-    def play_blocking(self, media_path: str) -> bool:
+    def play_blocking(self, media_path: str, image_duration_sec: int | None = None) -> bool:
         if not Path(media_path).exists():
             print(f"⚠️ medya bulunamadı: {media_path}")
             return False
@@ -129,15 +135,17 @@ class BorderlessFullscreenPlayer:
         process = None
 
         try:
-            command = self._build_command(media_path)
+            command = self._build_command(media_path, image_duration_sec=image_duration_sec)
             if not self._resolve_executable(command):
                 print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
                 return False
 
+            self._stop_requested = False
             process = subprocess.Popen(command)
             self._process = process
             process.wait()
-            return process.returncode == 0
+            interrupted = self._stop_requested
+            return process.returncode == 0 or interrupted
         except Exception as exc:
             print(f"⚠️ medya oynatma hatası: {exc}")
             return False
@@ -147,6 +155,7 @@ class BorderlessFullscreenPlayer:
 
     def stop(self):
         if self._process and self._process.poll() is None:
+            self._stop_requested = True
             self._process.terminate()
             try:
                 self._process.wait(timeout=5)
