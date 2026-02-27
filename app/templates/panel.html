@@ -851,7 +851,8 @@ async function loadUpdater(){
     current.textContent = 'Yayınlanan dosya: yok';
     return;
   }
-  current.textContent = `Yayınlanan dosya: ${release.file_name} | Boyut: ${((release.size||0)/(1024*1024)).toFixed(1)} MB`;
+  const releaseVersion = release.version || '-';
+  current.textContent = `Yayınlanan dosya: ${release.file_name} | Build: ${releaseVersion} | Boyut: ${((release.size||0)/(1024*1024)).toFixed(1)} MB`;
 }
 
 async function uploadClientUpdate(){
