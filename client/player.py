@@ -26,7 +26,7 @@ class BorderlessFullscreenPlayer:
         "{player} --fs --border=no --force-window=yes --quiet "
         "--image-display-duration={duration} {media}"
     )
-    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".json"}
+    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".json"}
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
@@ -89,6 +89,40 @@ class BorderlessFullscreenPlayer:
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         viewer_path = Path(__file__).with_name("image_viewer.py")
         return [sys.executable, str(viewer_path), media_path, str(duration)]
+
+    @staticmethod
+    def _is_vlc_image_fallback_allowed() -> bool:
+        return os.getenv("ALLOW_VLC_IMAGE_FALLBACK", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+    def _prefer_non_vlc_image_command(
+        self,
+        media_path: str,
+        command: list[str],
+        image_duration_sec: int | None = None,
+    ) -> list[str] | None:
+        if not self.is_image(media_path):
+            return command
+
+        if not self._is_vlc_command(command):
+            return command
+
+        if self._is_vlc_image_fallback_allowed():
+            return command
+
+        mpv_fallback = self._build_mpv_image_command(
+            media_path,
+            image_duration_sec=image_duration_sec,
+        )
+        if self._resolve_executable(mpv_fallback):
+            print("ℹ️ image oynatımında VLC yerine mpv kullanılacak")
+            return mpv_fallback
+
+        print("⚠️ VLC image fallback devre dışı ve mpv bulunamadı, medya atlandı")
+        return None
 
     def _pick_default_player_commands(self) -> tuple[str, str]:
         player_candidates = []
@@ -186,11 +220,21 @@ class BorderlessFullscreenPlayer:
 
         try:
             command = self._build_command(media_path, image_duration_sec=image_duration_sec)
+            used_python_image_viewer = False
             if self._should_use_python_image_viewer(media_path):
                 command = self._build_python_image_command(
                     media_path,
                     image_duration_sec=image_duration_sec,
                 )
+                used_python_image_viewer = True
+            else:
+                command = self._prefer_non_vlc_image_command(
+                    media_path,
+                    command,
+                    image_duration_sec=image_duration_sec,
+                )
+                if not command:
+                    return False
 
             if not self._resolve_executable(command):
                 print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
@@ -201,33 +245,19 @@ class BorderlessFullscreenPlayer:
             self._process = process
             process.wait()
 
-            if process.returncode != 0 and self._should_use_python_image_viewer(media_path):
+            if process.returncode != 0 and used_python_image_viewer:
                 print(
                     "⚠️ Python image viewer başarısız oldu "
                     f"(exit={process.returncode}, media={media_path}), medya player fallback deneniyor"
                 )
                 self._python_image_viewer_runtime_enabled = False
                 fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
-                allow_vlc_image_fallback = os.getenv("ALLOW_VLC_IMAGE_FALLBACK", "0").strip().lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                }
-                if (
-                    self.is_image(media_path)
-                    and self._is_vlc_command(fallback_command)
-                    and not allow_vlc_image_fallback
-                ):
-                    print("⚠️ VLC image fallback devre dışı, siyah ekranı önlemek için atlandı")
-                    mpv_fallback = self._build_mpv_image_command(
-                        media_path,
-                        image_duration_sec=image_duration_sec,
-                    )
-                    if self._resolve_executable(mpv_fallback):
-                        process = subprocess.Popen(mpv_fallback)
-                        self._process = process
-                        process.wait()
-                elif self._resolve_executable(fallback_command):
+                fallback_command = self._prefer_non_vlc_image_command(
+                    media_path,
+                    fallback_command,
+                    image_duration_sec=image_duration_sec,
+                )
+                if fallback_command and self._resolve_executable(fallback_command):
                     process = subprocess.Popen(fallback_command)
                     self._process = process
                     process.wait()
