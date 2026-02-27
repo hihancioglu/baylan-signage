@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, url_for
+from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, session, redirect
 from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 
@@ -29,10 +29,25 @@ from .models import (
     MediaAsset,
     AppSetting,
 )
-from .config import SHARED_SECRET
+from .config import (
+    SHARED_SECRET,
+    PANEL_SESSION_SECRET,
+    AD_SERVER_URI,
+    AD_DOMAIN,
+    AD_USER_DN_TEMPLATE,
+    AD_USE_SSL,
+)
 
+
+try:
+    from ldap3 import Server, Connection, SIMPLE
+except ImportError:  # optional dependency during early setup
+    Server = None
+    Connection = None
+    SIMPLE = None
 
 app = Flask(__name__)
+app.secret_key = PANEL_SESSION_SECRET
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 ensure_sqlite_schema()
@@ -89,7 +104,39 @@ def index():
 
 @app.get("/panel")
 def panel():
+    if _panel_auth_failed():
+        return redirect(url_for("panel_login_page"))
     return render_template("panel.html")
+
+
+@app.get("/panel/login")
+def panel_login_page():
+    if _is_panel_authenticated():
+        return redirect(url_for("panel"))
+    return render_template("panel_login.html")
+
+
+@app.post("/panel/logout")
+def panel_logout():
+    session.clear()
+    return redirect(url_for("panel_login_page"))
+
+
+@app.post("/api/panel/login")
+def panel_login():
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Kullanıcı adı ve parola zorunlu"}), 400
+
+    if not _ad_signin(username, password):
+        return jsonify({"ok": False, "error": "AD kimlik doğrulaması başarısız"}), 401
+
+    session["panel_authenticated"] = True
+    session["panel_username"] = username
+    return jsonify({"ok": True})
 
 
 @app.get("/media/<path:asset_path>")
@@ -106,7 +153,29 @@ def _utc_now_iso():
 
 
 def _auth_failed():
-    return request.headers.get("X-SECRET") != SHARED_SECRET
+    return _panel_auth_failed() or request.headers.get("X-SECRET") != SHARED_SECRET
+
+
+def _is_panel_authenticated() -> bool:
+    return bool(session.get("panel_authenticated"))
+
+
+def _ad_signin(username: str, password: str) -> bool:
+    if not (Server and Connection):
+        return False
+    if not AD_SERVER_URI or not AD_DOMAIN or not username or not password:
+        return False
+
+    account_name = username if "\\" in username or "@" in username else f"{AD_DOMAIN}\\{username}"
+    user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else account_name
+
+    server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None)
+    conn = Connection(server, user=user_dn, password=password, authentication=SIMPLE, auto_bind=False)
+    return bool(conn.bind())
+
+
+def _panel_auth_failed():
+    return not _is_panel_authenticated()
 
 
 def _serialize_device(db, device):
