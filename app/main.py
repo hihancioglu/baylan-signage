@@ -36,17 +36,13 @@ from .config import (
     AD_DOMAIN,
     AD_USER_DN_TEMPLATE,
     AD_USE_SSL,
-    AD_BASE_DN,
-    AD_BIND_DN,
-    AD_BIND_PASSWORD,
-    AD_USER_SEARCH_FILTER,
     AD_CONNECT_TIMEOUT,
     AD_ALLOWED_USERS,
 )
 
 
 try:
-    from ldap3 import Server, Connection, SIMPLE, SUBTREE
+    from ldap3 import Server, Connection, SIMPLE
 except ImportError:  # optional dependency during early setup
     Server = None
     Connection = None
@@ -178,48 +174,7 @@ def _ad_signin(username: str, password: str) -> bool:
 
     server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None, connect_timeout=AD_CONNECT_TIMEOUT)
 
-    if AD_BASE_DN:
-        search_username = _canonical_ad_username(username)
-        bind_user = _normalize_ad_account_name(AD_BIND_DN) or None
-        bind_password = AD_BIND_PASSWORD or None
-        lookup = Connection(
-            server,
-            user=bind_user,
-            password=bind_password,
-            authentication=SIMPLE,
-            auto_bind=False,
-            raise_exceptions=False,
-        )
-        if not lookup.bind():
-            return False
-
-        user_filter = AD_USER_SEARCH_FILTER.format(username=search_username)
-        if not lookup.search(AD_BASE_DN, user_filter, search_scope=SUBTREE, attributes=["distinguishedName"]):
-            lookup.unbind()
-            return False
-
-        if not lookup.entries:
-            lookup.unbind()
-            return False
-
-        user_dn = lookup.entries[0].entry_dn
-        lookup.unbind()
-
-        user_conn = Connection(
-            server,
-            user=user_dn,
-            password=password,
-            authentication=SIMPLE,
-            auto_bind=False,
-            raise_exceptions=False,
-        )
-        ok = bool(user_conn.bind())
-        user_conn.unbind()
-        return ok
-
-    account_name = _normalize_ad_account_name(username)
-
-    user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else account_name
+    user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else _normalize_ad_account_name(username)
     conn = Connection(
         server,
         user=user_dn,
