@@ -452,6 +452,7 @@ playback = PlaybackController()
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
+_console_hider_started = False
 
 
 def hide_console_window():
@@ -484,8 +485,26 @@ def hide_console_window():
             )
             SW_HIDE = 0
             user32.ShowWindow(hwnd, SW_HIDE)
+            try:
+                kernel32.FreeConsole()
+            except Exception:
+                pass
     except Exception:
         pass
+
+
+def start_console_hider():
+    global _console_hider_started
+    if _console_hider_started:
+        return
+    _console_hider_started = True
+
+    def _worker():
+        while not shutdown_event.is_set():
+            hide_console_window()
+            time.sleep(1)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 class SystemTrayController:
@@ -774,6 +793,7 @@ def run_state_cycle():
 
 def main():
     hide_console_window()
+    start_console_hider()
     systray.start()
     print("Connecting to:", SERVER_URL)
 
