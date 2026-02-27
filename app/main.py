@@ -159,7 +159,7 @@ def _utc_now_iso():
 
 
 def _auth_failed():
-    return _panel_auth_failed() or request.headers.get("X-SECRET") != SHARED_SECRET
+    return _panel_auth_failed()
 
 
 def _is_panel_authenticated() -> bool:

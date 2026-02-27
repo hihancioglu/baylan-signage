@@ -28,4 +28,4 @@ Basit LDAP bind akışı:
 
 İpucu: Kullanıcı adı sadece `ali` gibi gelirse ve `AD_DOMAIN` tanımlıysa uygulama bunu otomatik `DOMAIN\ali` formatına çevirir.
 
-Not: Panel API çağrılarında mevcut `SHARED_SECRET` (`X-SECRET`) kontrolü devam eder.
+Not: Panel oturum açma ve panel API işlemleri AD oturumu ile korunur; girişte ek `X-SECRET` istenmez.

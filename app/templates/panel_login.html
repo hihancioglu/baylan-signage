@@ -22,23 +22,14 @@
         <label class="form-label" for="password">Parola</label>
         <input id="password" class="form-control" type="password" autocomplete="current-password" />
       </div>
-      <div class="mb-3">
-        <label class="form-label" for="secret">Panel API Secret (X-SECRET)</label>
-        <input id="secret" class="form-control" />
-      </div>
       <button class="btn btn-primary w-100" onclick="login()">Giriş Yap</button>
       <div id="error" class="text-danger small mt-3"></div>
     </div>
   </div>
 <script>
-const secretInput = document.getElementById('secret');
-secretInput.value = localStorage.getItem('panelSecret') || '';
-
 async function login(){
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
-  const secret = secretInput.value.trim();
-  localStorage.setItem('panelSecret', secret);
 
   const resp = await fetch('/api/panel/login', {
     method: 'POST',
