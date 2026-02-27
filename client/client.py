@@ -4,6 +4,7 @@ import platform
 import socket
 import subprocess
 import threading
+import ctypes
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
@@ -450,6 +451,65 @@ window_manager = _WindowManager()
 playback = PlaybackController()
 processed_command_ids = set()
 processed_lock = threading.Lock()
+shutdown_event = threading.Event()
+
+
+def hide_console_window():
+    if not platform.system().lower().startswith("win"):
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            SW_HIDE = 0
+            user32.ShowWindow(hwnd, SW_HIDE)
+    except Exception:
+        pass
+
+
+class SystemTrayController:
+    def __init__(self):
+        self._icon = None
+        self._thread = None
+
+    def start(self):
+        if not platform.system().lower().startswith("win"):
+            return
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+        except Exception as exc:
+            print(f"⚠️ systray başlatılamadı: {exc}")
+            return
+
+        image = Image.new("RGB", (64, 64), color="#111111")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((8, 8, 56, 56), outline="#00AEEF", width=4)
+        draw.rectangle((20, 20, 44, 44), fill="#00AEEF")
+
+        def on_quit(icon, _item):
+            shutdown_event.set()
+            icon.stop()
+
+        self._icon = pystray.Icon(
+            "baylan_signage_client",
+            image,
+            "Baylan Signage Client",
+            menu=pystray.Menu(pystray.MenuItem("Çıkış", on_quit)),
+        )
+        self._thread = threading.Thread(target=self._icon.run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        if self._icon:
+            try:
+                self._icon.stop()
+            except Exception:
+                pass
+
+
+systray = SystemTrayController()
 
 
 def _parse_issued_at(value):
@@ -693,9 +753,11 @@ def run_state_cycle():
 
 
 def main():
+    hide_console_window()
+    systray.start()
     print("Connecting to:", SERVER_URL)
 
-    while True:
+    while not shutdown_event.is_set():
         try:
             if not sio.connected:
                 sio.connect(SERVER_URL)
@@ -709,7 +771,7 @@ def main():
 
     next_heartbeat_at = time.monotonic()
 
-    while True:
+    while not shutdown_event.is_set():
         try:
             idle_sec = run_state_cycle()
             now = time.monotonic()
@@ -756,6 +818,7 @@ def main():
         sio.disconnect()
     except Exception:
         pass
+    systray.stop()
 
 
 if __name__ == "__main__":
