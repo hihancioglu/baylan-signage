@@ -380,17 +380,56 @@ def bind_device_group(hostname, group_id):
         if not device:
             return jsonify({"error": "device not found"}), 404
 
-        db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).update(
-            {"is_active": False, "unassigned_at": datetime.utcnow()}
-        )
+        group = db.query(Group).filter_by(id=group_id).first()
+        if not group:
+            return jsonify({"error": "group not found"}), 404
+
+        active_memberships = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).all()
+
+        for membership in active_memberships:
+            membership.is_active = False
+            membership.unassigned_at = datetime.utcnow()
         db.add(DeviceGroup(device_id=device.id, group_id=group_id, is_active=True))
         db.commit()
 
         sid = connected.get(hostname)
         if sid:
+            for membership in active_memberships:
+                socketio.server.leave_room(sid, f"group:{membership.group_id}")
             socketio.server.enter_room(sid, f"group:{group_id}")
 
         return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/devices/<hostname>/group")
+def unbind_device_group(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        device = db.query(Device).filter_by(hostname=hostname).first()
+        if not device:
+            return jsonify({"error": "device not found"}), 404
+
+        active_memberships = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).all()
+        if not active_memberships:
+            return jsonify({"ok": True, "removed": 0})
+
+        for membership in active_memberships:
+            membership.is_active = False
+            membership.unassigned_at = datetime.utcnow()
+
+        db.commit()
+
+        sid = connected.get(hostname)
+        if sid:
+            for membership in active_memberships:
+                socketio.server.leave_room(sid, f"group:{membership.group_id}")
+
+        return jsonify({"ok": True, "removed": len(active_memberships)})
     finally:
         db.close()
 
@@ -445,6 +484,60 @@ def create_group():
         db.add(g)
         db.commit()
         return jsonify({"ok": True, "id": g.id, "already_exists": False})
+    finally:
+        db.close()
+
+
+@app.patch("/api/groups/<int:group_id>")
+def update_group(group_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    name = ((request.json or {}).get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    db = db_session()
+    try:
+        group = db.query(Group).filter_by(id=group_id).first()
+        if not group:
+            return jsonify({"error": "group not found"}), 404
+
+        existing = db.query(Group).filter(Group.name == name, Group.id != group_id).first()
+        if existing:
+            return jsonify({"error": "group name already exists"}), 409
+
+        group.name = name
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/groups/<int:group_id>")
+def delete_group(group_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        group = db.query(Group).filter_by(id=group_id).first()
+        if not group:
+            return jsonify({"error": "group not found"}), 404
+
+        deactivated_memberships = db.query(DeviceGroup).filter_by(group_id=group_id, is_active=True).update(
+            {"is_active": False, "unassigned_at": datetime.utcnow()},
+            synchronize_session=False,
+        )
+        db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
+        db.query(DeviceGroup).filter_by(group_id=group_id).delete()
+        db.delete(group)
+        db.commit()
+
+        for hostname, sid in connected.items():
+            socketio.server.leave_room(sid, f"group:{group_id}")
+
+        return jsonify({"ok": True, "deactivated_memberships": deactivated_memberships})
     finally:
         db.close()
 

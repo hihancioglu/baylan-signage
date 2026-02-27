@@ -61,11 +61,27 @@
       <button onclick="createPlaylist()">Playlist Ekle</button>
     </div>
 
+    <h3>Grup Düzenleme / Silme</h3>
+    <div class="row">
+      <select id="group-edit-select" onchange="syncGroupEditField()"></select>
+      <input id="group-new-name" placeholder="Grup adı" />
+      <button onclick="updateGroup()">Grup Adını Güncelle</button>
+      <button class="danger" onclick="deleteGroup()">Grubu Sil</button>
+    </div>
+
     <h3>Playlist'i Gruba Ata</h3>
     <div class="row">
       <select id="group-select"></select>
       <select id="playlist-select"></select>
       <button onclick="assignPlaylist()">Gruba Ata</button>
+    </div>
+
+    <h3>Cihazı Gruba Ata / Çıkar</h3>
+    <div class="row">
+      <select id="device-select"></select>
+      <select id="device-group-select"></select>
+      <button onclick="assignDeviceToGroup()">Cihazı Gruba Ata</button>
+      <button class="danger" onclick="removeDeviceFromGroup()">Cihazı Gruptan Çıkar</button>
     </div>
 
     <h3>Playlist Düzenle (Ad / Aktiflik)</h3>
@@ -120,6 +136,7 @@ const SECRET = localStorage.getItem('panelSecret') || prompt('X-SECRET girin');
 localStorage.setItem('panelSecret', SECRET || '');
 const hdr = { 'Content-Type': 'application/json', 'X-SECRET': SECRET || '' };
 let cachedPlaylists = [];
+let cachedGroups = [];
 let selectedPlaylistItemId = null;
 
 async function jget(url){
@@ -148,14 +165,22 @@ async function loadDevices(){
     tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.last_state||''}</td><td>${d.group||'-'}</td>`;
     body.appendChild(tr);
   });
+
+  const deviceSelect = document.getElementById('device-select');
+  if(deviceSelect){
+    deviceSelect.innerHTML = (devices||[]).map(d=>`<option value="${d.hostname}">${d.hostname}</option>`).join('');
+  }
 }
 
 async function loadGroupsPlaylists(){
   const groups = await jget('/api/groups');
   const playlists = await jget('/api/playlists');
   cachedPlaylists = playlists || [];
+  cachedGroups = groups || [];
 
   const gs = document.getElementById('group-select');
+  const gedit = document.getElementById('group-edit-select');
+  const dgs = document.getElementById('device-group-select');
   const ps = document.getElementById('playlist-select');
   const pe = document.getElementById('playlist-edit-select');
   const pa = document.getElementById('playlist-add-select');
@@ -165,12 +190,15 @@ async function loadGroupsPlaylists(){
   const pOpts = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
 
   gs.innerHTML = gOpts;
+  if(gedit) gedit.innerHTML = gOpts;
+  if(dgs) dgs.innerHTML = gOpts;
   ps.innerHTML = pOpts;
   pe.innerHTML = pOpts;
   pa.innerHTML = pOpts;
   po.innerHTML = pOpts;
 
   syncPlaylistEditFields();
+  syncGroupEditField();
   loadItems();
 }
 
@@ -234,6 +262,78 @@ async function createGroup(){
   alert(resp.already_exists ? 'Grup zaten vardı' : 'Grup oluşturuldu');
   document.getElementById('new-group-name').value = '';
   await loadGroupsPlaylists();
+}
+
+
+function syncGroupEditField(){
+  const groupId = Number(document.getElementById('group-edit-select')?.value);
+  const g = cachedGroups.find(x => x.id === groupId);
+  document.getElementById('group-new-name').value = g ? g.name : '';
+}
+
+async function updateGroup(){
+  const groupId = Number(document.getElementById('group-edit-select').value);
+  const name = document.getElementById('group-new-name').value.trim();
+  if(!groupId || !name){
+    alert('Grup ve yeni ad zorunlu');
+    return;
+  }
+  const resp = await jpatch(`/api/groups/${groupId}`, {name});
+  if(!resp.ok){
+    alert(resp.error || 'Grup güncellenemedi');
+    return;
+  }
+  alert('Grup adı güncellendi');
+  await loadGroupsPlaylists();
+  await loadDevices();
+}
+
+async function deleteGroup(){
+  const groupId = Number(document.getElementById('group-edit-select').value);
+  if(!groupId){
+    alert('Silinecek grubu seçin');
+    return;
+  }
+  if(!confirm('Grup silinecek. Bu gruba bağlı cihazlar gruptan çıkarılacak. Devam edilsin mi?')) return;
+  const resp = await jdelete(`/api/groups/${groupId}`);
+  if(!resp.ok){
+    alert(resp.error || 'Grup silinemedi');
+    return;
+  }
+  alert('Grup silindi');
+  await loadGroupsPlaylists();
+  await loadDevices();
+}
+
+async function assignDeviceToGroup(){
+  const hostname = document.getElementById('device-select').value;
+  const groupId = Number(document.getElementById('device-group-select').value);
+  if(!hostname || !groupId){
+    alert('Cihaz ve grup seçin');
+    return;
+  }
+  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}`, {});
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz gruba atanamadı');
+    return;
+  }
+  alert('Cihaz gruba atandı');
+  await loadDevices();
+}
+
+async function removeDeviceFromGroup(){
+  const hostname = document.getElementById('device-select').value;
+  if(!hostname){
+    alert('Cihaz seçin');
+    return;
+  }
+  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}/group`);
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz gruptan çıkarılamadı');
+    return;
+  }
+  alert('Cihaz gruptan çıkarıldı');
+  await loadDevices();
 }
 
 async function createPlaylist(){
