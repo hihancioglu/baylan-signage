@@ -1,4 +1,5 @@
 import ctypes
+import platform
 from ctypes import wintypes
 
 
@@ -11,6 +12,9 @@ class LASTINPUTINFO(ctypes.Structure):
 
 def get_idle_seconds() -> float:
     """Return elapsed seconds since the last keyboard/mouse/touch interaction."""
+    if not platform.system().lower().startswith("win"):
+        return 0.0
+
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
 

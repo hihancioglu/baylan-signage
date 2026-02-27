@@ -52,13 +52,14 @@ class _WindowManager:
         import ctypes
 
         self._ctypes = ctypes
-        self._user32 = ctypes.windll.user32
+        self._enabled = platform.system().lower().startswith("win") and hasattr(ctypes, "windll")
+        self._user32 = ctypes.windll.user32 if self._enabled else None
 
     def _normalize(self, text: str) -> str:
         return " ".join((text or "").strip().lower().split())
 
     def _find_window_handle(self, window_title: str) -> int:
-        if not window_title:
+        if not self._enabled or not window_title:
             return 0
 
         if ERP_WINDOW_MATCH_MODE == "exact":
