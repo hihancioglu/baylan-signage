@@ -41,7 +41,32 @@ class BorderlessFullscreenPlayer:
         )
         self._process = None
         self._stop_requested = False
+        self._python_image_viewer_supported = self._detect_python_image_viewer_support()
         self._python_image_viewer_runtime_enabled = True
+
+    def _detect_python_image_viewer_support(self) -> bool:
+        if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+            return False
+
+        if os.name != "nt" and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
+            print("⚠️ Python image viewer pasif: DISPLAY/WAYLAND_DISPLAY bulunamadı")
+            return False
+
+        try:
+            import tkinter as tk
+        except Exception as exc:
+            print(f"⚠️ Python image viewer pasif: tkinter kullanılamıyor ({exc})")
+            return False
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.update_idletasks()
+            root.destroy()
+            return True
+        except Exception as exc:
+            print(f"⚠️ Python image viewer pasif: pencere açılamadı ({exc})")
+            return False
 
     @staticmethod
     def _is_vlc_command(command: list[str]) -> bool:
@@ -51,9 +76,9 @@ class BorderlessFullscreenPlayer:
         return "vlc" in executable_name
 
     def _should_use_python_image_viewer(self, media_path: str) -> bool:
-        if not self._python_image_viewer_runtime_enabled:
+        if not self._python_image_viewer_supported:
             return False
-        if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        if not self._python_image_viewer_runtime_enabled:
             return False
         return Path(media_path).suffix.lower() in self.PYTHON_IMAGE_EXTENSIONS
 
