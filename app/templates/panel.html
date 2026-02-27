@@ -37,15 +37,11 @@
   <div class="card">
     <h2>Medya Yükleme ve Havuz</h2>
     <div class="row">
-      <input id="media-file" type="file" accept="video/*,image/*,.svg,.ppt,.pptx" />
-      <label>
-        PPT Slayt Süresi (sn)
-        <input id="ppt-slide-duration" type="number" min="1" value="8" style="width:90px" />
-      </label>
+      <input id="media-file" type="file" accept="video/*,image/*,.svg" />
       <button onclick="uploadVideo()">Medyayı Yükle</button>
       <button onclick="loadMedia()">Listeyi Yenile</button>
     </div>
-    <small>Yüklenen video/görseller medya listesine eklenir. PPT/PPTX yüklenirse slaytlar PNG'ye çevrilir ve otomatik slayt gösterisi olarak eklenir.</small>
+    <small>Yüklenen video/görseller medya listesine eklenir.</small>
 
     <h3>Sistemdeki Medyalar</h3>
     <table>
@@ -244,12 +240,6 @@ async function uploadVideo(){
   const fd = new FormData();
   const selectedFile = fileInput.files[0];
   fd.append('file', selectedFile);
-  const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
-  if(['ppt', 'pptx'].includes(ext)) {
-    const duration = Number(document.getElementById('ppt-slide-duration')?.value || 8);
-    fd.append('slide_duration_sec', String(Math.max(1, duration || 8)));
-  }
-
   const res = await fetch('/api/media/upload', {
     method: 'POST',
     headers: { 'X-SECRET': SECRET || '' },
