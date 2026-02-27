@@ -42,6 +42,13 @@ class BorderlessFullscreenPlayer:
         self._process = None
         self._stop_requested = False
 
+    @staticmethod
+    def _is_vlc_command(command: list[str]) -> bool:
+        if not command:
+            return False
+        executable_name = Path(BorderlessFullscreenPlayer._strip_outer_quotes(command[0])).name.lower()
+        return "vlc" in executable_name
+
     def _should_use_python_image_viewer(self, media_path: str) -> bool:
         if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
             return False
@@ -166,7 +173,18 @@ class BorderlessFullscreenPlayer:
             if process.returncode != 0 and self._should_use_python_image_viewer(media_path):
                 print("⚠️ Python image viewer başarısız oldu, medya player fallback deneniyor")
                 fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
-                if self._resolve_executable(fallback_command):
+                allow_vlc_image_fallback = os.getenv("ALLOW_VLC_IMAGE_FALLBACK", "0").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }
+                if (
+                    self.is_image(media_path)
+                    and self._is_vlc_command(fallback_command)
+                    and not allow_vlc_image_fallback
+                ):
+                    print("⚠️ VLC image fallback devre dışı, siyah ekranı önlemek için atlandı")
+                elif self._resolve_executable(fallback_command):
                     process = subprocess.Popen(fallback_command)
                     self._process = process
                     process.wait()
