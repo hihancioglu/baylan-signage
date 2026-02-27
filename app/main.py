@@ -132,6 +132,37 @@ def _target_hostnames(db, target_type, target_value):
     return []
 
 
+def _emit_config_update(hostnames):
+    for hostname in sorted(set(hostnames or [])):
+        if hostname not in connected:
+            continue
+        socketio.emit("config", build_config(hostname), room=f"device:{hostname}")
+
+
+def _hostnames_for_group(db, group_id):
+    rows = (
+        db.query(Device.hostname)
+        .join(DeviceGroup, DeviceGroup.device_id == Device.id)
+        .filter(DeviceGroup.group_id == int(group_id), DeviceGroup.is_active.is_(True))
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def _hostnames_for_playlist(db, playlist_id):
+    rows = (
+        db.query(Device.hostname)
+        .join(DeviceGroup, DeviceGroup.device_id == Device.id)
+        .join(GroupPlaylist, GroupPlaylist.group_id == DeviceGroup.group_id)
+        .filter(
+            DeviceGroup.is_active.is_(True),
+            GroupPlaylist.playlist_id == int(playlist_id),
+        )
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 def _emit_command(db, cmd, target_type, target_value):
     target_hostnames = _target_hostnames(db, target_type, target_value)
     if target_type == "all":
@@ -392,6 +423,8 @@ def bind_device_group(hostname, group_id):
         db.add(DeviceGroup(device_id=device.id, group_id=group_id, is_active=True))
         db.commit()
 
+        _emit_config_update([hostname])
+
         sid = connected.get(hostname)
         if sid:
             for membership in active_memberships:
@@ -423,6 +456,8 @@ def unbind_device_group(hostname):
             membership.unassigned_at = datetime.utcnow()
 
         db.commit()
+
+        _emit_config_update([hostname])
 
         sid = connected.get(hostname)
         if sid:
@@ -525,6 +560,8 @@ def delete_group(group_id):
         if not group:
             return jsonify({"error": "group not found"}), 404
 
+        affected_hostnames = _hostnames_for_group(db, group_id)
+
         deactivated_memberships = db.query(DeviceGroup).filter_by(group_id=group_id, is_active=True).update(
             {"is_active": False, "unassigned_at": datetime.utcnow()},
             synchronize_session=False,
@@ -533,6 +570,8 @@ def delete_group(group_id):
         db.query(DeviceGroup).filter_by(group_id=group_id).delete()
         db.delete(group)
         db.commit()
+
+        _emit_config_update(affected_hostnames)
 
         for hostname, sid in connected.items():
             socketio.server.leave_room(sid, f"group:{group_id}")
@@ -552,6 +591,9 @@ def bind_group_playlist(group_id, playlist_id):
         db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
         db.add(GroupPlaylist(group_id=group_id, playlist_id=playlist_id))
         db.commit()
+
+        _emit_config_update(_hostnames_for_group(db, group_id))
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -707,6 +749,9 @@ def add_playlist_item(playlist_id):
         item = PlaylistItem(playlist_id=playlist_id, path=_media_url(asset.relative_path), order_no=order_no)
         db.add(item)
         db.commit()
+
+        _emit_config_update(_hostnames_for_playlist(db, playlist_id))
+
         return jsonify({"ok": True, "id": item.id})
     finally:
         db.close()
@@ -724,6 +769,9 @@ def delete_playlist_item(playlist_id, item_id):
             return jsonify({"error": "playlist item not found"}), 404
         db.delete(item)
         db.commit()
+
+        _emit_config_update(_hostnames_for_playlist(db, playlist_id))
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -743,6 +791,9 @@ def reorder_playlist_items(playlist_id):
             if item_id in by_id:
                 by_id[item_id].order_no = idx
         db.commit()
+
+        _emit_config_update(_hostnames_for_playlist(db, playlist_id))
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -766,6 +817,9 @@ def update_playlist(playlist_id):
             playlist.enabled = bool(body.get("enabled"))
 
         db.commit()
+
+        _emit_config_update(_hostnames_for_playlist(db, playlist_id))
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -784,6 +838,19 @@ def delete_media_asset(media_id):
 
         media_url = _media_url(asset.relative_path)
         relative_path = asset.relative_path
+        impacted_playlist_ids = [
+            row[0]
+            for row in (
+                db.query(PlaylistItem.playlist_id)
+                .filter(PlaylistItem.path == media_url)
+                .distinct()
+                .all()
+            )
+        ]
+        impacted_hosts = []
+        for playlist_id in impacted_playlist_ids:
+            impacted_hosts.extend(_hostnames_for_playlist(db, playlist_id))
+
         removed_playlist_item_count = (
             db.query(PlaylistItem)
             .filter(PlaylistItem.path == media_url)
@@ -792,6 +859,8 @@ def delete_media_asset(media_id):
 
         db.delete(asset)
         db.commit()
+
+        _emit_config_update(impacted_hosts)
 
         file_path = MEDIA_ROOT / relative_path
         if file_path.exists():
