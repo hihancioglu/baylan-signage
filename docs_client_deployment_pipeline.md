@@ -320,14 +320,15 @@ $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
 
 # Agent binary sonuna marker ekle
-Add-Content -Path "dist\agent.exe" -Value $marker -Encoding ASCII
+Add-Content -Path "dist\BaylanSignageAgent.exe" -Value $marker -Encoding ASCII -NoNewline
 
 Write-Host "Embedded build marker: $buildVersion"
 ```
+
+Not: Marker'dan önce/sonra newline olsa da regex araması marker'ı bulur; ancak binary sonuna ekstra satır sonu eklememek için `-NoNewline` önerilir.
 
 Bu yöntemle:
 
 - Client açılışta kendi sürümünü marker’dan okuyabilir.
 - Server’a update yüklenince versiyon otomatik marker’dan çıkarılabilir.
 - Manuel `CLIENT_BUILD_VERSION` verilmezse bile tarih-saat tabanlı tekil build sürümü korunur.
-
