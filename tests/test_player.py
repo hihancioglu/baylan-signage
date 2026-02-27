@@ -17,7 +17,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         with patch.dict("os.environ", {"PYTHON_IMAGE_VIEWER_ENABLED": "1"}, clear=False):
             self.assertTrue(player._should_use_python_image_viewer("/tmp/a.png"))
-            self.assertFalse(player._should_use_python_image_viewer("/tmp/a.webp"))
+            self.assertTrue(player._should_use_python_image_viewer("/tmp/a.webp"))
             self.assertTrue(player._should_use_python_image_viewer("/tmp/slides.json"))
 
     def test_build_python_image_command(self):
@@ -44,6 +44,32 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(cmd[-1], "/tmp/example.jpg")
         self.assertIn("--image-display-duration=5", cmd)
         self.assertEqual(cmd[0], "mpv")
+
+    def test_prefers_mpv_for_images_when_vlc_selected(self):
+        player = self._build_player()
+        with patch.object(player, "_build_mpv_image_command", return_value=["mpv", "img.jpg"]), patch.object(
+            player,
+            "_resolve_executable",
+            return_value=True,
+        ), patch.dict("os.environ", {"ALLOW_VLC_IMAGE_FALLBACK": "0"}, clear=False):
+            cmd = player._prefer_non_vlc_image_command("/tmp/example.jpg", ["vlc", "/tmp/example.jpg"])
+        self.assertEqual(cmd, ["mpv", "img.jpg"])
+
+    def test_skips_vlc_image_when_mpv_missing_and_fallback_disallowed(self):
+        player = self._build_player()
+        with patch.object(player, "_build_mpv_image_command", return_value=["mpv", "img.jpg"]), patch.object(
+            player,
+            "_resolve_executable",
+            return_value=False,
+        ), patch.dict("os.environ", {"ALLOW_VLC_IMAGE_FALLBACK": "0"}, clear=False):
+            cmd = player._prefer_non_vlc_image_command("/tmp/example.jpg", ["vlc", "/tmp/example.jpg"])
+        self.assertIsNone(cmd)
+
+    def test_allows_vlc_image_when_fallback_enabled(self):
+        player = self._build_player()
+        with patch.dict("os.environ", {"ALLOW_VLC_IMAGE_FALLBACK": "1"}, clear=False):
+            cmd = player._prefer_non_vlc_image_command("/tmp/example.jpg", ["vlc", "/tmp/example.jpg"])
+        self.assertEqual(cmd, ["vlc", "/tmp/example.jpg"])
 
     def test_python_viewer_disabled_without_display(self):
         with patch.dict("os.environ", {"DISPLAY": "", "WAYLAND_DISPLAY": ""}, clear=False):
