@@ -20,6 +20,7 @@ SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
 HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
 STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
+RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
@@ -679,14 +680,15 @@ def main():
 
     while True:
         try:
-            sio.connect(SERVER_URL)
+            if not sio.connected:
+                sio.connect(SERVER_URL)
             break
         except KeyboardInterrupt:
             print("🛑 Client interrupted during connect")
             return
         except Exception as e:
             print("Connection failed, retrying...", e)
-            time.sleep(3)
+            time.sleep(RECONNECT_RETRY_SEC)
 
     next_heartbeat_at = time.monotonic()
 
@@ -695,18 +697,34 @@ def main():
             idle_sec = run_state_cycle()
             now = time.monotonic()
             if now >= next_heartbeat_at:
-                sio.emit(
-                    "heartbeat",
-                    {
-                        "hostname": hostname,
-                        "current_state": current_state.value,
-                        "state": current_state.value,
-                        "idle_seconds": round(idle_sec, 1),
-                        "os_name": platform.system(),
-                        "content_name": playback.current_content_name(),
-                    },
-                )
-                print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
+                if not sio.connected:
+                    try:
+                        sio.connect(SERVER_URL)
+                    except Exception as reconnect_err:
+                        print(f"⚠️ Reconnect failed: {reconnect_err}")
+                        next_heartbeat_at = now + RECONNECT_RETRY_SEC
+                        time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
+                        continue
+
+                try:
+                    sio.emit(
+                        "heartbeat",
+                        {
+                            "hostname": hostname,
+                            "current_state": current_state.value,
+                            "state": current_state.value,
+                            "idle_seconds": round(idle_sec, 1),
+                            "os_name": platform.system(),
+                            "content_name": playback.current_content_name(),
+                        },
+                    )
+                    print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
+                except Exception as heartbeat_err:
+                    print(f"⚠️ Heartbeat send failed: {heartbeat_err}")
+                    next_heartbeat_at = now + RECONNECT_RETRY_SEC
+                    time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
+                    continue
+
                 next_heartbeat_at = now + HEARTBEAT_INTERVAL_SEC
             time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
         except KeyboardInterrupt:
