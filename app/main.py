@@ -364,6 +364,7 @@ def build_config(hostname):
             "fallback_media": fallback_media,
             "fallback_media_version": fallback_version,
             "loop_mode": "sequential",
+            "idle_timeout_sec": None,
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -373,6 +374,10 @@ def build_config(hostname):
         dg = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).first()
         if not dg:
             return base_config
+
+        group = db.query(Group).filter_by(id=dg.group_id).first()
+        if group and isinstance(group.idle_timeout_sec, int) and group.idle_timeout_sec > 0:
+            base_config["idle_timeout_sec"] = group.idle_timeout_sec
 
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
@@ -681,6 +686,7 @@ def list_groups():
                 {
                     "id": g.id,
                     "name": g.name,
+                    "idle_timeout_sec": g.idle_timeout_sec,
                     "playlist": {
                         "id": active_playlist[0],
                         "name": active_playlist[1],
@@ -697,9 +703,15 @@ def create_group():
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    name = (request.json or {}).get("name")
+    payload = request.json or {}
+    name = payload.get("name")
     if not name:
         return jsonify({"error": "name required"}), 400
+
+    idle_timeout_sec = payload.get("idle_timeout_sec")
+    if idle_timeout_sec is not None:
+        if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
+            return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
 
     db = db_session()
     try:
@@ -707,7 +719,7 @@ def create_group():
         if existing:
             return jsonify({"ok": True, "id": existing.id, "already_exists": True})
 
-        g = Group(name=name)
+        g = Group(name=name, idle_timeout_sec=idle_timeout_sec)
         db.add(g)
         db.commit()
         return jsonify({"ok": True, "id": g.id, "already_exists": False})
@@ -720,9 +732,15 @@ def update_group(group_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    name = ((request.json or {}).get("name") or "").strip()
+    payload = request.json or {}
+    name = (payload.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
+
+    idle_timeout_sec = payload.get("idle_timeout_sec")
+    if idle_timeout_sec is not None:
+        if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
+            return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
 
     db = db_session()
     try:
@@ -735,6 +753,7 @@ def update_group(group_id):
             return jsonify({"error": "group name already exists"}), 409
 
         group.name = name
+        group.idle_timeout_sec = idle_timeout_sec
         db.commit()
         return jsonify({"ok": True})
     finally:

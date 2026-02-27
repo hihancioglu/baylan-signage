@@ -87,12 +87,13 @@
               <div class="card-body">
                 <h2 class="h4 mb-3">Grup Yönetimi</h2>
                 <div class="row g-2 mb-3 align-items-center">
-                  <div class="col-12 col-md-5"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
+                  <div class="col-12 col-md-4"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
+                  <div class="col-12 col-md-3"><input id="new-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Idle Timeout (sn)" /></div>
                   <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Grup</th><th>Aktif Playlist</th><th>Cihazlar</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>Grup</th><th>Idle Timeout (sn)</th><th>Aktif Playlist</th><th>Cihazlar</th><th>İşlem</th></tr></thead>
                     <tbody id="groups-body"></tbody>
                   </table>
                 </div>
@@ -154,6 +155,7 @@
                 <div class="modal-body">
                   <input type="hidden" id="modal-group-id" />
                   <div class="mb-3"><label class="form-label">Grup Adı</label><input id="modal-group-name" class="form-control" /></div>
+                  <div class="mb-3"><label class="form-label">Idle Timeout (sn)</label><input id="modal-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Boş bırak: client varsayılanı" /></div>
                   <div><label class="form-label">Aktif Playlist</label><select id="modal-group-playlist" class="form-select"></select></div>
                 </div>
                 <div class="modal-footer">
@@ -416,7 +418,8 @@ function renderGroupsTable(){
 
     const tr = document.createElement('tr');
     const playlistName = g.playlist?.name || '-';
-    tr.innerHTML = `<td>${g.name}</td><td>${playlistName}</td><td><div class="mb-2">${groupDeviceBadges}</div><div class="d-flex gap-2"><select id="group-device-select-${g.id}" class="form-select form-select-sm"><option value="">Cihaz seçin</option>${deviceOptions}</select><button class="btn btn-sm btn-outline-success" onclick="addDeviceToGroup(${g.id})">Ekle</button></div></td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
+    const idleTimeoutText = g.idle_timeout_sec ? String(g.idle_timeout_sec) : 'Varsayılan';
+    tr.innerHTML = `<td>${g.name}</td><td>${idleTimeoutText}</td><td>${playlistName}</td><td><div class="mb-2">${groupDeviceBadges}</div><div class="d-flex gap-2"><select id="group-device-select-${g.id}" class="form-select form-select-sm"><option value="">Cihaz seçin</option>${deviceOptions}</select><button class="btn btn-sm btn-outline-success" onclick="addDeviceToGroup(${g.id})">Ekle</button></div></td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
 }
@@ -460,11 +463,23 @@ function renderPlaylistsTable(){
 
 async function createGroup(){
   const name = document.getElementById('new-group-name').value.trim();
+  const idleTimeoutRaw = document.getElementById('new-group-idle-timeout').value.trim();
   if(!name){ alert('Grup adı girin'); return; }
-  const resp = await jpost('/api/groups', {name});
+
+  let idleTimeoutSec = null;
+  if(idleTimeoutRaw){
+    idleTimeoutSec = Number(idleTimeoutRaw);
+    if(!Number.isInteger(idleTimeoutSec) || idleTimeoutSec <= 0){
+      alert('Idle timeout pozitif tam sayı olmalıdır');
+      return;
+    }
+  }
+
+  const resp = await jpost('/api/groups', {name, idle_timeout_sec: idleTimeoutSec});
   if(!resp.ok){ alert(resp.error || 'Grup oluşturulamadı'); return; }
   alert(resp.already_exists ? 'Grup zaten vardı' : 'Grup oluşturuldu');
   document.getElementById('new-group-name').value = '';
+  document.getElementById('new-group-idle-timeout').value = '';
   await loadGroupsPlaylists();
 }
 
@@ -474,6 +489,7 @@ function openGroupEditModal(groupId){
   document.getElementById('modal-group-id').value = group.id;
   document.getElementById('modal-group-name').value = group.name;
   document.getElementById('modal-group-playlist').value = group.playlist?.id ? String(group.playlist.id) : '';
+  document.getElementById('modal-group-idle-timeout').value = group.idle_timeout_sec ? String(group.idle_timeout_sec) : '';
   bootstrap.Modal.getOrCreateInstance(document.getElementById('group-edit-modal')).show();
 }
 
@@ -481,12 +497,22 @@ async function saveGroupModal(){
   const groupId = Number(document.getElementById('modal-group-id').value);
   const name = document.getElementById('modal-group-name').value.trim();
   const playlistId = Number(document.getElementById('modal-group-playlist').value);
+  const idleTimeoutRaw = document.getElementById('modal-group-idle-timeout').value.trim();
   if(!groupId || !name){
     alert('Grup adı zorunlu');
     return;
   }
 
-  const updateResp = await jpatch(`/api/groups/${groupId}`, {name});
+  let idleTimeoutSec = null;
+  if(idleTimeoutRaw){
+    idleTimeoutSec = Number(idleTimeoutRaw);
+    if(!Number.isInteger(idleTimeoutSec) || idleTimeoutSec <= 0){
+      alert('Idle timeout pozitif tam sayı olmalıdır');
+      return;
+    }
+  }
+
+  const updateResp = await jpatch(`/api/groups/${groupId}`, {name, idle_timeout_sec: idleTimeoutSec});
   if(!updateResp.ok){
     alert(updateResp.error || 'Grup güncellenemedi');
     return;

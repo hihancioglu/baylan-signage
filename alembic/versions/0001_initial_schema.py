@@ -39,6 +39,7 @@ def upgrade() -> None:
         "groups",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=128), nullable=False, unique=True),
+        sa.Column("idle_timeout_sec", sa.Integer(), nullable=True),
     )
 
     op.create_table(
