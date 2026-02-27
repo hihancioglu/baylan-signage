@@ -6,6 +6,13 @@ import sys
 from pathlib import Path
 
 
+def _safe_print(message: str) -> None:
+    try:
+        print(message)
+    except OSError:
+        pass
+
+
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
@@ -56,7 +63,7 @@ class BorderlessFullscreenPlayer:
             return False
 
         if os.name != "nt" and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
-            print("⚠️ Python image viewer pasif: DISPLAY/WAYLAND_DISPLAY bulunamadı")
+            _safe_print("⚠️ Python image viewer pasif: DISPLAY/WAYLAND_DISPLAY bulunamadı")
             return False
 
         try:
@@ -66,7 +73,7 @@ class BorderlessFullscreenPlayer:
             pygame.display.quit()
             return True
         except Exception as exc:
-            print(f"⚠️ Python image viewer pasif: pygame kullanılamıyor ({exc})")
+            _safe_print(f"⚠️ Python image viewer pasif: pygame kullanılamıyor ({exc})")
             return False
 
     @staticmethod
@@ -123,10 +130,10 @@ class BorderlessFullscreenPlayer:
             image_duration_sec=image_duration_sec,
         )
         if self._resolve_executable(mpv_fallback):
-            print("ℹ️ image oynatımında VLC yerine mpv kullanılacak")
+            _safe_print("ℹ️ image oynatımında VLC yerine mpv kullanılacak")
             return mpv_fallback
 
-        print("⚠️ VLC image fallback devre dışı ve mpv bulunamadı, medya atlandı")
+        _safe_print("⚠️ VLC image fallback devre dışı ve mpv bulunamadı, medya atlandı")
         return None
 
     def _pick_default_player_commands(self) -> tuple[str, str]:
@@ -224,12 +231,12 @@ class BorderlessFullscreenPlayer:
     ) -> bool:
         if not Path(media_path).exists():
             self._last_interrupted = False
-            print(f"⚠️ medya bulunamadı: {media_path}")
+            _safe_print(f"⚠️ medya bulunamadı: {media_path}")
             return False
 
         if not self.supports_media(media_path):
             self._last_interrupted = False
-            print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
+            _safe_print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
             return False
 
         self.stop()
@@ -261,7 +268,7 @@ class BorderlessFullscreenPlayer:
                     return False
 
             if not self._resolve_executable(command):
-                print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
+                _safe_print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
                 return False
 
             self._stop_requested = False
@@ -270,7 +277,7 @@ class BorderlessFullscreenPlayer:
             process.wait()
 
             if process.returncode != 0 and used_python_image_viewer:
-                print(
+                _safe_print(
                     "⚠️ Python image viewer başarısız oldu "
                     f"(exit={process.returncode}, media={media_path}), medya player fallback deneniyor"
                 )
@@ -291,7 +298,7 @@ class BorderlessFullscreenPlayer:
             return process.returncode == 0 or interrupted
         except Exception as exc:
             self._last_interrupted = False
-            print(f"⚠️ medya oynatma hatası: {exc}")
+            _safe_print(f"⚠️ medya oynatma hatası: {exc}")
             return False
         finally:
             if self._process is process:
