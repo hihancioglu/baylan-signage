@@ -142,6 +142,7 @@ class PlaybackController:
         self._worker = None
         self._sync_in_progress = False
         self._sync_percent = 0
+        self._waiting_for_media_logged = False
 
     def _on_sync_progress(self, progress: dict):
         with self._lock:
@@ -196,16 +197,20 @@ class PlaybackController:
             print("📦 Offline mode: last successful cache playlist ile devam ediliyor")
 
     def start(self):
-        if self._running:
+        if self._worker and self._worker.is_alive():
             return
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
+        print("▶️ playback worker started")
 
     def stop(self):
         self._running = False
         self.overlay.hide()
         self.player.stop()
+
+        if self._worker and self._worker.is_alive():
+            self._worker.join(timeout=1)
 
     def pause(self):
         self.overlay.hide()
@@ -213,29 +218,38 @@ class PlaybackController:
 
     def _run(self):
         index = 0
-        while self._running:
-            with self._lock:
-                playlist = self._effective_playlist(list(self._playlist))
-                sync_in_progress = self._sync_in_progress
+        try:
+            while self._running:
+                with self._lock:
+                    playlist = self._effective_playlist(list(self._playlist))
+                    sync_in_progress = self._sync_in_progress
 
-            if sync_in_progress:
-                if not self.overlay.is_active():
-                    self.player.stop()
-                    self.overlay.show(self._overlay_text())
-                else:
-                    self.overlay.update(self._overlay_text())
-            elif self.overlay.is_active():
-                self.overlay.hide()
+                if sync_in_progress:
+                    if not self.overlay.is_active():
+                        self.player.stop()
+                        self.overlay.show(self._overlay_text())
+                    else:
+                        self.overlay.update(self._overlay_text())
+                elif self.overlay.is_active():
+                    self.overlay.hide()
 
-            if not playlist:
-                time.sleep(1)
-                continue
+                if not playlist:
+                    if not self._waiting_for_media_logged:
+                        print("⚠️ oynatılacak medya yok, içerik bekleniyor")
+                        self._waiting_for_media_logged = True
+                    time.sleep(1)
+                    continue
 
-            media_path = playlist[index % len(playlist)]
-            ok = self.player.play_blocking(media_path)
-            if not ok:
-                print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
-            index = (index + 1) % len(playlist)
+                self._waiting_for_media_logged = False
+                media_path = playlist[index % len(playlist)]
+                ok = self.player.play_blocking(media_path)
+                if not ok:
+                    print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
+                index = (index + 1) % len(playlist)
+        except Exception as exc:
+            print(f"❌ playback worker crashed: {exc}")
+        finally:
+            self._running = False
 
 
 window_manager = _WindowManager()
