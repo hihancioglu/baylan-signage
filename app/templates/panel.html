@@ -92,7 +92,7 @@
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Grup</th><th>Aktif Playlist</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>Grup</th><th>Aktif Playlist</th><th>Cihazlar</th><th>İşlem</th></tr></thead>
                     <tbody id="groups-body"></tbody>
                   </table>
                 </div>
@@ -220,6 +220,7 @@
 const hdr = { 'Content-Type': 'application/json' };
 let cachedPlaylists = [];
 let cachedGroups = [];
+let cachedDevices = [];
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
 
@@ -251,9 +252,10 @@ async function jdelete(url){
 
 async function loadDevices(){
   const devices = await jget('/api/devices');
+  cachedDevices = devices || [];
   const body = document.getElementById('devices-body');
   body.innerHTML = '';
-  (devices||[]).forEach(d => {
+  (cachedDevices||[]).forEach(d => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${d.hostname||''}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${d.state_display||d.last_state||''}</td><td>${d.group||'-'}</td>`;
     body.appendChild(tr);
@@ -386,11 +388,47 @@ function renderGroupsTable(){
   const body = document.getElementById('groups-body');
   body.innerHTML = '';
   (cachedGroups || []).forEach(g => {
+    const groupDevices = (cachedDevices || []).filter(d => d.group === g.name);
+    const deviceOptions = (cachedDevices || [])
+      .filter(d => !d.group || d.group === g.name)
+      .map(d => `<option value="${d.hostname}">${d.hostname}${d.group === g.name ? ' (grupta)' : ''}</option>`)
+      .join('');
+    const groupDeviceBadges = groupDevices.length
+      ? groupDevices.map(d => `<span class="badge text-bg-light border d-inline-flex align-items-center gap-2 me-1 mb-1">${d.hostname}<button type="button" class="btn-close btn-close-sm" aria-label="Cihazı gruptan çıkar" onclick="removeDeviceFromGroup(decodeURIComponent('${encodeURIComponent(d.hostname)}'))"></button></span>`).join('')
+      : '<span class="text-secondary">Cihaz yok</span>';
+
     const tr = document.createElement('tr');
     const playlistName = g.playlist?.name || '-';
-    tr.innerHTML = `<td>${g.name}</td><td>${playlistName}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
+    tr.innerHTML = `<td>${g.name}</td><td>${playlistName}</td><td><div class="mb-2">${groupDeviceBadges}</div><div class="d-flex gap-2"><select id="group-device-select-${g.id}" class="form-select form-select-sm"><option value="">Cihaz seçin</option>${deviceOptions}</select><button class="btn btn-sm btn-outline-success" onclick="addDeviceToGroup(${g.id})">Ekle</button></div></td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
+}
+
+async function addDeviceToGroup(groupId){
+  const select = document.getElementById(`group-device-select-${groupId}`);
+  const hostname = select?.value;
+  if(!hostname){
+    alert('Eklenecek cihazı seçin');
+    return;
+  }
+  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}`, {});
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz gruba eklenemedi');
+    return;
+  }
+  await loadDevices();
+  renderGroupsTable();
+}
+
+async function removeDeviceFromGroup(hostname){
+  if(!hostname) return;
+  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}/group`);
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz gruptan çıkarılamadı');
+    return;
+  }
+  await loadDevices();
+  renderGroupsTable();
 }
 
 function renderPlaylistsTable(){
