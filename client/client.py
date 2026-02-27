@@ -39,6 +39,22 @@ ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().l
 DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
 
 
+def resolve_client_version() -> str:
+    manual_version = (os.getenv("CLIENT_BUILD_VERSION") or "").strip()
+    if manual_version:
+        return manual_version
+
+    version_source = Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+    try:
+        mtime = datetime.fromtimestamp(version_source.stat().st_mtime, tz=timezone.utc)
+        return f"build-{mtime.strftime('%Y%m%d%H%M%S')}"
+    except OSError:
+        return "build-unknown"
+
+
+CLIENT_VERSION = resolve_client_version()
+
+
 def print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
@@ -93,6 +109,7 @@ def log_info(message: str):
 
 setup_debug_logging()
 log_info(f"🧾 debug logs: {DEBUG_LOG_PATH}")
+log_info(f"🏷️ client version: {CLIENT_VERSION}")
 
 sio = socketio.Client(reconnection=True)
 hostname = socket.gethostname()
@@ -652,7 +669,7 @@ class SystemTrayController:
         self._icon = pystray.Icon(
             "baylan_signage_client",
             image,
-            "Baylan Signage Client",
+            f"Baylan Signage Client | {CLIENT_VERSION}",
             menu=pystray.Menu(pystray.MenuItem("Çıkış", on_quit)),
         )
         self._thread = threading.Thread(target=self._icon.run, daemon=True)
@@ -792,6 +809,7 @@ def connect():
             "department": os.getenv("CLIENT_DEPARTMENT", "URETIM"),
             "state": current_state.value,
             "os_name": platform.system(),
+            "agent_version": CLIENT_VERSION,
             "content_name": playback.current_content_name(),
         },
     )
@@ -958,6 +976,7 @@ def main():
                             "state": current_state.value,
                             "idle_seconds": round(idle_sec, 1),
                             "os_name": platform.system(),
+                            "agent_version": CLIENT_VERSION,
                             "content_name": playback.current_content_name(),
                         },
                     )

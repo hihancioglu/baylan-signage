@@ -126,6 +126,23 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(cfg["idle_mode_enabled"], False)
         self.assertEqual(cfg["content_enabled"], False)
 
+    def test_devices_api_includes_agent_version(self):
+        db = self.main.db_session()
+        try:
+            db.add(self.main.Device(hostname="pc-ver", agent_version="build-20260101120000", is_online=True))
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().get("/api/devices")
+
+        self.assertEqual(resp.status_code, 200)
+        devices = resp.get_json() or []
+        target = next((d for d in devices if d.get("hostname") == "pc-ver"), None)
+        self.assertIsNotNone(target)
+        self.assertEqual(target.get("agent_version"), "build-20260101120000")
+
 
 
 if __name__ == "__main__":

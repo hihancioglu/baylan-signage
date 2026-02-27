@@ -268,6 +268,7 @@ def _serialize_device(db, device):
         "idle_minutes": _idle_minutes_since_last_state(device),
         "state_display": _format_device_state(device),
         "last_content_name": device.last_content_name,
+        "agent_version": device.agent_version,
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
@@ -486,6 +487,7 @@ def handle_register(data):
         if incoming_state:
             device.last_state = incoming_state
             device.last_state_at = datetime.utcnow()
+        device.agent_version = data.get("agent_version") or device.agent_version
         device.os_version = data.get("os_name") or device.os_version
         device.last_content_name = data.get("content_name") or ""
         device.is_online = True
@@ -516,6 +518,7 @@ def handle_heartbeat(data):
             if incoming_state:
                 device.last_state = incoming_state
                 device.last_state_at = datetime.utcnow()
+            device.agent_version = data.get("agent_version") or device.agent_version
             device.os_version = data.get("os_name") or device.os_version
             device.last_content_name = data.get("content_name") or ""
             device.is_online = True
