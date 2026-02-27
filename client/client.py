@@ -43,7 +43,7 @@ def print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
     except OSError as exc:
-        if getattr(exc, "winerror", None) == 6:
+        if getattr(exc, "winerror", None) == 6 or getattr(exc, "errno", None) == 6:
             return
         raise
 
