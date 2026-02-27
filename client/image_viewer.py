@@ -1,4 +1,7 @@
 import json
+import importlib.util
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -70,8 +73,47 @@ def _load_image_surface(image_path: Path):
 
 def _run_agent_fallback() -> int:
     """Fallback: when built with wrong entrypoint, run the real agent instead of exiting."""
+    agent_main = None
+
+    client_py = Path(__file__).with_name("client.py")
+    if client_py.exists():
+        try:
+            spec = importlib.util.spec_from_file_location("baylan_agent_entry", client_py)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                candidate = getattr(module, "main", None)
+                if callable(candidate):
+                    agent_main = candidate
+        except Exception:
+            agent_main = None
+
+    if agent_main is None:
+        for module_name in ("client", "client.client"):
+            try:
+                imported = __import__(module_name, fromlist=["main"])
+                candidate = getattr(imported, "main", None)
+                if callable(candidate):
+                    agent_main = candidate
+                    break
+            except Exception:
+                continue
+
+    if agent_main is None and getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        sidecar = executable_dir / "client.py"
+        if sidecar.exists():
+            env = dict(os.environ)
+            env.setdefault("BAYLAN_IMAGE_VIEWER_FALLBACK", "1")
+            try:
+                return subprocess.call([sys.executable, str(sidecar)], env=env)
+            except Exception:
+                pass
+
     try:
-        from client import main as run_agent
+        run_agent = agent_main
+        if run_agent is None:
+            raise RuntimeError("client.main bulunamadı")
     except Exception as exc:
         print("Usage: python image_viewer.py <image_or_manifest_path> <duration_sec>")
         print(f"⚠️ agent fallback başlatılamadı: {exc}")
