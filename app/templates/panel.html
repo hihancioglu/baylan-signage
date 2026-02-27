@@ -17,6 +17,8 @@
     .offline { color: #dc2626; font-weight: 700; }
     .playlist-item { cursor: move; }
     .playlist-item.active { outline: 2px solid #0ea5e9; }
+    .mini-card { border: 1px solid #e2e8f0; border-radius: 12px; }
+    .mini-card .card-body { padding: 1rem; }
   </style>
 </head>
 <body>
@@ -27,7 +29,8 @@
         <div class="nav flex-column nav-pills gap-2" id="panel-menu" role="tablist" aria-orientation="vertical">
           <button class="nav-link active text-start" data-section="section-devices" type="button">Cihazlar</button>
           <button class="nav-link text-start" data-section="section-media" type="button">Medya Yönetimi</button>
-          <button class="nav-link text-start" data-section="section-playlist" type="button">Playlist Yönetimi</button>
+          <button class="nav-link text-start" data-section="section-groups" type="button">Grup Yönetimi</button>
+          <button class="nav-link text-start" data-section="section-playlists" type="button">Playlist Yönetimi</button>
           <button class="nav-link text-start" data-section="section-announcement" type="button">Acil Duyuru</button>
           <button class="nav-link text-start" data-section="section-logs" type="button">Operasyon Logları</button>
         </div>
@@ -79,88 +82,117 @@
             </div>
           </div>
 
-          <div class="tab-section d-none" id="section-playlist">
+          <div class="tab-section d-none" id="section-groups">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Grup Yönetimi</h2>
+                <p class="text-secondary mb-4">Grup işlemleri ve cihaz atamaları bu bölümde, playlist işlemleri ayrı menüde konumlandırıldı.</p>
+                <div class="row g-3">
+                  <div class="col-12 col-xl-6">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Yeni Grup</h3>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-8"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-xl-6">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Grup Düzenle</h3>
+                        <div class="row g-2 mb-2 align-items-center">
+                          <div class="col-12 col-md-6"><select id="group-edit-select" class="form-select" onchange="syncGroupEditField()"></select></div>
+                          <div class="col-12 col-md-6"><input id="group-new-name" class="form-control" placeholder="Grup adı" /></div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                          <button class="btn btn-primary" onclick="updateGroup()">Güncelle</button>
+                          <button class="btn btn-danger" onclick="deleteGroup()">Sil</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-xl-6">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Gruba Playlist Ata</h3>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-5"><select id="group-select" class="form-select"></select></div>
+                          <div class="col-12 col-md-5"><select id="playlist-select" class="form-select"></select></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="assignPlaylist()">Playlist Ata</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-xl-6">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Cihazı Gruba Ata</h3>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-5"><select id="device-select" class="form-select"></select></div>
+                          <div class="col-12 col-md-5"><select id="device-group-select" class="form-select"></select></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="assignDeviceToGroup()">Ata</button></div>
+                          <div class="col-auto"><button class="btn btn-outline-danger" onclick="removeDeviceFromGroup()">Çıkar</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-playlists">
             <div class="card panel-card">
               <div class="card-body">
                 <h2 class="h4 mb-3">Playlist Yönetimi</h2>
-
-                <div class="accordion" id="playlistAccordion">
-                  <div class="accordion-item">
-                    <h3 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#accCreate">Yeni Grup / Playlist</button></h3>
-                    <div id="accCreate" class="accordion-collapse collapse show" data-bs-parent="#playlistAccordion">
-                      <div class="accordion-body">
-                        <div class="row g-2">
-                          <div class="col-12 col-md-5"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
-                          <div class="w-100"></div>
-                          <div class="col-12 col-md-5"><input id="new-playlist-name" class="form-control" placeholder="Yeni playlist adı" /></div>
+                <div class="row g-3">
+                  <div class="col-12 col-xl-5">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Yeni Playlist</h3>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-8"><input id="new-playlist-name" class="form-control" placeholder="Yeni playlist adı" /></div>
                           <div class="col-auto"><button class="btn btn-primary" onclick="createPlaylist()">Playlist Ekle</button></div>
                         </div>
                       </div>
                     </div>
                   </div>
-
-                  <div class="accordion-item">
-                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accGroup">Grup İşlemleri</button></h3>
-                    <div id="accGroup" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
-                      <div class="accordion-body">
-                        <div class="row g-2 mb-3 align-items-center">
-                          <div class="col-12 col-md-4"><select id="group-edit-select" class="form-select" onchange="syncGroupEditField()"></select></div>
-                          <div class="col-12 col-md-4"><input id="group-new-name" class="form-control" placeholder="Grup adı" /></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="updateGroup()">Güncelle</button></div>
-                          <div class="col-auto"><button class="btn btn-danger" onclick="deleteGroup()">Sil</button></div>
-                        </div>
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-4"><select id="group-select" class="form-select"></select></div>
-                          <div class="col-12 col-md-4"><select id="playlist-select" class="form-select"></select></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="assignPlaylist()">Playlist'i Ata</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="accordion-item">
-                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accDevice">Cihaz Eşleme</button></h3>
-                    <div id="accDevice" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
-                      <div class="accordion-body">
-                        <div class="row g-2 align-items-center">
-                          <div class="col-12 col-md-4"><select id="device-select" class="form-select"></select></div>
-                          <div class="col-12 col-md-4"><select id="device-group-select" class="form-select"></select></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="assignDeviceToGroup()">Gruba Ata</button></div>
-                          <div class="col-auto"><button class="btn btn-danger" onclick="removeDeviceFromGroup()">Gruptan Çıkar</button></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="accordion-item">
-                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accPlaylistEdit">Playlist İçeriği</button></h3>
-                    <div id="accPlaylistEdit" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
-                      <div class="accordion-body">
-                        <div class="row g-2 mb-3 align-items-center">
-                          <div class="col-12 col-md-4"><select id="playlist-edit-select" class="form-select" onchange="syncPlaylistEditFields()"></select></div>
-                          <div class="col-12 col-md-3"><input id="playlist-new-name" class="form-control" placeholder="Playlist adı" /></div>
+                  <div class="col-12 col-xl-7">
+                    <div class="card mini-card h-100">
+                      <div class="card-body">
+                        <h3 class="h6">Playlist Bilgisi</h3>
+                        <div class="row g-2 mb-2 align-items-center">
+                          <div class="col-12 col-md-5"><select id="playlist-edit-select" class="form-select" onchange="syncPlaylistEditFields()"></select></div>
+                          <div class="col-12 col-md-4"><input id="playlist-new-name" class="form-control" placeholder="Playlist adı" /></div>
                           <div class="col-auto form-check mt-2 ms-2"><input id="playlist-enabled" class="form-check-input" type="checkbox" checked /> <label class="form-check-label" for="playlist-enabled">Aktif</label></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="updatePlaylist()">Kaydet</button></div>
                         </div>
-
-                        <div class="row g-2 mb-3 align-items-center">
-                          <div class="col-12 col-md-4"><select id="playlist-add-select" class="form-select"></select></div>
-                          <div class="col-12 col-md-4"><select id="media-select" class="form-select"></select></div>
-                          <div class="col-auto"><button class="btn btn-primary" onclick="addMediaToPlaylist()">Medya Ekle</button></div>
-                        </div>
-
-                        <div class="row g-2 mb-3">
-                          <div class="col-12 col-md-5"><select id="playlist-order-select" class="form-select" onchange="loadItems()"></select></div>
-                        </div>
-                        <ul id="playlist-items" class="list-group mb-3"></ul>
-                        <div class="d-flex gap-2 flex-wrap">
-                          <button class="btn btn-primary" onclick="saveOrder()">Sıralamayı Kaydet</button>
-                          <button class="btn btn-danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
-                        </div>
-                        <div class="form-text">Item seçmek için listeden bir videoya tıklayın.</div>
+                        <button class="btn btn-primary" onclick="updatePlaylist()">Kaydet</button>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div class="card mini-card mt-3">
+                  <div class="card-body">
+                    <h3 class="h6">Playlist İçeriği</h3>
+                    <div class="row g-2 mb-3 align-items-center">
+                      <div class="col-12 col-md-4"><select id="playlist-add-select" class="form-select"></select></div>
+                      <div class="col-12 col-md-4"><select id="media-select" class="form-select"></select></div>
+                      <div class="col-auto"><button class="btn btn-primary" onclick="addMediaToPlaylist()">Medya Ekle</button></div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                      <div class="col-12 col-md-5"><select id="playlist-order-select" class="form-select" onchange="loadItems()"></select></div>
+                    </div>
+                    <ul id="playlist-items" class="list-group mb-3"></ul>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <button class="btn btn-primary" onclick="saveOrder()">Sıralamayı Kaydet</button>
+                      <button class="btn btn-danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
+                    </div>
+                    <div class="form-text">Item seçmek için listeden bir medyaya tıklayın.</div>
                   </div>
                 </div>
               </div>
