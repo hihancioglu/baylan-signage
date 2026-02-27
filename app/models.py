@@ -26,6 +26,7 @@ class Group(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(128), unique=True, nullable=False)
+    idle_timeout_sec = Column(Integer)
 
 
 class Playlist(Base):

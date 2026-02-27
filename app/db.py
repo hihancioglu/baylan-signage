@@ -49,6 +49,9 @@ def ensure_sqlite_schema():
             "assigned_at": "DATETIME",
             "unassigned_at": "DATETIME",
         },
+        "groups": {
+            "idle_timeout_sec": "INTEGER",
+        },
     }
 
     Base.metadata.create_all(bind=engine)
