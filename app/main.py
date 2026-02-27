@@ -388,11 +388,6 @@ def build_config(hostname):
             if group.content_enabled is not None:
                 base_config["content_enabled"] = bool(group.content_enabled)
 
-        if device.idle_mode_enabled is not None:
-            base_config["idle_mode_enabled"] = bool(device.idle_mode_enabled)
-        if device.content_enabled is not None:
-            base_config["content_enabled"] = bool(device.content_enabled)
-
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
             return base_config
@@ -615,39 +610,7 @@ def update_device_alias(hostname):
 def update_device_settings(hostname):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
-
-    payload = request.get_json(silent=True) or {}
-    idle_mode_enabled = payload.get("idle_mode_enabled")
-    content_enabled = payload.get("content_enabled")
-
-    if idle_mode_enabled is not None and not isinstance(idle_mode_enabled, bool):
-        return jsonify({"error": "idle_mode_enabled must be a boolean"}), 400
-    if content_enabled is not None and not isinstance(content_enabled, bool):
-        return jsonify({"error": "content_enabled must be a boolean"}), 400
-
-    if idle_mode_enabled is None and content_enabled is None:
-        return jsonify({"error": "at least one setting required"}), 400
-
-    db = db_session()
-    try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
-        if not device:
-            return jsonify({"error": "device not found"}), 404
-
-        changed = False
-        if idle_mode_enabled is not None and device.idle_mode_enabled != idle_mode_enabled:
-            device.idle_mode_enabled = idle_mode_enabled
-            changed = True
-        if content_enabled is not None and device.content_enabled != content_enabled:
-            device.content_enabled = content_enabled
-            changed = True
-
-        if changed:
-            db.commit()
-            _emit_config_update([hostname])
-        return jsonify({"ok": True, "device": _serialize_device(db, device)})
-    finally:
-        db.close()
+    return jsonify({"error": "device-level settings are disabled; use group settings"}), 410
 
 
 @app.post("/api/devices/<hostname>/group/<int:group_id>")
