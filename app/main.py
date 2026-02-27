@@ -133,6 +133,7 @@ def panel_login():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username") or "").strip()
     password = str(payload.get("password") or "")
+    canonical_username = _canonical_ad_username(username)
 
     if not username or not password:
         return jsonify({"ok": False, "error": "Kullanıcı adı ve parola zorunlu"}), 400
@@ -140,7 +141,7 @@ def panel_login():
     if not _ad_signin(username, password):
         return jsonify({"ok": False, "error": "AD kimlik doğrulaması başarısız"}), 401
 
-    if AD_ALLOWED_USERS and username.lower() not in AD_ALLOWED_USERS:
+    if AD_ALLOWED_USERS and canonical_username not in AD_ALLOWED_USERS:
         return jsonify({"ok": False, "error": "Bu kullanıcı panel erişimi için yetkili değil"}), 403
 
     session["panel_authenticated"] = True
@@ -178,6 +179,7 @@ def _ad_signin(username: str, password: str) -> bool:
     server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None, connect_timeout=AD_CONNECT_TIMEOUT)
 
     if AD_BASE_DN:
+        search_username = _canonical_ad_username(username)
         bind_user = _normalize_ad_account_name(AD_BIND_DN) or None
         bind_password = AD_BIND_PASSWORD or None
         lookup = Connection(
@@ -191,7 +193,7 @@ def _ad_signin(username: str, password: str) -> bool:
         if not lookup.bind():
             return False
 
-        user_filter = AD_USER_SEARCH_FILTER.format(username=username)
+        user_filter = AD_USER_SEARCH_FILTER.format(username=search_username)
         if not lookup.search(AD_BASE_DN, user_filter, search_scope=SUBTREE, attributes=["distinguishedName"]):
             lookup.unbind()
             return False
@@ -241,6 +243,17 @@ def _normalize_ad_account_name(account_name: str) -> str:
         return normalized
     if "\\" not in normalized and "@" not in normalized and "=" not in normalized and AD_DOMAIN:
         return f"{AD_DOMAIN}\\{normalized}"
+    return normalized
+
+
+def _canonical_ad_username(username: str) -> str:
+    normalized = (username or "").strip().lower()
+    if not normalized:
+        return ""
+    if "\\" in normalized:
+        return normalized.split("\\", 1)[1]
+    if "@" in normalized:
+        return normalized.split("@", 1)[0]
     return normalized
 
 
