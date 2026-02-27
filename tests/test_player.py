@@ -94,6 +94,25 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             player = BorderlessFullscreenPlayer()
         self.assertFalse(player._python_image_viewer_supported)
 
+    def test_build_python_image_command_prefers_frozen_viewer_executable(self):
+        player = self._build_player()
+        with patch("client.player.getattr", return_value=True), patch.object(
+            player,
+            "_find_frozen_image_viewer_executable",
+            return_value="C:/app/image_viewer.exe",
+        ):
+            cmd = player._build_python_image_command("/tmp/example.jpg", image_duration_sec=7)
+        self.assertEqual(cmd, ["C:/app/image_viewer.exe", "/tmp/example.jpg", "7"])
+
+    def test_detect_python_viewer_support_disabled_when_frozen_viewer_missing(self):
+        with patch("client.player.getattr", return_value=True), patch.object(
+            BorderlessFullscreenPlayer,
+            "_find_frozen_image_viewer_executable",
+            return_value=None,
+        ):
+            player = BorderlessFullscreenPlayer()
+        self.assertFalse(player._python_image_viewer_supported)
+
 
 if __name__ == "__main__":
     unittest.main()

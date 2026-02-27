@@ -58,8 +58,26 @@ class BorderlessFullscreenPlayer:
         self._python_image_viewer_runtime_enabled = True
         self._last_interrupted = False
 
+    @staticmethod
+    def _find_frozen_image_viewer_executable() -> str | None:
+        if not getattr(sys, "frozen", False):
+            return None
+
+        executable_dir = Path(sys.executable).resolve().parent
+        for candidate in ("image_viewer.exe", "image_viewer"):
+            viewer_path = executable_dir / candidate
+            if viewer_path.exists() and viewer_path.is_file():
+                return str(viewer_path)
+        return None
+
     def _detect_python_image_viewer_support(self) -> bool:
         if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+            return False
+
+        if getattr(sys, "frozen", False) and self._find_frozen_image_viewer_executable() is None:
+            _safe_print(
+                "⚠️ Python image viewer pasif: frozen build içinde bağımsız image_viewer executable bulunamadı"
+            )
             return False
 
         if os.name != "nt" and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
@@ -100,6 +118,9 @@ class BorderlessFullscreenPlayer:
     def _build_python_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         viewer_path = Path(__file__).with_name("image_viewer.py")
+        frozen_viewer = self._find_frozen_image_viewer_executable()
+        if frozen_viewer:
+            return [frozen_viewer, media_path, str(duration)]
         return [sys.executable, str(viewer_path), media_path, str(duration)]
 
     @staticmethod
