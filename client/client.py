@@ -434,6 +434,14 @@ class PlaybackController:
         finally:
             self._running = False
 
+    def current_content_name(self) -> str:
+        with self._lock:
+            item = dict(self._active_item) if isinstance(self._active_item, dict) else None
+        if not item:
+            return ""
+        media_path = str(item.get("local_path") or "").strip()
+        return Path(media_path).name if media_path else ""
+
 
 window_manager = _WindowManager()
 playback = PlaybackController()
@@ -562,6 +570,9 @@ def connect():
             "ip": socket.gethostbyname(hostname),
             "username": os.getenv("CLIENT_USERNAME", "test_user"),
             "department": os.getenv("CLIENT_DEPARTMENT", "URETIM"),
+            "state": current_state.value,
+            "os_name": platform.system(),
+            "content_name": playback.current_content_name(),
         },
     )
 
@@ -689,7 +700,10 @@ def main():
                     {
                         "hostname": hostname,
                         "current_state": current_state.value,
+                        "state": current_state.value,
                         "idle_seconds": round(idle_sec, 1),
+                        "os_name": platform.system(),
+                        "content_name": playback.current_content_name(),
                     },
                 )
                 print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")

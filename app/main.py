@@ -208,6 +208,18 @@ def _normalize_ad_account_name(account_name: str) -> str:
     return normalized
 
 
+def _format_device_state(device) -> str:
+    state = (device.last_state or "").upper()
+    content_name = (device.last_content_name or "").strip()
+    os_name = (device.os_version or "").lower()
+
+    if state in {"IDLE", "IDLE_PENDING", "PLAYING"} and content_name:
+        return content_name
+    if "windows" in os_name:
+        return "Windows"
+    return device.last_state or ""
+
+
 def _canonical_ad_username(username: str) -> str:
     normalized = (username or "").strip().lower()
     if not normalized:
@@ -235,6 +247,8 @@ def _serialize_device(db, device):
         "is_online": bool(device.is_online),
         "last_seen": device.last_seen.isoformat() if device.last_seen else None,
         "last_state": device.last_state,
+        "state_display": _format_device_state(device),
+        "last_content_name": device.last_content_name,
         "group": active_group[0] if active_group else None,
     }
 
@@ -435,7 +449,9 @@ def handle_register(data):
         device.ip = data.get("ip")
         device.username = data.get("username")
         device.department = data.get("department")
-        device.last_state = data.get("state") or device.last_state
+        device.last_state = data.get("state") or data.get("current_state") or device.last_state
+        device.os_version = data.get("os_name") or device.os_version
+        device.last_content_name = data.get("content_name") or ""
         device.is_online = True
         device.last_seen = datetime.utcnow()
 
@@ -460,7 +476,9 @@ def handle_heartbeat(data):
         device = db.query(Device).filter_by(hostname=hostname).first()
         if device:
             device.last_seen = datetime.utcnow()
-            device.last_state = data.get("state") or device.last_state
+            device.last_state = data.get("state") or data.get("current_state") or device.last_state
+            device.os_version = data.get("os_name") or device.os_version
+            device.last_content_name = data.get("content_name") or ""
             device.is_online = True
             db.commit()
     finally:
