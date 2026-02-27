@@ -237,6 +237,55 @@ class DownloadStatusOverlay:
         root.mainloop()
 
 
+class IdleBackgroundOverlay:
+    def __init__(self):
+        self._active = False
+        self._lock = threading.Lock()
+        self._thread = None
+
+    def show(self):
+        if not platform.system().lower().startswith("win"):
+            return
+
+        with self._lock:
+            if self._active:
+                return
+            self._active = True
+
+        self._thread = threading.Thread(target=self._run, daemon=True, name="idle-blackout")
+        self._thread.start()
+
+    def hide(self):
+        with self._lock:
+            self._active = False
+
+    def _run(self):
+        try:
+            import tkinter as tk
+        except Exception as exc:
+            logging.warning("IdleBackgroundOverlay başlatılamadı: %s", exc)
+            with self._lock:
+                self._active = False
+            return
+
+        root = tk.Tk()
+        root.configure(bg="black")
+        root.attributes("-fullscreen", True)
+        root.overrideredirect(True)
+        root.title("Baylan Idle Background")
+
+        def refresh():
+            with self._lock:
+                active = self._active
+            if not active:
+                root.destroy()
+                return
+            root.after(200, refresh)
+
+        root.after(50, refresh)
+        root.mainloop()
+
+
 class PlaybackController:
     def __init__(self):
         self.media_manager = MediaManager(cache_root=os.getenv("MEDIA_CACHE_DIR", "client/cache"))
@@ -517,6 +566,7 @@ class PlaybackController:
 
 window_manager = _WindowManager()
 playback = PlaybackController()
+idle_background = IdleBackgroundOverlay()
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
@@ -816,12 +866,14 @@ def on_command(data):
 
 def run_state_cycle():
     if emergency_active:
+        idle_background.hide()
         if current_state != ClientState.EMERGENCY:
             set_state(ClientState.EMERGENCY, "emergency_policy_enforced")
         playback.pause()
         return get_idle_seconds()
 
     if not content_enabled:
+        idle_background.hide()
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING}:
             playback.stop()
             set_state(ClientState.ACTIVE, "content_disabled")
@@ -830,6 +882,7 @@ def run_state_cycle():
     idle_sec = get_idle_seconds()
 
     if not idle_mode_enabled:
+        idle_background.hide()
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING, ClientState.RETURNING}:
             playback.stop()
             return_to_erp_window()
@@ -837,9 +890,11 @@ def run_state_cycle():
         return idle_sec
 
     if current_state == ClientState.ACTIVE and idle_sec >= idle_timeout_sec:
+        idle_background.show()
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")
 
     if current_state == ClientState.IDLE_PENDING:
+        idle_background.show()
         playback.start()
         set_state(ClientState.PLAYING, "player_started")
 
@@ -852,6 +907,7 @@ def run_state_cycle():
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:
+        idle_background.hide()
         playback.stop()
         return_to_erp_window()
         set_state(ClientState.ACTIVE, "returned_to_erp")
@@ -923,6 +979,7 @@ def main():
             time.sleep(max(RECONNECT_RETRY_SEC, STATE_CHECK_INTERVAL_SEC))
             continue
 
+    idle_background.hide()
     playback.stop()
     try:
         sio.disconnect()
