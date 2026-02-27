@@ -772,45 +772,55 @@ def _apply_update_package(local_file: Path):
 
         current_exe = Path(sys.executable).resolve()
         work_dir = current_exe.parent
-        launcher_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.ps1"
+        launcher_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.cmd"
         launcher_script.parent.mkdir(parents=True, exist_ok=True)
-        escaped_src = str(local_file).replace("'", "''")
-        escaped_dst = str(current_exe).replace("'", "''")
-        escaped_workdir = str(work_dir).replace("'", "''")
+        escaped_dst_for_ps = str(current_exe).replace("'", "''")
+        escaped_workdir_for_ps = str(work_dir).replace("'", "''")
         script = "\n".join(
             [
-                "$ErrorActionPreference = 'SilentlyContinue'",
-                f"$source = '{escaped_src}'",
-                f"$target = '{escaped_dst}'",
-                f"$workingDir = '{escaped_workdir}'",
-                f"$oldPid = {os.getpid()}",
-                "for ($i = 0; $i -lt 60; $i++) {",
-                "  if (-not (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) { break }",
-                "  Start-Sleep -Milliseconds 500",
-                "}",
-                "for ($attempt = 0; $attempt -lt 20; $attempt++) {",
-                "  Copy-Item -Path $source -Destination $target -Force",
-                "  if ($?) { break }",
-                "  Start-Sleep -Seconds 1",
-                "}",
-                "Start-Process -FilePath $target -WorkingDirectory $workingDir",
-                "Remove-Item -Path $source -Force",
-                "Remove-Item -Path $PSCommandPath -Force",
+                "@echo off",
+                "setlocal EnableExtensions",
+                f"set \"SRC={local_file}\"",
+                f"set \"DST={current_exe}\"",
+                f"set \"WORK_DIR={work_dir}\"",
+                f"set \"OLD_PID={os.getpid()}\"",
+                "set /a WAIT_ATTEMPTS=0",
+                ":wait_for_old_process",
+                "tasklist /FI \"PID eq %OLD_PID%\" 2>nul | find /I \"%OLD_PID%\" >nul",
+                "if not errorlevel 1 goto wait_loop",
+                "goto copy_start",
+                ":wait_loop",
+                "set /a WAIT_ATTEMPTS+=1",
+                "if %WAIT_ATTEMPTS% GEQ 90 goto copy_start",
+                "timeout /t 1 /nobreak >nul",
+                "goto wait_for_old_process",
+                ":copy_start",
+                "set /a COPY_ATTEMPTS=0",
+                ":copy_retry",
+                "copy /Y \"%SRC%\" \"%DST%\" >nul 2>&1",
+                "if errorlevel 1 (",
+                "  set /a COPY_ATTEMPTS+=1",
+                "  if %COPY_ATTEMPTS% LSS 30 (",
+                "    timeout /t 1 /nobreak >nul",
+                "    goto copy_retry",
+                "  )",
+                ")",
+                "start \"\" /D \"%WORK_DIR%\" \"%DST%\" >nul 2>&1",
+                "if errorlevel 1 (",
+                "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '"
+                + escaped_dst_for_ps
+                + "' -WorkingDirectory '"
+                + escaped_workdir_for_ps
+                + "'\" >nul 2>&1",
+                ")",
+                "del \"%SRC%\" >nul 2>&1",
+                "del \"%~f0\" >nul 2>&1",
             ]
         ) + "\n"
         launcher_script.write_text(script, encoding="utf-8")
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-File",
-                str(launcher_script),
-            ],
+            ["cmd", "/c", str(launcher_script)],
             cwd=str(work_dir),
             creationflags=creation_flags,
         )
