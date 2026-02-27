@@ -55,9 +55,11 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 ensure_sqlite_schema()
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
+UPDATE_ROOT = Path(os.getenv("UPDATE_ROOT", "data/updates")).resolve()
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+UPDATE_ROOT.mkdir(parents=True, exist_ok=True)
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
@@ -91,6 +93,28 @@ def _media_kind_from_path(path: str) -> str:
     if suffix in ALLOWED_IMAGE_EXTENSIONS:
         return "image"
     return "video"
+
+
+def _safe_update_filename(original_name: str) -> str:
+    ext = Path(original_name or "").suffix.lower() or ".bin"
+    return f"{uuid.uuid4().hex}{ext}"
+
+
+def _build_updater_payload(db):
+    version = _get_setting(db, "updater_version")
+    file_name = _get_setting(db, "updater_file_name")
+    file_path = _get_setting(db, "updater_file_path")
+    if not (version and file_name and file_path):
+        return None
+
+    return {
+        "version": version,
+        "url": url_for("download_update_file", file_path=file_path, _external=True),
+        "sha256": _get_setting(db, "updater_sha256") or "",
+        "file_name": file_name,
+        "size": int(_get_setting(db, "updater_size") or 0),
+        "published_at": _get_setting(db, "updater_published_at"),
+    }
 
 
 def _get_setting(db, key: str, default: str | None = None) -> str | None:
@@ -155,6 +179,11 @@ def panel_login():
 @app.get("/media/<path:asset_path>")
 def serve_media(asset_path):
     return send_from_directory(MEDIA_ROOT, asset_path)
+
+
+@app.get("/updates/<path:file_path>")
+def download_update_file(file_path):
+    return send_from_directory(UPDATE_ROOT, file_path)
 
 
 def db_session():
@@ -388,6 +417,7 @@ def build_config(hostname):
             "idle_timeout_sec": None,
             "idle_mode_enabled": True,
             "content_enabled": True,
+            "updater": _build_updater_payload(db),
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -1025,6 +1055,69 @@ def upload_media_asset():
                 },
             }
         )
+    finally:
+        db.close()
+
+
+@app.get("/api/updater")
+def get_updater_settings():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        payload = _build_updater_payload(db)
+        return jsonify({"ok": True, "release": payload})
+    finally:
+        db.close()
+
+
+@app.post("/api/updater/upload")
+def upload_client_update():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    version = str(request.form.get("version") or "").strip()
+    uploaded = request.files.get("file")
+    if not version:
+        return jsonify({"error": "version required"}), 400
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "file required"}), 400
+
+    stored_name = _safe_update_filename(uploaded.filename)
+    relative_path = f"{version}/{stored_name}"
+    stored_path = UPDATE_ROOT / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    uploaded.save(stored_path)
+
+    try:
+        checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
+        file_size = stored_path.stat().st_size
+        published_at = datetime.now(timezone.utc).isoformat()
+    except Exception as exc:
+        stored_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+
+    db = db_session()
+    try:
+        old_relative_path = _get_setting(db, "updater_file_path")
+
+        _set_setting(db, "updater_version", version)
+        _set_setting(db, "updater_file_name", uploaded.filename)
+        _set_setting(db, "updater_file_path", relative_path)
+        _set_setting(db, "updater_sha256", checksum)
+        _set_setting(db, "updater_size", str(file_size))
+        _set_setting(db, "updater_published_at", published_at)
+        db.commit()
+
+        if old_relative_path and old_relative_path != relative_path:
+            old_path = UPDATE_ROOT / old_relative_path
+            old_path.unlink(missing_ok=True)
+
+        hostnames = [row[0] for row in db.query(Device.hostname).all()]
+        _emit_config_update(hostnames)
+
+        return jsonify({"ok": True, "release": _build_updater_payload(db)})
     finally:
         db.close()
 
