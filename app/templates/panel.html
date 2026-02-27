@@ -4,141 +4,204 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Signage Panel</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #0f172a; color: #e2e8f0; }
-    h2 { margin-top: 28px; }
-    h3 { margin: 14px 0 8px; }
-    .card { background: #1e293b; padding: 16px; border-radius: 10px; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; }
-    td, th { border-bottom: 1px solid #334155; padding: 8px; text-align: left; }
-    .online { color: #22c55e; font-weight: bold; }
-    .offline { color: #ef4444; font-weight: bold; }
-    ul { list-style: none; padding: 0; margin: 8px 0; }
-    li { background: #334155; margin: 6px 0; padding: 8px; border-radius: 6px; cursor: move; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    input, select, button, textarea { padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; }
-    button { cursor: pointer; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .danger { border-color: #7f1d1d; background: #450a0a; }
-    .muted { color: #94a3b8; font-size: 12px; }
-    .w-full { width: 100%; }
+    body { background: #f1f5f9; }
+    .sidebar { min-height: 100vh; background: #0f172a; }
+    .sidebar .nav-link { color: #cbd5e1; border-radius: .65rem; }
+    .sidebar .nav-link:hover { color: #f8fafc; background: rgba(148, 163, 184, .2); }
+    .sidebar .nav-link.active { color: #0f172a; background: #38bdf8; font-weight: 600; }
+    .content-wrap { max-width: 1100px; }
+    .panel-card { border: 0; border-radius: 14px; box-shadow: 0 8px 25px rgba(15, 23, 42, .08); }
+    .online { color: #16a34a; font-weight: 700; }
+    .offline { color: #dc2626; font-weight: 700; }
+    .playlist-item { cursor: move; }
+    .playlist-item.active { outline: 2px solid #0ea5e9; }
   </style>
 </head>
 <body>
-  <h1>Signage Operasyon Paneli</h1>
+  <div class="container-fluid px-0">
+    <div class="row g-0">
+      <aside class="col-12 col-lg-3 col-xl-2 sidebar p-3 p-lg-4">
+        <h1 class="h4 text-white mb-4">Signage Panel</h1>
+        <div class="nav flex-column nav-pills gap-2" id="panel-menu" role="tablist" aria-orientation="vertical">
+          <button class="nav-link active text-start" data-section="section-devices" type="button">Cihazlar</button>
+          <button class="nav-link text-start" data-section="section-media" type="button">Medya Yönetimi</button>
+          <button class="nav-link text-start" data-section="section-playlist" type="button">Playlist Yönetimi</button>
+          <button class="nav-link text-start" data-section="section-announcement" type="button">Acil Duyuru</button>
+          <button class="nav-link text-start" data-section="section-logs" type="button">Operasyon Logları</button>
+        </div>
+      </aside>
 
-  <div class="card">
-    <h2>Cihazlar</h2>
-    <table>
-      <thead><tr><th>Hostname</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th></tr></thead>
-      <tbody id="devices-body"></tbody>
-    </table>
+      <main class="col-12 col-lg-9 col-xl-10 p-3 p-md-4 p-xl-5">
+        <div class="content-wrap">
+          <div class="tab-section" id="section-devices">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Cihazlar</h2>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>Hostname</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th></tr></thead>
+                    <tbody id="devices-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-media">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Medya Yükleme ve Havuz</h2>
+                <div class="row g-2 align-items-center mb-2">
+                  <div class="col-12 col-md-5"><input id="media-file" class="form-control" type="file" accept="video/*,image/*,.svg" /></div>
+                  <div class="col-auto"><button class="btn btn-primary" onclick="uploadVideo()">Medyayı Yükle</button></div>
+                  <div class="col-auto"><button class="btn btn-outline-secondary" onclick="loadMedia()">Listeyi Yenile</button></div>
+                </div>
+                <p class="text-secondary small">Yüklenen video/görseller medya listesine eklenir.</p>
+
+                <h3 class="h5 mt-4">Sistemdeki Medyalar</h3>
+                <div class="table-responsive mb-4">
+                  <table class="table table-striped align-middle">
+                    <thead class="table-light"><tr><th>Ad</th><th>Boyut</th><th>Eklenme</th><th>İşlem</th></tr></thead>
+                    <tbody id="media-body"></tbody>
+                  </table>
+                </div>
+
+                <h3 class="h5">Fallback Medya</h3>
+                <div class="row g-2 align-items-center">
+                  <div class="col-12 col-md-5"><select id="fallback-media-select" class="form-select"></select></div>
+                  <div class="col-auto"><button class="btn btn-primary" onclick="saveFallbackMedia()">Kaydet</button></div>
+                  <div class="col-auto"><button class="btn btn-outline-secondary" onclick="clearFallbackSelection()">Temizle</button></div>
+                </div>
+                <div class="text-secondary small mt-2" id="fallback-current">Mevcut fallback: -</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-playlist">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Playlist Yönetimi</h2>
+
+                <div class="accordion" id="playlistAccordion">
+                  <div class="accordion-item">
+                    <h3 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#accCreate">Yeni Grup / Playlist</button></h3>
+                    <div id="accCreate" class="accordion-collapse collapse show" data-bs-parent="#playlistAccordion">
+                      <div class="accordion-body">
+                        <div class="row g-2">
+                          <div class="col-12 col-md-5"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
+                          <div class="w-100"></div>
+                          <div class="col-12 col-md-5"><input id="new-playlist-name" class="form-control" placeholder="Yeni playlist adı" /></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="createPlaylist()">Playlist Ekle</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="accordion-item">
+                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accGroup">Grup İşlemleri</button></h3>
+                    <div id="accGroup" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
+                      <div class="accordion-body">
+                        <div class="row g-2 mb-3 align-items-center">
+                          <div class="col-12 col-md-4"><select id="group-edit-select" class="form-select" onchange="syncGroupEditField()"></select></div>
+                          <div class="col-12 col-md-4"><input id="group-new-name" class="form-control" placeholder="Grup adı" /></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="updateGroup()">Güncelle</button></div>
+                          <div class="col-auto"><button class="btn btn-danger" onclick="deleteGroup()">Sil</button></div>
+                        </div>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-4"><select id="group-select" class="form-select"></select></div>
+                          <div class="col-12 col-md-4"><select id="playlist-select" class="form-select"></select></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="assignPlaylist()">Playlist'i Ata</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="accordion-item">
+                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accDevice">Cihaz Eşleme</button></h3>
+                    <div id="accDevice" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
+                      <div class="accordion-body">
+                        <div class="row g-2 align-items-center">
+                          <div class="col-12 col-md-4"><select id="device-select" class="form-select"></select></div>
+                          <div class="col-12 col-md-4"><select id="device-group-select" class="form-select"></select></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="assignDeviceToGroup()">Gruba Ata</button></div>
+                          <div class="col-auto"><button class="btn btn-danger" onclick="removeDeviceFromGroup()">Gruptan Çıkar</button></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="accordion-item">
+                    <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accPlaylistEdit">Playlist İçeriği</button></h3>
+                    <div id="accPlaylistEdit" class="accordion-collapse collapse" data-bs-parent="#playlistAccordion">
+                      <div class="accordion-body">
+                        <div class="row g-2 mb-3 align-items-center">
+                          <div class="col-12 col-md-4"><select id="playlist-edit-select" class="form-select" onchange="syncPlaylistEditFields()"></select></div>
+                          <div class="col-12 col-md-3"><input id="playlist-new-name" class="form-control" placeholder="Playlist adı" /></div>
+                          <div class="col-auto form-check mt-2 ms-2"><input id="playlist-enabled" class="form-check-input" type="checkbox" checked /> <label class="form-check-label" for="playlist-enabled">Aktif</label></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="updatePlaylist()">Kaydet</button></div>
+                        </div>
+
+                        <div class="row g-2 mb-3 align-items-center">
+                          <div class="col-12 col-md-4"><select id="playlist-add-select" class="form-select"></select></div>
+                          <div class="col-12 col-md-4"><select id="media-select" class="form-select"></select></div>
+                          <div class="col-auto"><button class="btn btn-primary" onclick="addMediaToPlaylist()">Medya Ekle</button></div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                          <div class="col-12 col-md-5"><select id="playlist-order-select" class="form-select" onchange="loadItems()"></select></div>
+                        </div>
+                        <ul id="playlist-items" class="list-group mb-3"></ul>
+                        <div class="d-flex gap-2 flex-wrap">
+                          <button class="btn btn-primary" onclick="saveOrder()">Sıralamayı Kaydet</button>
+                          <button class="btn btn-danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
+                        </div>
+                        <div class="form-text">Item seçmek için listeden bir videoya tıklayın.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-announcement">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Acil Duyuru</h2>
+                <div class="row g-2 align-items-center mb-2">
+                  <div class="col-12 col-md-3"><select id="announce-target" class="form-select" onchange="onTargetChange()"><option value="all">Tüm Cihazlar</option><option value="group">Grup</option><option value="devices">Seçili Cihazlar</option></select></div>
+                  <div class="col-12 col-md-4"><input id="announce-target-value" class="form-control" placeholder="grup id veya cihaz1,cihaz2" /></div>
+                  <div class="col-12 col-md-2"><input id="announce-ttl" class="form-control" type="number" value="120" min="10" /></div>
+                </div>
+                <textarea id="announce-message" rows="3" class="form-control mb-2" placeholder="Duyuru metni"></textarea>
+                <div class="mb-2"><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
+                <button class="btn btn-danger" onclick="pushAnnouncement()">Push</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-logs">
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Operasyon Logları</h2>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>Komut</th><th>Hedef</th><th>Ack Oranı</th><th>Hata Detayı</th></tr></thead>
+                    <tbody id="log-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>Medya Yükleme ve Havuz</h2>
-    <div class="row">
-      <input id="media-file" type="file" accept="video/*,image/*,.svg" />
-      <button onclick="uploadVideo()">Medyayı Yükle</button>
-      <button onclick="loadMedia()">Listeyi Yenile</button>
-    </div>
-    <small>Yüklenen video/görseller medya listesine eklenir.</small>
-
-    <h3>Sistemdeki Medyalar</h3>
-    <table>
-      <thead><tr><th>Ad</th><th>Boyut</th><th>Eklenme</th><th>İşlem</th></tr></thead>
-      <tbody id="media-body"></tbody>
-    </table>
-
-
-    <h3>Fallback Medya (Playlist yoksa göster)</h3>
-    <div class="row">
-      <select id="fallback-media-select"></select>
-      <button onclick="saveFallbackMedia()">Fallback Olarak Kaydet</button>
-      <button onclick="clearFallbackSelection()">Seçimi Temizle</button>
-    </div>
-    <div class="muted" id="fallback-current">Mevcut fallback: -</div>
-  </div>
-  <div class="card">
-    <h2>Playlist Yönetimi</h2>
-
-    <h3>Yeni Grup / Playlist Oluştur</h3>
-    <div class="row">
-      <input id="new-group-name" placeholder="Yeni grup adı" />
-      <button onclick="createGroup()">Grup Ekle</button>
-      <input id="new-playlist-name" placeholder="Yeni playlist adı" />
-      <button onclick="createPlaylist()">Playlist Ekle</button>
-    </div>
-
-    <h3>Grup Düzenleme / Silme</h3>
-    <div class="row">
-      <select id="group-edit-select" onchange="syncGroupEditField()"></select>
-      <input id="group-new-name" placeholder="Grup adı" />
-      <button onclick="updateGroup()">Grup Adını Güncelle</button>
-      <button class="danger" onclick="deleteGroup()">Grubu Sil</button>
-    </div>
-
-    <h3>Playlist'i Gruba Ata</h3>
-    <div class="row">
-      <select id="group-select"></select>
-      <select id="playlist-select"></select>
-      <button onclick="assignPlaylist()">Gruba Ata</button>
-    </div>
-
-    <h3>Cihazı Gruba Ata / Çıkar</h3>
-    <div class="row">
-      <select id="device-select"></select>
-      <select id="device-group-select"></select>
-      <button onclick="assignDeviceToGroup()">Cihazı Gruba Ata</button>
-      <button class="danger" onclick="removeDeviceFromGroup()">Cihazı Gruptan Çıkar</button>
-    </div>
-
-    <h3>Playlist Düzenle (Ad / Aktiflik)</h3>
-    <div class="row">
-      <select id="playlist-edit-select" onchange="syncPlaylistEditFields()"></select>
-      <input id="playlist-new-name" placeholder="Playlist adı" />
-      <label><input id="playlist-enabled" type="checkbox" checked /> Aktif</label>
-      <button onclick="updatePlaylist()">Kaydet</button>
-    </div>
-
-    <h3>Playlist'e Video Ekle</h3>
-    <div class="row">
-      <select id="playlist-add-select"></select>
-      <select id="media-select"></select>
-      <button onclick="addMediaToPlaylist()">Ekle</button>
-    </div>
-
-    <h3>Playlist Item Sıralama / Silme</h3>
-    <select id="playlist-order-select" onchange="loadItems()"></select>
-    <ul id="playlist-items"></ul>
-    <div class="row">
-      <button onclick="saveOrder()">Sıralamayı Kaydet</button>
-      <button class="danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
-    </div>
-    <div class="muted">Item seçmek için listeden bir videoya tıklayın.</div>
-  </div>
-
-  <div class="card">
-    <h2>Acil Duyuru</h2>
-    <select id="announce-target" onchange="onTargetChange()">
-      <option value="all">Tüm Cihazlar</option>
-      <option value="group">Grup</option>
-      <option value="devices">Seçili Cihazlar</option>
-    </select>
-    <input id="announce-target-value" placeholder="grup id veya cihaz1,cihaz2" />
-    <input id="announce-ttl" type="number" value="120" min="10" />
-    <textarea id="announce-message" rows="3" class="w-full" placeholder="Duyuru metni"></textarea>
-    <div><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
-    <button onclick="pushAnnouncement()">Push</button>
-  </div>
-
-  <div class="card">
-    <h2>Operasyon Logları</h2>
-    <table>
-      <thead><tr><th>Komut</th><th>Hedef</th><th>Ack Oranı</th><th>Hata Detayı</th></tr></thead>
-      <tbody id="log-body"></tbody>
-    </table>
-  </div>
-
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
 const SECRET = localStorage.getItem('panelSecret') || prompt('X-SECRET girin');
 localStorage.setItem('panelSecret', SECRET || '');
@@ -146,6 +209,15 @@ const hdr = { 'Content-Type': 'application/json', 'X-SECRET': SECRET || '' };
 let cachedPlaylists = [];
 let cachedGroups = [];
 let selectedPlaylistItemId = null;
+
+function activateSection(sectionId){
+  document.querySelectorAll('.tab-section').forEach(section => section.classList.toggle('d-none', section.id !== sectionId));
+  document.querySelectorAll('#panel-menu .nav-link').forEach(link => link.classList.toggle('active', link.dataset.section === sectionId));
+}
+
+document.querySelectorAll('#panel-menu .nav-link').forEach(link => {
+  link.addEventListener('click', () => activateSection(link.dataset.section));
+});
 
 async function jget(url){
   const r = await fetch(url, {headers: hdr});
@@ -225,7 +297,7 @@ async function loadMedia(){
   (assets || []).forEach(a => {
     const tr = document.createElement('tr');
     const mb = a.file_size ? `${(a.file_size / (1024*1024)).toFixed(1)} MB` : '-';
-    tr.innerHTML = `<td>${a.name}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><button class="danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></td>`;
+    tr.innerHTML = `<td>${a.name}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></td>`;
     body.appendChild(tr);
   });
 }
@@ -456,13 +528,14 @@ async function loadItems(){
   ul.innerHTML = '';
   (items||[]).forEach(i=>{
     const li = document.createElement('li');
+    li.className = 'list-group-item playlist-item';
     li.draggable = true;
     li.dataset.id = i.id;
     li.textContent = i.label || i.path;
     li.addEventListener('click',()=>{
       selectedPlaylistItemId = i.id;
-      [...ul.children].forEach(x => x.style.outline = 'none');
-      li.style.outline = '2px solid #38bdf8';
+      [...ul.children].forEach(x => x.classList.remove('active'));
+      li.classList.add('active');
     });
     li.addEventListener('dragstart',()=>dragId=i.id);
     li.addEventListener('dragover',e=>e.preventDefault());
@@ -538,6 +611,7 @@ async function loadLogs(){
 }
 
 async function init(){
+  activateSection('section-devices');
   await loadDevices();
   await loadGroupsPlaylists();
   await loadMedia();
