@@ -7,16 +7,20 @@
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; background: #0f172a; color: #e2e8f0; }
     h2 { margin-top: 28px; }
+    h3 { margin: 14px 0 8px; }
     .card { background: #1e293b; padding: 16px; border-radius: 10px; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; }
     td, th { border-bottom: 1px solid #334155; padding: 8px; text-align: left; }
     .online { color: #22c55e; font-weight: bold; }
     .offline { color: #ef4444; font-weight: bold; }
-    ul { list-style: none; padding: 0; }
-    li { background: #334155; margin: 6px 0; padding: 8px; border-radius: 6px; cursor: move; }
+    ul { list-style: none; padding: 0; margin: 8px 0; }
+    li { background: #334155; margin: 6px 0; padding: 8px; border-radius: 6px; cursor: move; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     input, select, button, textarea { padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; }
     button { cursor: pointer; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .danger { border-color: #7f1d1d; background: #450a0a; }
+    .muted { color: #94a3b8; font-size: 12px; }
+    .w-full { width: 100%; }
   </style>
 </head>
 <body>
@@ -31,21 +35,47 @@
   </div>
 
   <div class="card">
-    <h2>Video Yükleme</h2>
+    <h2>Video Yükleme ve Medya Havuzu</h2>
     <div class="row">
       <input id="media-file" type="file" accept="video/*" />
       <button onclick="uploadVideo()">Videoyu Yükle</button>
+      <button onclick="loadMedia()">Listeyi Yenile</button>
     </div>
     <small>Yüklenen videolar medya listesine eklenir ve playlistlere buradan atanır.</small>
+
+    <h3>Sistemdeki Videolar</h3>
+    <table>
+      <thead><tr><th>Ad</th><th>Boyut</th><th>Eklenme</th><th>İşlem</th></tr></thead>
+      <tbody id="media-body"></tbody>
+    </table>
   </div>
 
   <div class="card">
     <h2>Playlist Yönetimi</h2>
+
+    <h3>Yeni Grup / Playlist Oluştur</h3>
+    <div class="row">
+      <input id="new-group-name" placeholder="Yeni grup adı" />
+      <button onclick="createGroup()">Grup Ekle</button>
+      <input id="new-playlist-name" placeholder="Yeni playlist adı" />
+      <button onclick="createPlaylist()">Playlist Ekle</button>
+    </div>
+
+    <h3>Playlist'i Gruba Ata</h3>
     <div class="row">
       <select id="group-select"></select>
       <select id="playlist-select"></select>
       <button onclick="assignPlaylist()">Gruba Ata</button>
     </div>
+
+    <h3>Playlist Düzenle (Ad / Aktiflik)</h3>
+    <div class="row">
+      <select id="playlist-edit-select" onchange="syncPlaylistEditFields()"></select>
+      <input id="playlist-new-name" placeholder="Playlist adı" />
+      <label><input id="playlist-enabled" type="checkbox" checked /> Aktif</label>
+      <button onclick="updatePlaylist()">Kaydet</button>
+    </div>
+
     <h3>Playlist'e Video Ekle</h3>
     <div class="row">
       <select id="playlist-add-select"></select>
@@ -53,10 +83,14 @@
       <button onclick="addMediaToPlaylist()">Ekle</button>
     </div>
 
-    <h3>Playlist Item Sıralama (Drag-Drop)</h3>
+    <h3>Playlist Item Sıralama / Silme</h3>
     <select id="playlist-order-select" onchange="loadItems()"></select>
     <ul id="playlist-items"></ul>
-    <button onclick="saveOrder()">Sıralamayı Kaydet</button>
+    <div class="row">
+      <button onclick="saveOrder()">Sıralamayı Kaydet</button>
+      <button class="danger" onclick="removeSelectedPlaylistItem()">Seçili Videoyu Çıkar</button>
+    </div>
+    <div class="muted">Item seçmek için listeden bir videoya tıklayın.</div>
   </div>
 
   <div class="card">
@@ -68,7 +102,7 @@
     </select>
     <input id="announce-target-value" placeholder="grup id veya cihaz1,cihaz2" />
     <input id="announce-ttl" type="number" value="120" min="10" />
-    <textarea id="announce-message" rows="3" placeholder="Duyuru metni"></textarea>
+    <textarea id="announce-message" rows="3" class="w-full" placeholder="Duyuru metni"></textarea>
     <div><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
     <button onclick="pushAnnouncement()">Push</button>
   </div>
@@ -85,9 +119,25 @@
 const SECRET = localStorage.getItem('panelSecret') || prompt('X-SECRET girin');
 localStorage.setItem('panelSecret', SECRET || '');
 const hdr = { 'Content-Type': 'application/json', 'X-SECRET': SECRET || '' };
+let cachedPlaylists = [];
+let selectedPlaylistItemId = null;
 
-async function jget(url){ const r = await fetch(url, {headers: hdr}); return r.json(); }
-async function jpost(url, body){ const r = await fetch(url, {method:'POST', headers:hdr, body: JSON.stringify(body)}); return r.json(); }
+async function jget(url){
+  const r = await fetch(url, {headers: hdr});
+  return r.json();
+}
+async function jpost(url, body){
+  const r = await fetch(url, {method:'POST', headers:hdr, body: JSON.stringify(body)});
+  return r.json();
+}
+async function jpatch(url, body){
+  const r = await fetch(url, {method:'PATCH', headers:hdr, body: JSON.stringify(body)});
+  return r.json();
+}
+async function jdelete(url){
+  const r = await fetch(url, {method:'DELETE', headers: {'X-SECRET': SECRET || ''}});
+  return r.json();
+}
 
 async function loadDevices(){
   const devices = await jget('/api/devices');
@@ -103,14 +153,24 @@ async function loadDevices(){
 async function loadGroupsPlaylists(){
   const groups = await jget('/api/groups');
   const playlists = await jget('/api/playlists');
+  cachedPlaylists = playlists || [];
+
   const gs = document.getElementById('group-select');
   const ps = document.getElementById('playlist-select');
+  const pe = document.getElementById('playlist-edit-select');
   const pa = document.getElementById('playlist-add-select');
   const po = document.getElementById('playlist-order-select');
-  gs.innerHTML = (groups||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
-  ps.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-  pa.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-  po.innerHTML = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+
+  const gOpts = (groups||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
+  const pOpts = (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
+
+  gs.innerHTML = gOpts;
+  ps.innerHTML = pOpts;
+  pe.innerHTML = pOpts;
+  pa.innerHTML = pOpts;
+  po.innerHTML = pOpts;
+
+  syncPlaylistEditFields();
   loadItems();
 }
 
@@ -118,6 +178,15 @@ async function loadMedia(){
   const assets = await jget('/api/media');
   const ms = document.getElementById('media-select');
   ms.innerHTML = (assets||[]).map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+
+  const body = document.getElementById('media-body');
+  body.innerHTML = '';
+  (assets || []).forEach(a => {
+    const tr = document.createElement('tr');
+    const mb = a.file_size ? `${(a.file_size / (1024*1024)).toFixed(1)} MB` : '-';
+    tr.innerHTML = `<td>${a.name}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><button class="danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></td>`;
+    body.appendChild(tr);
+  });
 }
 
 async function uploadVideo(){
@@ -145,6 +214,62 @@ async function uploadVideo(){
   await loadMedia();
 }
 
+async function deleteMedia(mediaId, mediaName){
+  if(!confirm(`"${mediaName}" sistemden silinsin mi?\nPlaylistlerde kullanılıyorsa itemlardan da kaldırılacaktır.`)) return;
+  const resp = await jdelete(`/api/media/${mediaId}`);
+  if(!resp.ok){
+    alert(resp.error || 'Silme hatası');
+    return;
+  }
+  alert(`Video silindi. Playlistlerden kaldırılan kayıt: ${resp.removed_playlist_item_count || 0}`);
+  await loadMedia();
+  await loadItems();
+}
+
+async function createGroup(){
+  const name = document.getElementById('new-group-name').value.trim();
+  if(!name){ alert('Grup adı girin'); return; }
+  const resp = await jpost('/api/groups', {name});
+  if(!resp.ok){ alert(resp.error || 'Grup oluşturulamadı'); return; }
+  alert(resp.already_exists ? 'Grup zaten vardı' : 'Grup oluşturuldu');
+  document.getElementById('new-group-name').value = '';
+  await loadGroupsPlaylists();
+}
+
+async function createPlaylist(){
+  const name = document.getElementById('new-playlist-name').value.trim();
+  if(!name){ alert('Playlist adı girin'); return; }
+  const resp = await jpost('/api/playlists', {name, enabled: true});
+  if(!resp.ok){ alert(resp.error || 'Playlist oluşturulamadı'); return; }
+  alert('Playlist oluşturuldu');
+  document.getElementById('new-playlist-name').value = '';
+  await loadGroupsPlaylists();
+}
+
+async function updatePlaylist(){
+  const playlistId = Number(document.getElementById('playlist-edit-select').value);
+  const name = document.getElementById('playlist-new-name').value.trim();
+  const enabled = document.getElementById('playlist-enabled').checked;
+  if(!playlistId || !name){
+    alert('Playlist ve ad bilgisi zorunlu');
+    return;
+  }
+  const resp = await jpatch(`/api/playlists/${playlistId}`, {name, enabled});
+  if(!resp.ok){
+    alert(resp.error || 'Playlist güncellenemedi');
+    return;
+  }
+  alert('Playlist güncellendi');
+  await loadGroupsPlaylists();
+}
+
+function syncPlaylistEditFields(){
+  const playlistId = Number(document.getElementById('playlist-edit-select').value);
+  const p = cachedPlaylists.find(x => x.id === playlistId);
+  document.getElementById('playlist-new-name').value = p ? p.name : '';
+  document.getElementById('playlist-enabled').checked = p ? !!p.enabled : true;
+}
+
 async function addMediaToPlaylist(){
   const playlistId = Number(document.getElementById('playlist-add-select').value);
   const mediaId = Number(document.getElementById('media-select').value);
@@ -166,7 +291,11 @@ async function addMediaToPlaylist(){
 async function assignPlaylist(){
   const g = document.getElementById('group-select').value;
   const p = document.getElementById('playlist-select').value;
-  await jpost(`/api/groups/${g}/playlist/${p}`, {});
+  const resp = await jpost(`/api/groups/${g}/playlist/${p}`, {});
+  if(!resp.ok){
+    alert(resp.error || 'Playlist atama hatası');
+    return;
+  }
   alert('Playlist atandı');
 }
 
@@ -174,6 +303,7 @@ let dragId = null;
 async function loadItems(){
   const pid = document.getElementById('playlist-order-select').value;
   if(!pid) return;
+  selectedPlaylistItemId = null;
   const items = await jget(`/api/playlists/${pid}/items`);
   const ul = document.getElementById('playlist-items');
   ul.innerHTML = '';
@@ -182,6 +312,11 @@ async function loadItems(){
     li.draggable = true;
     li.dataset.id = i.id;
     li.textContent = i.label || i.path;
+    li.addEventListener('click',()=>{
+      selectedPlaylistItemId = i.id;
+      [...ul.children].forEach(x => x.style.outline = 'none');
+      li.style.outline = '2px solid #38bdf8';
+    });
     li.addEventListener('dragstart',()=>dragId=i.id);
     li.addEventListener('dragover',e=>e.preventDefault());
     li.addEventListener('drop', e=>{
@@ -194,10 +329,29 @@ async function loadItems(){
   });
 }
 
+async function removeSelectedPlaylistItem(){
+  const pid = Number(document.getElementById('playlist-order-select').value);
+  if(!pid || !selectedPlaylistItemId){
+    alert('Önce listeden bir video seçin');
+    return;
+  }
+  const resp = await jdelete(`/api/playlists/${pid}/items/${selectedPlaylistItemId}`);
+  if(!resp.ok){
+    alert(resp.error || 'Playlist item silinemedi');
+    return;
+  }
+  alert('Video playlistten çıkarıldı');
+  await loadItems();
+}
+
 async function saveOrder(){
   const pid = document.getElementById('playlist-order-select').value;
   const ids = [...document.querySelectorAll('#playlist-items li')].map(x=>Number(x.dataset.id));
-  await jpost(`/api/playlists/${pid}/items/reorder`, {item_ids: ids});
+  const resp = await jpost(`/api/playlists/${pid}/items/reorder`, {item_ids: ids});
+  if(!resp.ok){
+    alert(resp.error || 'Sıralama kaydedilemedi');
+    return;
+  }
   alert('Sıralama kaydedildi');
 }
 

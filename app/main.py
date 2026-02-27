@@ -66,6 +66,7 @@ def _media_url(relative_path: str) -> str:
     return url_for("serve_media", asset_path=relative_path, _external=True)
 
 
+
 @app.route("/")
 def index():
     return "Signage Server Running"
@@ -618,6 +619,23 @@ def add_playlist_item(playlist_id):
         db.close()
 
 
+@app.delete("/api/playlists/<int:playlist_id>/items/<int:item_id>")
+def delete_playlist_item(playlist_id, item_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        item = db.query(PlaylistItem).filter_by(id=item_id, playlist_id=playlist_id).first()
+        if not item:
+            return jsonify({"error": "playlist item not found"}), 404
+        db.delete(item)
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
 @app.post("/api/playlists/<int:playlist_id>/items/reorder")
 def reorder_playlist_items(playlist_id):
     if _auth_failed():
@@ -633,6 +651,60 @@ def reorder_playlist_items(playlist_id):
                 by_id[item_id].order_no = idx
         db.commit()
         return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.patch("/api/playlists/<int:playlist_id>")
+def update_playlist(playlist_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.json or {}
+    db = db_session()
+    try:
+        playlist = db.query(Playlist).filter_by(id=playlist_id).first()
+        if not playlist:
+            return jsonify({"error": "playlist not found"}), 404
+
+        if "name" in body and body.get("name"):
+            playlist.name = body["name"]
+        if "enabled" in body:
+            playlist.enabled = bool(body.get("enabled"))
+
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/media/<int:media_id>")
+def delete_media_asset(media_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        asset = db.query(MediaAsset).filter_by(id=media_id).first()
+        if not asset:
+            return jsonify({"error": "media not found"}), 404
+
+        media_url = _media_url(asset.relative_path)
+        relative_path = asset.relative_path
+        removed_playlist_item_count = (
+            db.query(PlaylistItem)
+            .filter(PlaylistItem.path == media_url)
+            .delete(synchronize_session=False)
+        )
+
+        db.delete(asset)
+        db.commit()
+
+        file_path = MEDIA_ROOT / relative_path
+        if file_path.exists():
+            file_path.unlink()
+
+        return jsonify({"ok": True, "removed_playlist_item_count": removed_playlist_item_count})
     finally:
         db.close()
 
