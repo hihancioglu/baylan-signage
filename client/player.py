@@ -7,7 +7,7 @@ from pathlib import Path
 
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
-    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
     VLC_VIDEO_TEMPLATE = (
         "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
         "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "

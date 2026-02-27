@@ -176,6 +176,7 @@ class PlaybackController:
             os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
         )
         self._fallback_warning_emitted = False
+        self._configured_fallback: list[str] = []
         self._version = None
         self._lock = threading.Lock()
         self._running = False
@@ -198,6 +199,9 @@ class PlaybackController:
         if playlist:
             return playlist
 
+        if self._configured_fallback:
+            return list(self._configured_fallback)
+
         if self._fallback_media.exists() and self.player.supports_media(str(self._fallback_media)):
             return [str(self._fallback_media)]
 
@@ -210,6 +214,20 @@ class PlaybackController:
         videos = config.get("videos") or []
         playlist_version = config.get("playlist_version") or "default"
         media_signatures = config.get("media_signatures") or {}
+        fallback_media = config.get("fallback_media")
+        fallback_version = config.get("fallback_media_version") or "0"
+
+
+        fallback_playlist = []
+        if fallback_media:
+            fallback_playlist = self.media_manager.sync_playlist(
+                [fallback_media],
+                f"fallback-{fallback_version}",
+                {},
+                progress_callback=None,
+            )
+        with self._lock:
+            self._configured_fallback = fallback_playlist
 
         if self._version == playlist_version and self._playlist:
             return

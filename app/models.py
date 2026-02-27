@@ -65,6 +65,13 @@ class MediaAsset(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String(128), primary_key=True)
+    value = Column(String(2048))
+
+
 class DeviceGroup(Base):
     __tablename__ = "device_groups"
 
