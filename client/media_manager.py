@@ -45,6 +45,13 @@ class MediaManager:
         return parsed.scheme in {"http", "https"}
 
     @staticmethod
+    def _normalize_source(source: str) -> str:
+        value = (source or "").strip()
+        if value.lower().startswith(("http://", "https://")):
+            return value.replace("\\", "/")
+        return value
+
+    @staticmethod
     def _path_exists_safely(path: Path) -> bool:
         # Avoid blocking startup on unreachable Windows network shares (UNC paths).
         # These can raise WinError 53 or hang for a long time when disconnected.
@@ -98,11 +105,12 @@ class MediaManager:
 
         downloadable_items = []
         for source in playlist_items:
-            signature = media_signatures.get(source)
-            if self._is_url(source):
-                target = self._url_cache_target(source, signature)
+            normalized_source = self._normalize_source(source)
+            signature = media_signatures.get(source) or media_signatures.get(normalized_source)
+            if self._is_url(normalized_source):
+                target = self._url_cache_target(normalized_source, signature)
                 if not target.exists():
-                    downloadable_items.append(source)
+                    downloadable_items.append(normalized_source)
 
         downloaded_count = 0
         total_download_count = len(downloadable_items)
@@ -124,28 +132,29 @@ class MediaManager:
         report_progress("start")
 
         for source in playlist_items:
-            signature = media_signatures.get(source)
+            normalized_source = self._normalize_source(source)
+            signature = media_signatures.get(source) or media_signatures.get(normalized_source)
 
             try:
-                if self._is_url(source):
-                    target = self._url_cache_target(source, signature)
+                if self._is_url(normalized_source):
+                    target = self._url_cache_target(normalized_source, signature)
                     if not target.exists():
-                        report_progress("downloading", source)
-                        self._download_url(source, target)
+                        report_progress("downloading", normalized_source)
+                        self._download_url(normalized_source, target)
                         downloaded_count += 1
-                        report_progress("downloaded", source)
+                        report_progress("downloaded", normalized_source)
                     checksum = self._sha256_file(target)
                     local_items.append(str(target))
                     manifest.append(
                         {
-                            "source": source,
+                            "source": normalized_source,
                             "local_path": str(target),
                             "checksum": checksum,
                             "signature_token": signature,
                         }
                     )
                 else:
-                    source_path = Path(source)
+                    source_path = Path(normalized_source)
                     if not self._is_file_safely(source_path):
                         continue
                     checksum = self._sha256_file(source_path)
@@ -154,13 +163,14 @@ class MediaManager:
                     local_items.append(str(source_path))
                     manifest.append(
                         {
-                            "source": source,
+                            "source": normalized_source,
                             "local_path": str(source_path),
                             "checksum": checksum,
                             "signature": signature,
                         }
                     )
-            except Exception:
+            except Exception as exc:
+                print(f"⚠️ medya senkronizasyonu başarısız: {normalized_source} | {exc}")
                 continue
 
         report_progress("done")
