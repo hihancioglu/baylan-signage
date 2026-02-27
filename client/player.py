@@ -130,16 +130,22 @@ class BorderlessFullscreenPlayer:
         return None
 
     def _pick_default_player_commands(self) -> tuple[str, str]:
-        player_candidates = []
+        # Windows'ta VLC her içerik geçişinde pencereyi kapatıp yeniden açarken
+        # masaüstünü kısa süre görünür bırakabiliyor. mpv bu geçişi daha stabil
+        # yönettiği için varsayılan seçimde önceliği mpv'ye veriyoruz.
+        player_candidates = ["mpv"]
         if os.name == "nt":
             player_candidates.extend(
                 [
+                    r"C:\Program Files\mpv\mpv.exe",
+                    "mpv.exe",
                     r"C:\Program Files\VideoLAN\VLC\vlc.exe",
                     "vlc",
                     "vlc.exe",
                 ]
             )
-        player_candidates.extend(["vlc", "mpv"])
+        else:
+            player_candidates.append("vlc")
 
         for player in player_candidates:
             resolved = shutil.which(player)
