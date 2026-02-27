@@ -24,6 +24,7 @@ ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
+ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
 
 sio = socketio.Client(reconnection=True)
 hostname = socket.gethostname()
@@ -46,10 +47,49 @@ class _WindowManager:
     def __init__(self):
         import ctypes
 
+        self._ctypes = ctypes
         self._user32 = ctypes.windll.user32
 
+    def _normalize(self, text: str) -> str:
+        return " ".join((text or "").strip().lower().split())
+
+    def _find_window_handle(self, window_title: str) -> int:
+        if not window_title:
+            return 0
+
+        if ERP_WINDOW_MATCH_MODE == "exact":
+            return self._user32.FindWindowW(None, window_title)
+
+        matches = []
+        needle = self._normalize(window_title)
+
+        EnumWindowsProc = self._ctypes.WINFUNCTYPE(
+            self._ctypes.c_bool,
+            self._ctypes.c_void_p,
+            self._ctypes.c_void_p,
+        )
+
+        def callback(hwnd, _):
+            if not self._user32.IsWindowVisible(hwnd):
+                return True
+
+            length = self._user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+
+            title_buffer = self._ctypes.create_unicode_buffer(length + 1)
+            self._user32.GetWindowTextW(hwnd, title_buffer, length + 1)
+            normalized_title = self._normalize(title_buffer.value)
+            if normalized_title and needle in normalized_title:
+                matches.append(hwnd)
+                return False
+            return True
+
+        self._user32.EnumWindows(EnumWindowsProc(callback), 0)
+        return int(matches[0]) if matches else 0
+
     def bring_to_front(self, window_title: str) -> bool:
-        hwnd = self._user32.FindWindowW(None, window_title)
+        hwnd = self._find_window_handle(window_title)
         if not hwnd:
             return False
 
