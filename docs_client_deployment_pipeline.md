@@ -302,3 +302,32 @@ msiexec /i "\\fileserver\packages\BaylanSignageAgent-1.4.1.msi" /qn /norestart
 - [ ] Silent install/uninstall script’leri doğrulandı
 - [ ] Ring rollout + rollback runbook yayınlandı
 - [ ] İzleme/alarm eşikleri dashboard’a işlendi
+
+
+## 6) BAYLAN_CLIENT_BUILD değerini build sırasında binary içine gömme
+
+`app/main.py` içindeki updater akışı, yüklenen dosyada `BAYLAN_CLIENT_BUILD:<değer>` marker’ını arar.
+Aynı marker client tarafında da okunabildiği için build versiyonunu tek bir yerde taşıyabilirsiniz.
+
+Önerilen format:
+
+- `build-YYYYMMDDHHMMSS` (ör. `build-20260227153045`)
+
+PowerShell (CI pipeline) örneği:
+
+```powershell
+$buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
+$marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
+
+# Agent binary sonuna marker ekle
+Add-Content -Path "dist\agent.exe" -Value $marker -Encoding ASCII
+
+Write-Host "Embedded build marker: $buildVersion"
+```
+
+Bu yöntemle:
+
+- Client açılışta kendi sürümünü marker’dan okuyabilir.
+- Server’a update yüklenince versiyon otomatik marker’dan çıkarılabilir.
+- Manuel `CLIENT_BUILD_VERSION` verilmezse bile tarih-saat tabanlı tekil build sürümü korunur.
+

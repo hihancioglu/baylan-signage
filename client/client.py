@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -40,6 +41,23 @@ STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
 DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
+EMBEDDED_BUILD_PATTERN = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
+
+
+def _read_embedded_build_version(file_path: Path) -> str | None:
+    try:
+        payload = file_path.read_bytes()
+    except OSError:
+        return None
+
+    match = EMBEDDED_BUILD_PATTERN.search(payload)
+    if not match:
+        return None
+
+    try:
+        return match.group(1).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def resolve_client_version() -> str:
@@ -48,6 +66,11 @@ def resolve_client_version() -> str:
         return manual_version
 
     version_source = Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+
+    embedded_version = _read_embedded_build_version(version_source)
+    if embedded_version:
+        return embedded_version
+
     try:
         mtime = datetime.fromtimestamp(version_source.stat().st_mtime, tz=timezone.utc)
         return f"build-{mtime.strftime('%Y%m%d%H%M%S')}"
