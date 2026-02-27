@@ -235,9 +235,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
-const SECRET = localStorage.getItem('panelSecret') || prompt('X-SECRET girin');
-localStorage.setItem('panelSecret', SECRET || '');
-const hdr = { 'Content-Type': 'application/json', 'X-SECRET': SECRET || '' };
+const hdr = { 'Content-Type': 'application/json' };
 let cachedPlaylists = [];
 let cachedGroups = [];
 let selectedPlaylistItemId = null;
@@ -264,7 +262,7 @@ async function jpatch(url, body){
   return r.json();
 }
 async function jdelete(url){
-  const r = await fetch(url, {method:'DELETE', headers: {'X-SECRET': SECRET || ''}});
+  const r = await fetch(url, {method:'DELETE'});
   return r.json();
 }
 
@@ -346,7 +344,6 @@ async function uploadVideo(){
   fd.append('file', selectedFile);
   const res = await fetch('/api/media/upload', {
     method: 'POST',
-    headers: { 'X-SECRET': SECRET || '' },
     body: fd
   });
   const body = await res.json();
