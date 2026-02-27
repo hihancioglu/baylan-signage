@@ -34,6 +34,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertFalse(player._should_use_python_image_viewer("/tmp/a.jpg"))
 
 
+    def test_play_blocking_ignores_stdout_oserror(self):
+        player = self._build_player()
+        with patch("builtins.print", side_effect=OSError(6, "invalid handle")):
+            self.assertFalse(player.play_blocking("/tmp/missing.jpg"))
+
     def test_supports_slideshow_manifest(self):
         player = self._build_player()
         self.assertTrue(player.supports_media("/tmp/slides.json"))
