@@ -30,5 +30,8 @@ Search + bind (ad-file-share benzeri önerilen yapı):
 - `AD_BIND_DN` (opsiyonel): Arama için servis hesabı DN'i
 - `AD_BIND_PASSWORD` (opsiyonel): Servis hesabı parolası
 - `AD_USER_SEARCH_FILTER`: Varsayılan `(&(objectClass=user)(sAMAccountName={username}))`
+- `AD_ALLOWED_USERS` (opsiyonel): Virgülle ayrılmış kullanıcı listesi (`ali,veli`). Tanımlanırsa sadece listedekiler panele girebilir, boş bırakılırsa AD'de doğrulanan tüm kullanıcılar girebilir.
+
+İpucu: `AD_BIND_DN` için tam DN (`CN=svc,...`) veya `DOMAIN\kullanici` kullanın. Sadece kullanıcı adı yazarsanız uygulama `AD_DOMAIN` değerini otomatik ekler.
 
 Not: Panel API çağrılarında mevcut `SHARED_SECRET` (`X-SECRET`) kontrolü devam eder.

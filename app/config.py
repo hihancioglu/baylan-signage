@@ -12,3 +12,8 @@ AD_BIND_DN = os.getenv("AD_BIND_DN", "")
 AD_BIND_PASSWORD = os.getenv("AD_BIND_PASSWORD", "")
 AD_USER_SEARCH_FILTER = os.getenv("AD_USER_SEARCH_FILTER", "(&(objectClass=user)(sAMAccountName={username}))")
 AD_CONNECT_TIMEOUT = float(os.getenv("AD_CONNECT_TIMEOUT", "5"))
+AD_ALLOWED_USERS = {
+    username.strip().lower()
+    for username in os.getenv("AD_ALLOWED_USERS", "").split(",")
+    if username.strip()
+}

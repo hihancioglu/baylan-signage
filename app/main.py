@@ -41,6 +41,7 @@ from .config import (
     AD_BIND_PASSWORD,
     AD_USER_SEARCH_FILTER,
     AD_CONNECT_TIMEOUT,
+    AD_ALLOWED_USERS,
 )
 
 
@@ -139,6 +140,9 @@ def panel_login():
     if not _ad_signin(username, password):
         return jsonify({"ok": False, "error": "AD kimlik doğrulaması başarısız"}), 401
 
+    if AD_ALLOWED_USERS and username.lower() not in AD_ALLOWED_USERS:
+        return jsonify({"ok": False, "error": "Bu kullanıcı panel erişimi için yetkili değil"}), 403
+
     session["panel_authenticated"] = True
     session["panel_username"] = username
     return jsonify({"ok": True})
@@ -174,7 +178,7 @@ def _ad_signin(username: str, password: str) -> bool:
     server = Server(AD_SERVER_URI, use_ssl=AD_USE_SSL, get_info=None, connect_timeout=AD_CONNECT_TIMEOUT)
 
     if AD_BASE_DN:
-        bind_user = AD_BIND_DN or None
+        bind_user = _normalize_ad_account_name(AD_BIND_DN) or None
         bind_password = AD_BIND_PASSWORD or None
         lookup = Connection(
             server,
@@ -211,9 +215,7 @@ def _ad_signin(username: str, password: str) -> bool:
         user_conn.unbind()
         return ok
 
-    account_name = username
-    if "\\" not in account_name and "@" not in account_name and AD_DOMAIN:
-        account_name = f"{AD_DOMAIN}\\{username}"
+    account_name = _normalize_ad_account_name(username)
 
     user_dn = AD_USER_DN_TEMPLATE.format(username=username) if AD_USER_DN_TEMPLATE else account_name
     conn = Connection(
@@ -231,6 +233,15 @@ def _ad_signin(username: str, password: str) -> bool:
 
 def _panel_auth_failed():
     return not _is_panel_authenticated()
+
+
+def _normalize_ad_account_name(account_name: str) -> str:
+    normalized = (account_name or "").strip()
+    if not normalized:
+        return normalized
+    if "\\" not in normalized and "@" not in normalized and "=" not in normalized and AD_DOMAIN:
+        return f"{AD_DOMAIN}\\{normalized}"
+    return normalized
 
 
 def _serialize_device(db, device):
