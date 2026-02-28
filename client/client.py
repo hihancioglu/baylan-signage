@@ -637,6 +637,7 @@ processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
 _console_hider_started = False
+update_shutdown_requested = False
 
 
 def hide_console_window():
@@ -783,6 +784,7 @@ def _download_release(update_info: dict) -> Path:
 
 
 def _apply_update_package(local_file: Path):
+    global update_shutdown_requested
     if platform.system().lower().startswith("win"):
         local_file = local_file.resolve()
         if local_file.suffix.lower() != ".exe":
@@ -855,20 +857,9 @@ def _apply_update_package(local_file: Path):
         )
 
         log_info("🛑 Agent shutting down for update...")
-
-        try:
-            sio.disconnect()
-        except Exception:
-            pass
-
-        playback.stop()
-        idle_background.hide()
-        systray.stop()
+        update_shutdown_requested = True
         shutdown_event.set()
-
-        time.sleep(1.5)
-
-        sys.exit(0)
+        return "windows_update_shutdown_requested"
     return "update_downloaded_manual_install"
 
 
@@ -1140,6 +1131,7 @@ def run_state_cycle():
 
 
 def main():
+    global update_shutdown_requested
     hide_console_window()
     start_console_hider()
     systray.start()
@@ -1211,6 +1203,11 @@ def main():
     except Exception:
         pass
     systray.stop()
+
+    if update_shutdown_requested:
+        # Updater waits for this PID to end before swapping the executable.
+        # os._exit guarantees immediate process exit even if background threads are still alive.
+        os._exit(0)
 
 
 if __name__ == "__main__":
