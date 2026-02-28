@@ -355,6 +355,7 @@ class IdleBackgroundOverlay:
         root = tk.Tk()
         root.configure(bg="black")
         root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
         root.overrideredirect(True)
         root.title("Baylan Idle Background")
 
