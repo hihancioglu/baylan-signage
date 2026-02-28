@@ -853,9 +853,22 @@ def _apply_update_package(local_file: Path):
             cwd=str(work_dir),
             creationflags=creation_flags,
         )
+
+        log_info("🛑 Agent shutting down for update...")
+
+        try:
+            sio.disconnect()
+        except Exception:
+            pass
+
+        playback.stop()
+        idle_background.hide()
         systray.stop()
         shutdown_event.set()
-        os._exit(0)
+
+        time.sleep(1.5)
+
+        sys.exit(0)
     return "update_downloaded_manual_install"
 
 
