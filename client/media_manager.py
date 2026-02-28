@@ -46,10 +46,14 @@ class MediaManager:
     def _save_state(self, state: dict):
         with self._state_lock:
             safe_state = state if isinstance(state, dict) else {}
-            tmp_path = self.state_file.with_suffix(".tmp")
-            with open(tmp_path, "w", encoding="utf-8") as fh:
-                json.dump(safe_state, fh, ensure_ascii=False, indent=2)
-            tmp_path.replace(self.state_file)
+            self._write_json_atomic(self.state_file, safe_state)
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict):
+        tmp_path = path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        tmp_path.replace(path)
 
     @staticmethod
     def _is_url(path: str) -> bool:
@@ -268,15 +272,17 @@ class MediaManager:
         report_progress("done")
 
         if local_entries:
-            with open(manifest_path, "w", encoding="utf-8") as fh:
-                json.dump({"items": manifest}, fh, ensure_ascii=False, indent=2)
+            try:
+                self._write_json_atomic(manifest_path, {"items": manifest})
 
-            with self._state_lock:
-                state = self._load_state()
-                state["current_version"] = version
-                state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
-                state["last_successful_playlist_entries"] = local_entries
-                self._save_state(state)
+                with self._state_lock:
+                    state = self._load_state()
+                    state["current_version"] = version
+                    state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
+                    state["last_successful_playlist_entries"] = local_entries
+                    self._save_state(state)
+            except OSError as exc:
+                print(f"⚠️ manifest/state yazımı başarısız: {manifest_path} | {exc}")
 
         return local_entries
 

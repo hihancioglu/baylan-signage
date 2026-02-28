@@ -70,5 +70,29 @@ class TestMediaManagerDownload(unittest.TestCase):
                 self.assertTrue(Path(slide["image"]).exists())
 
 
+class TestMediaManagerManifestWrite(unittest.TestCase):
+    def test_sync_playlist_entries_handles_manifest_write_permission_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            source_manifest = "http://example.com/slides/deck.json"
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            with patch("client.media_manager.urlopen", return_value=DummyResponse(b"{}")):
+                with patch.object(MediaManager, "_write_json_atomic", side_effect=PermissionError(13, "Permission denied")):
+                    items = manager.sync_playlist_entries(
+                        [{"path": source_manifest, "media_type": "image", "duration_sec": None}],
+                        "v-perm",
+                        {source_manifest: "sig-1"},
+                    )
+
+            self.assertEqual(len(items), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
