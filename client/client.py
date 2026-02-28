@@ -589,6 +589,20 @@ class PlaybackController:
                 self._waiting_for_media_logged = False
                 runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
 
+                if loop_mode == "sequential":
+                    playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries]
+                    playlist_paths = [path for path in playlist_paths if path]
+                    if self.player.can_play_with_mpv_playlist(playlist_paths):
+                        self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist"}
+                        self._active_item_started_at = time.monotonic()
+                        ok = self.player.play_mpv_playlist_blocking(playlist_paths)
+                        self._active_item = None
+                        self._active_item_started_at = None
+                        if not ok:
+                            print("⚠️ mpv playlist oynatma başarısız, tekli oynatma moduna dönülüyor")
+                        time.sleep(0.2)
+                        continue
+
                 if loop_mode == "random":
                     order = runtime_state.get("random_order") or []
                     pos = int(runtime_state.get("random_pos") or 0)

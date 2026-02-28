@@ -3,6 +3,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -122,6 +123,13 @@ class BorderlessFullscreenPlayer:
         if frozen_viewer:
             return [frozen_viewer, media_path, str(duration)]
         return [sys.executable, str(viewer_path), media_path, str(duration)]
+
+    @staticmethod
+    def _is_mpv_command(command: list[str]) -> bool:
+        if not command:
+            return False
+        executable_name = Path(BorderlessFullscreenPlayer._strip_outer_quotes(command[0])).name.lower()
+        return "mpv" in executable_name
 
     @staticmethod
     def _is_vlc_image_fallback_allowed() -> bool:
@@ -343,6 +351,82 @@ class BorderlessFullscreenPlayer:
         finally:
             if self._process is process:
                 self._process = None
+
+    def can_play_with_mpv_playlist(self, media_paths: list[str]) -> bool:
+        if len(media_paths) < 2:
+            return False
+
+        if any(self._is_slideshow_manifest(path) for path in media_paths):
+            return False
+
+        for media_path in media_paths:
+            if not Path(media_path).exists() or not self.supports_media(media_path):
+                return False
+
+        probe_path = media_paths[0]
+        probe_command = self._build_command(probe_path)
+        probe_command = self._prefer_non_vlc_image_command(probe_path, probe_command)
+        if not probe_command:
+            return False
+        return self._is_mpv_command(probe_command)
+
+    def play_mpv_playlist_blocking(self, media_paths: list[str], image_duration_sec: int | None = None) -> bool:
+        if not self.can_play_with_mpv_playlist(media_paths):
+            self._last_interrupted = False
+            return False
+
+        self.stop()
+
+        duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
+        playlist_file = None
+        process = None
+
+        try:
+            first_command = self._build_command(media_paths[0])
+            executable = self._strip_outer_quotes(first_command[0])
+            if not self._resolve_executable([executable]):
+                self._last_interrupted = False
+                _safe_print(f"⚠️ player executable bulunamadı: {executable}")
+                return False
+
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".m3u") as handle:
+                for media_path in media_paths:
+                    handle.write(f"{media_path}\n")
+                playlist_file = handle.name
+
+            command = [
+                executable,
+                "--fs",
+                "--border=no",
+                "--force-window=immediate",
+                "--ontop",
+                "--quiet",
+                "--background-color=0/0/0",
+                "--osc=no",
+                "--osd-level=0",
+                "--input-cursor=no",
+                f"--image-display-duration={duration}",
+                "--loop-playlist=inf",
+                f"--playlist={playlist_file}",
+            ]
+
+            self._stop_requested = False
+            process = subprocess.Popen(command)
+            self._process = process
+            process.wait()
+
+            interrupted = self._stop_requested
+            self._last_interrupted = interrupted
+            return process.returncode == 0 or interrupted
+        except Exception as exc:
+            self._last_interrupted = False
+            _safe_print(f"⚠️ mpv playlist oynatma hatası: {exc}")
+            return False
+        finally:
+            if self._process is process:
+                self._process = None
+            if playlist_file:
+                Path(playlist_file).unlink(missing_ok=True)
 
     def stop(self):
         if self._process and self._process.poll() is None:
