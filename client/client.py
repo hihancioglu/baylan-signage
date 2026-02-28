@@ -400,6 +400,7 @@ class PlaybackController:
         self._active_item = None
         self._playback_state_lock = threading.Lock()
         self._playback_state = self.media_manager.load_playback_state()
+        self._background_overlay = IdleBackgroundOverlay()
 
     def _on_sync_progress(self, progress: dict):
         with self._lock:
@@ -533,6 +534,7 @@ class PlaybackController:
     def start(self):
         if self._worker and self._worker.is_alive():
             return
+        self._background_overlay.show()
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
@@ -541,6 +543,7 @@ class PlaybackController:
     def stop(self):
         self._running = False
         self.overlay.hide()
+        self._background_overlay.hide()
         self.player.stop()
 
         if self._worker and self._worker.is_alive():
@@ -548,6 +551,7 @@ class PlaybackController:
 
     def pause(self):
         self.overlay.hide()
+        self._background_overlay.hide()
         if self._active_item and self._active_item_started_at:
             elapsed = max(0.0, time.monotonic() - self._active_item_started_at)
             if self.player._is_video(self._active_item.get("local_path") or ""):
@@ -559,6 +563,7 @@ class PlaybackController:
     def _run(self):
         try:
             while self._running:
+                self._background_overlay.show()
                 with self._lock:
                     playlist_entries = self._effective_playlist(list(self._playlist_entries))
                     sync_in_progress = self._sync_in_progress
