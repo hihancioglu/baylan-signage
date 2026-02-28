@@ -313,7 +313,30 @@ Aynı marker client tarafında da okunabildiği için build versiyonunu tek bir 
 
 - `build-YYYYMMDDHHMMSS` (ör. `build-20260227153045`)
 
-PowerShell (CI pipeline) örneği:
+Repository'de client build + marker embed adımlarını tek bir yerde yöneten
+`client/build_agent.ps1` script'i bulunur.
+
+Kullanım:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File client\build_agent.ps1
+```
+
+İsterseniz farklı python executable veya artifact adı verebilirsiniz:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File client\build_agent.ps1 `
+  -Python ".\.venv\Scripts\python.exe" `
+  -Name "BaylanSignageAgent"
+```
+
+Script'in yaptığı işlemler:
+
+1. `pyinstaller` bağımlılığını kurar/günceller.
+2. `client/client.py` dosyasını tek exe (`dist\BaylanSignageAgent.exe`) olarak build eder.
+3. Binary sonuna `BAYLAN_CLIENT_BUILD:build-YYYYMMDDHHMMSS` marker'ını ekler.
+
+Pipeline içinde sadece marker embed adımını ayrıca göstermek isterseniz:
 
 ```powershell
 $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
