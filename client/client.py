@@ -398,6 +398,7 @@ class PlaybackController:
         self._waiting_for_media_logged = False
         self._active_item_started_at = None
         self._active_item = None
+        self._playback_state_lock = threading.Lock()
         self._playback_state = self.media_manager.load_playback_state()
 
     def _on_sync_progress(self, progress: dict):
@@ -435,30 +436,33 @@ class PlaybackController:
     def _restore_or_init_runtime_state(self, entries: list[dict], loop_mode: str) -> dict:
         key = self._playlist_key(entries, loop_mode)
         paths = [str(e.get("local_path")) for e in entries]
-        state = self._playback_state if isinstance(self._playback_state, dict) else {}
-        if state.get("playlist_key") != key:
-            state = {"playlist_key": key}
+        with self._playback_state_lock:
+            state = dict(self._playback_state) if isinstance(self._playback_state, dict) else {}
+            if state.get("playlist_key") != key:
+                state = {"playlist_key": key}
 
-        if loop_mode == "random":
-            order = state.get("random_order")
-            if not isinstance(order, list) or sorted(order) != sorted(paths):
-                import random
+            if loop_mode == "random":
+                order = state.get("random_order")
+                if not isinstance(order, list) or sorted(order) != sorted(paths):
+                    import random
 
-                order = list(paths)
-                random.shuffle(order)
-                state["random_order"] = order
-                state["random_pos"] = 0
-                state["resume_sec"] = 0
-            state["random_pos"] = int(state.get("random_pos") or 0)
-        else:
-            state["index"] = int(state.get("index") or 0)
-            state["resume_sec"] = float(state.get("resume_sec") or 0)
+                    order = list(paths)
+                    random.shuffle(order)
+                    state["random_order"] = order
+                    state["random_pos"] = 0
+                    state["resume_sec"] = 0
+                state["random_pos"] = int(state.get("random_pos") or 0)
+            else:
+                state["index"] = int(state.get("index") or 0)
+                state["resume_sec"] = float(state.get("resume_sec") or 0)
 
-        self._playback_state = state
+            self._playback_state = state
         return state
 
     def _persist_playback_state(self):
-        self.media_manager.save_playback_state(self._playback_state)
+        with self._playback_state_lock:
+            state_snapshot = dict(self._playback_state) if isinstance(self._playback_state, dict) else {}
+        self.media_manager.save_playback_state(state_snapshot)
 
     def update_from_config(self, config: dict):
         enabled = bool(config.get("enabled", True))
@@ -547,7 +551,8 @@ class PlaybackController:
         if self._active_item and self._active_item_started_at:
             elapsed = max(0.0, time.monotonic() - self._active_item_started_at)
             if self.player._is_video(self._active_item.get("local_path") or ""):
-                self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
+                with self._playback_state_lock:
+                    self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
                 self._persist_playback_state()
         self.player.stop()
 
