@@ -30,6 +30,21 @@ from media_manager import MediaManager
 from player import BorderlessFullscreenPlayer
 from state_machine import ClientState
 
+
+def _runtime_base_dir() -> Path:
+    source = Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+    return source.resolve().parent
+
+
+RUNTIME_BASE_DIR = _runtime_base_dir()
+
+
+def _resolve_runtime_path(path_value: str) -> Path:
+    candidate = Path(path_value).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return RUNTIME_BASE_DIR / candidate
+
 SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
@@ -38,11 +53,13 @@ STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
-STATE_LOG_PATH = os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")
+STATE_LOG_PATH = str(_resolve_runtime_path(os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")))
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
-DEBUG_LOG_PATH = Path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
-UPDATER_LAUNCHER_LOG_PATH = Path(os.getenv("UPDATER_LAUNCHER_LOG_PATH", "client/logs/updater_launcher.log"))
+DEBUG_LOG_PATH = _resolve_runtime_path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
+UPDATER_LAUNCHER_LOG_PATH = _resolve_runtime_path(
+    os.getenv("UPDATER_LAUNCHER_LOG_PATH", "client/logs/updater_launcher.log")
+)
 EMBEDDED_BUILD_PATTERN = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
 
 
@@ -82,7 +99,7 @@ def resolve_client_version() -> str:
 
 CLIENT_VERSION = resolve_client_version()
 AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
-UPDATER_DOWNLOAD_DIR = Path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
+UPDATER_DOWNLOAD_DIR = _resolve_runtime_path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
 
 
@@ -355,7 +372,9 @@ class IdleBackgroundOverlay:
 
 class PlaybackController:
     def __init__(self):
-        self.media_manager = MediaManager(cache_root=os.getenv("MEDIA_CACHE_DIR", "client/cache"))
+        self.media_manager = MediaManager(
+            cache_root=str(_resolve_runtime_path(os.getenv("MEDIA_CACHE_DIR", "client/cache")))
+        )
         self.player = BorderlessFullscreenPlayer()
         self.overlay = DownloadStatusOverlay()
         cached_entries = self.media_manager.load_last_successful_playlist_entries()
@@ -363,7 +382,7 @@ class PlaybackController:
             {"local_path": p, "duration_sec": None, "media_type": None}
             for p in self.media_manager.load_last_successful_playlist()
         ]
-        self._fallback_media = Path(
+        self._fallback_media = _resolve_runtime_path(
             os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
         )
         self._fallback_warning_emitted = False
