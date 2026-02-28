@@ -1,5 +1,7 @@
 import hashlib
 import json
+import threading
+from copy import deepcopy
 import shutil
 import tempfile
 from pathlib import Path
@@ -16,6 +18,7 @@ class MediaManager:
         self.cache_root.mkdir(parents=True, exist_ok=True)
         self.versions_root.mkdir(parents=True, exist_ok=True)
         self.media_store_root.mkdir(parents=True, exist_ok=True)
+        self._state_lock = threading.RLock()
 
     @staticmethod
     def _sha256_text(value: str) -> str:
@@ -30,14 +33,23 @@ class MediaManager:
         return h.hexdigest()
 
     def _load_state(self) -> dict:
-        if not self.state_file.exists():
-            return {}
-        with open(self.state_file, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+        with self._state_lock:
+            if not self.state_file.exists():
+                return {}
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as fh:
+                    loaded = json.load(fh)
+                    return loaded if isinstance(loaded, dict) else {}
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                return {}
 
     def _save_state(self, state: dict):
-        with open(self.state_file, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, ensure_ascii=False, indent=2)
+        with self._state_lock:
+            safe_state = state if isinstance(state, dict) else {}
+            tmp_path = self.state_file.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                json.dump(safe_state, fh, ensure_ascii=False, indent=2)
+            tmp_path.replace(self.state_file)
 
     @staticmethod
     def _is_url(path: str) -> bool:
@@ -259,11 +271,12 @@ class MediaManager:
             with open(manifest_path, "w", encoding="utf-8") as fh:
                 json.dump({"items": manifest}, fh, ensure_ascii=False, indent=2)
 
-            state = self._load_state()
-            state["current_version"] = version
-            state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
-            state["last_successful_playlist_entries"] = local_entries
-            self._save_state(state)
+            with self._state_lock:
+                state = self._load_state()
+                state["current_version"] = version
+                state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
+                state["last_successful_playlist_entries"] = local_entries
+                self._save_state(state)
 
         return local_entries
 
@@ -294,6 +307,7 @@ class MediaManager:
         return state.get("playback_state") or {}
 
     def save_playback_state(self, playback_state: dict):
-        state = self._load_state()
-        state["playback_state"] = playback_state or {}
-        self._save_state(state)
+        with self._state_lock:
+            state = self._load_state()
+            state["playback_state"] = deepcopy(playback_state) if isinstance(playback_state, dict) else {}
+            self._save_state(state)
