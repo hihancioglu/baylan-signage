@@ -43,6 +43,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         self.assertTrue(player.supports_media("/tmp/slides.json"))
 
+    def test_detects_slideshow_manifest(self):
+        player = self._build_player()
+        self.assertTrue(player._is_slideshow_manifest("/tmp/slides.json"))
+        self.assertFalse(player._is_slideshow_manifest("/tmp/image.jpg"))
+
     def test_build_mpv_video_command_hides_controls_and_sets_black_background(self):
         with patch.dict(
             "os.environ",
@@ -112,6 +117,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         ):
             player = BorderlessFullscreenPlayer()
         self.assertFalse(player._python_image_viewer_supported)
+
+    def test_skips_slideshow_manifest_when_python_viewer_unavailable(self):
+        player = self._build_player()
+        with patch.object(player, "_should_use_python_image_viewer", return_value=False):
+            self.assertFalse(player.play_blocking("/tmp/slides.json"))
+
+    def test_does_not_fallback_to_media_player_for_slideshow_manifest(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.returncode = 1
+        process.wait.return_value = None
+
+        with patch("pathlib.Path.exists", return_value=True), patch.object(
+            player,
+            "_should_use_python_image_viewer",
+            return_value=True,
+        ), patch.object(player, "_build_python_image_command", return_value=["python", "viewer", "x", "5"]), patch.object(
+            player,
+            "_resolve_executable",
+            return_value=True,
+        ), patch("subprocess.Popen", return_value=process) as popen:
+            self.assertFalse(player.play_blocking("/tmp/slides.json", image_duration_sec=5))
+        self.assertEqual(popen.call_count, 1)
 
 
 if __name__ == "__main__":
