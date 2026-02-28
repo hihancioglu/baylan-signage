@@ -171,6 +171,42 @@ class TestConfigPush(unittest.TestCase):
         release = body.get("release") or {}
         self.assertEqual(release.get("version"), "build-20260227093045")
 
+    def test_playlist_items_api_returns_original_media_name_as_label(self):
+        db = self.main.db_session()
+        try:
+            playlist = self.main.Playlist(name="Real Name Playlist", enabled=True)
+            db.add(playlist)
+            db.commit()
+            playlist_id = playlist.id
+
+            asset = self.main.MediaAsset(
+                original_name="Kampanya Videosu Final.mp4",
+                stored_name="abc123.mp4",
+                relative_path="abc123.mp4",
+                content_type="video/mp4",
+            )
+            db.add(asset)
+            db.commit()
+
+            item = self.main.PlaylistItem(
+                playlist_id=playlist_id,
+                path="http://localhost/media/abc123.mp4",
+                media_type="video",
+                order_no=1,
+            )
+            db.add(item)
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().get(f"/api/playlists/{playlist_id}/items")
+
+        self.assertEqual(resp.status_code, 200)
+        items = resp.get_json() or []
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].get("label"), "Kampanya Videosu Final.mp4")
+
 
 if __name__ == "__main__":
     unittest.main()
