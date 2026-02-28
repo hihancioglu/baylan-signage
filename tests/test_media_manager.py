@@ -93,6 +93,29 @@ class TestMediaManagerManifestWrite(unittest.TestCase):
 
             self.assertEqual(len(items), 1)
 
+    def test_write_json_atomic_retries_after_permission_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "manifest.json"
+            calls = {"count": 0}
+
+            original_replace = Path.replace
+
+            def flaky_replace(path_obj, dst):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise PermissionError(13, "Permission denied")
+                return original_replace(path_obj, dst)
+
+            with patch.object(Path, "replace", new=flaky_replace):
+                MediaManager._write_json_atomic(target, {"ok": True})
+
+            self.assertGreaterEqual(calls["count"], 2)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"ok": True})
+
+    def test_safe_print_swallows_os_error(self):
+        with patch("builtins.print", side_effect=OSError(6, "Invalid handle")):
+            MediaManager._safe_print("hello")
+
 
 if __name__ == "__main__":
     unittest.main()

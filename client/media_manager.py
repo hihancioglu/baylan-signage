@@ -1,9 +1,11 @@
 import hashlib
 import json
+import os
 import threading
 from copy import deepcopy
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
@@ -49,11 +51,37 @@ class MediaManager:
             self._write_json_atomic(self.state_file, safe_state)
 
     @staticmethod
+    def _safe_print(message: str):
+        try:
+            print(message)
+        except OSError:
+            # Some Windows service/runtime contexts can have a closed/invalid stdout handle.
+            pass
+
+    @staticmethod
     def _write_json_atomic(path: Path, payload: dict):
-        tmp_path = path.with_suffix(".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False, indent=2)
-        tmp_path.replace(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        for attempt in range(5):
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
+                ) as fh:
+                    json.dump(payload, fh, ensure_ascii=False, indent=2)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                    tmp_path = Path(fh.name)
+
+                tmp_path.replace(path)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                if tmp_path and tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
 
     @staticmethod
     def _is_url(path: str) -> bool:
@@ -266,7 +294,7 @@ class MediaManager:
                         }
                     )
             except Exception as exc:
-                print(f"⚠️ medya senkronizasyonu başarısız: {normalized_source} | {exc}")
+                self._safe_print(f"⚠️ medya senkronizasyonu başarısız: {normalized_source} | {exc}")
                 continue
 
         report_progress("done")
@@ -282,7 +310,7 @@ class MediaManager:
                     state["last_successful_playlist_entries"] = local_entries
                     self._save_state(state)
             except OSError as exc:
-                print(f"⚠️ manifest/state yazımı başarısız: {manifest_path} | {exc}")
+                self._safe_print(f"⚠️ manifest/state yazımı başarısız: {manifest_path} | {exc}")
 
         return local_entries
 
