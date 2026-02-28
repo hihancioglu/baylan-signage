@@ -83,6 +83,7 @@ def resolve_client_version() -> str:
 CLIENT_VERSION = resolve_client_version()
 AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 UPDATER_DOWNLOAD_DIR = Path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
+UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
 
 
 def print(*args, **kwargs):
@@ -795,66 +796,29 @@ def _apply_update_package(local_file: Path):
 
         current_exe = Path(sys.executable).resolve()
         work_dir = current_exe.parent
-        launcher_script = UPDATER_DOWNLOAD_DIR / f"swap_{int(time.time())}.cmd"
+        updater_exe = (work_dir / UPDATER_EXECUTABLE_NAME).resolve()
         launcher_log_file = UPDATER_LAUNCHER_LOG_PATH.resolve()
-        launcher_script.parent.mkdir(parents=True, exist_ok=True)
         launcher_log_file.parent.mkdir(parents=True, exist_ok=True)
-        script = "\n".join(
-            [
-                "@echo off",
-                "setlocal EnableExtensions EnableDelayedExpansion",
-                f"set \"SRC={local_file}\"",
-                f"set \"DST={current_exe}\"",
-                f"set \"WORK_DIR={work_dir}\"",
-                f"set \"LOG_FILE={launcher_log_file}\"",
-                f"set \"OLD_PID={os.getpid()}\"",
-                "set \"LAUNCH_TARGET=%DST%\"",
-                "echo ==== [%date% %time%] updater start ====>> \"%LOG_FILE%\"",
-                "echo SRC=%SRC%>> \"%LOG_FILE%\"",
-                "echo DST=%DST%>> \"%LOG_FILE%\"",
-                "set /a WAIT_ATTEMPTS=0",
-                ":wait_for_old_process",
-                "tasklist /FI \"PID eq %OLD_PID%\" 2>nul | find /I \"%OLD_PID%\" >nul",
-                "if not errorlevel 1 goto wait_loop",
-                "goto copy_start",
-                ":wait_loop",
-                "set /a WAIT_ATTEMPTS+=1",
-                "if !WAIT_ATTEMPTS! GEQ 90 goto copy_start",
-                "timeout /t 1 /nobreak >nul",
-                "goto wait_for_old_process",
-                ":copy_start",
-                "set /a COPY_ATTEMPTS=0",
-                ":copy_retry",
-                "copy /Y \"%SRC%\" \"%DST%\" >nul 2>&1",
-                "if not errorlevel 1 goto launch_app",
-                "set /a COPY_ATTEMPTS+=1",
-                "echo copy attempt !COPY_ATTEMPTS! failed>> \"%LOG_FILE%\"",
-                "if !COPY_ATTEMPTS! LSS 30 (",
-                "  timeout /t 1 /nobreak >nul",
-                "  goto copy_retry",
-                ")",
-                "echo copy failed after retries, launching downloaded binary>> \"%LOG_FILE%\"",
-                "set \"LAUNCH_TARGET=%SRC%\"",
-                ":launch_app",
-                "start \"\" /D \"%WORK_DIR%\" \"%LAUNCH_TARGET%\" >nul 2>&1",
-                "if errorlevel 1 (",
-                "  echo start failed, trying powershell fallback>> \"%LOG_FILE%\"",
-                "  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Process -FilePath '%LAUNCH_TARGET%' -WorkingDirectory '%WORK_DIR%'\" >nul 2>&1",
-                "  if errorlevel 1 echo powershell fallback failed>> \"%LOG_FILE%\"",
-                ")",
-                "echo updater done>> \"%LOG_FILE%\"",
-                "if /I not \"%LAUNCH_TARGET%\"==\"%SRC%\" del \"%SRC%\" >nul 2>&1",
-                "del \"%~f0\" >nul 2>&1",
-            ]
-        ) + "\n"
-        launcher_script.write_text(script, encoding="utf-8")
         log_info(f"🛠️ updater launcher log path: {launcher_log_file}")
+        if not updater_exe.exists():
+            log_info(f"⚠️ Updater executable not found: {updater_exe}")
+            return "windows_update_downloaded_missing_updater_exe"
+
+        launch_args = [
+            str(updater_exe),
+            "--src",
+            str(local_file),
+            "--dst",
+            str(current_exe),
+            "--old-pid",
+            str(os.getpid()),
+            "--work-dir",
+            str(work_dir),
+            "--log-file",
+            str(launcher_log_file),
+        ]
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.Popen(
-            ["cmd", "/c", str(launcher_script)],
-            cwd=str(work_dir),
-            creationflags=creation_flags,
-        )
+        subprocess.Popen(launch_args, cwd=str(work_dir), creationflags=creation_flags)
 
         log_info("🛑 Agent shutting down for update...")
         update_shutdown_requested = True

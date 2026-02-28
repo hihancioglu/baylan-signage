@@ -332,3 +332,24 @@ Bu yöntemle:
 - Client açılışta kendi sürümünü marker’dan okuyabilir.
 - Server’a update yüklenince versiyon otomatik marker’dan çıkarılabilir.
 - Manuel `CLIENT_BUILD_VERSION` verilmezse bile tarih-saat tabanlı tekil build sürümü korunur.
+
+## 7) Ayrı bir Updater.exe ile swap/restart akışı
+
+İstemciyi daha dayanıklı güncellemek için update işlemini ikinci bir executable'a ayırın:
+
+1. Client yeni `agent.exe` dosyasını indirir.
+2. Client `BaylanUpdater.exe` sürecini `--src/--dst/--old-pid` argümanlarıyla başlatır.
+3. Client kendini kapatır.
+4. Updater eski süreç kapanana kadar bekler, binary swap yapar ve uygulamayı yeniden başlatır.
+
+Bu modelde process-kopyalama/yeniden başlatma mantığı ana process'ten ayrıldığı için,
+kilitlenme veya yarım-kalma senaryolarında recovery daha güvenli olur.
+
+Updater build için repository’de `client/build_updater.ps1` script'i bulunur:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File client\build_updater.ps1
+```
+
+Script, `client/updater.py` dosyasını PyInstaller ile tek dosya exe'ye çevirip
+`dist\BaylanUpdater.exe` üretir.
