@@ -216,6 +216,10 @@ class BorderlessFullscreenPlayer:
         ext = Path(media_path).suffix.lower()
         return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS or ext in self.SLIDESHOW_EXTENSIONS
 
+    @staticmethod
+    def _is_slideshow_manifest(media_path: str) -> bool:
+        return Path(media_path).suffix.lower() in BorderlessFullscreenPlayer.SLIDESHOW_EXTENSIONS
+
     def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
@@ -258,6 +262,14 @@ class BorderlessFullscreenPlayer:
         if not self.supports_media(media_path):
             self._last_interrupted = False
             _safe_print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
+            return False
+
+        if self._is_slideshow_manifest(media_path) and not self._should_use_python_image_viewer(media_path):
+            self._last_interrupted = False
+            _safe_print(
+                "⚠️ slayt manifesti için Python image viewer kullanılamıyor, medya atlandı: "
+                f"{media_path}"
+            )
             return False
 
         self.stop()
@@ -303,6 +315,13 @@ class BorderlessFullscreenPlayer:
                     f"(exit={process.returncode}, media={media_path}), medya player fallback deneniyor"
                 )
                 self._python_image_viewer_runtime_enabled = False
+                if self._is_slideshow_manifest(media_path):
+                    _safe_print(
+                        "⚠️ slayt manifesti medya player ile oynatılamaz, fallback atlandı"
+                    )
+                    interrupted = self._stop_requested
+                    self._last_interrupted = interrupted
+                    return interrupted
                 fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
                 fallback_command = self._prefer_non_vlc_image_command(
                     media_path,
