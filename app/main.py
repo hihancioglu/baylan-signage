@@ -12,6 +12,7 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, session, redirect
 from flask_socketio import SocketIO, emit, join_room
@@ -94,6 +95,16 @@ def _media_kind_from_path(path: str) -> str:
     if suffix in ALLOWED_IMAGE_EXTENSIONS:
         return "image"
     return "video"
+
+
+def _extract_relative_media_path(media_url: str) -> str | None:
+    if not media_url:
+        return None
+    parsed = urlparse(media_url)
+    media_prefix = "/media/"
+    if not parsed.path.startswith(media_prefix):
+        return None
+    return unquote(parsed.path[len(media_prefix):]) or None
 
 
 def _safe_update_filename(original_name: str) -> str:
@@ -1174,6 +1185,18 @@ def list_playlist_items(playlist_id):
             .order_by(PlaylistItem.order_no.asc())
             .all()
         )
+
+        media_assets_by_relative_path = {
+            media.relative_path: media.original_name
+            for media in db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
+        }
+
+        def _resolve_playlist_label(item_path: str) -> str:
+            relative_path = _extract_relative_media_path(item_path)
+            if relative_path and relative_path in media_assets_by_relative_path:
+                return media_assets_by_relative_path[relative_path]
+            return Path((item_path or "").split("?")[0]).name or item_path
+
         return jsonify([
             {
                 "id": i.id,
@@ -1181,7 +1204,7 @@ def list_playlist_items(playlist_id):
                 "order_no": i.order_no,
                 "media_type": i.media_type or _media_kind_from_path(i.path),
                 "duration_sec": i.duration_sec,
-                "label": Path((i.path or "").split("?")[0]).name or i.path,
+                "label": _resolve_playlist_label(i.path),
             }
             for i in items
         ])
