@@ -580,6 +580,18 @@ class PlaybackController:
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
 
+        first_items = [
+            f"{idx + 1}:{Path(str((item or {}).get('path') or '')).name}"
+            for idx, item in enumerate(videos[:5])
+            if isinstance(item, dict)
+        ]
+        print(
+            "🧩 Playback config summary | "
+            f"enabled={enabled} loop_mode={loop_mode} "
+            f"playlist_version={playlist_version} items={len(videos)} "
+            f"first_items={first_items}"
+        )
+
         fallback_playlist = []
         if fallback_media:
             fallback_entries = self.media_manager.sync_playlist_entries(
@@ -718,9 +730,18 @@ class PlaybackController:
                         pos = 0
                     target_path = order[pos]
                     item = next((x for x in playlist_entries if x.get("local_path") == target_path), playlist_entries[0])
+                    print(
+                        "🎲 Random seçim | "
+                        f"pos={pos}/{len(order)} media={Path(str(target_path)).name}"
+                    )
                 else:
                     index = int(runtime_state.get("index") or 0) % len(playlist_entries)
                     item = playlist_entries[index]
+                    print(
+                        "▶️ Sequential seçim | "
+                        f"index={index}/{len(playlist_entries)} "
+                        f"media={Path(str(item.get('local_path') or '')).name}"
+                    )
 
                 media_path = str(item.get("local_path") or "")
                 if not media_path:
@@ -1138,6 +1159,19 @@ def on_config(data):
 
     print("📥 CONFIG RECEIVED:")
     print(data)
+    if isinstance(data, dict):
+        videos = data.get("videos") or []
+        mode = str(data.get("loop_mode") or "sequential")
+        version = str(data.get("playlist_version") or "default")
+        order_map = [
+            f"{idx + 1}:{Path(str((item or {}).get('path') or '')).name}"
+            for idx, item in enumerate(videos)
+            if isinstance(item, dict)
+        ]
+        print(
+            "🧾 CONFIG PLAYLIST DETAIL | "
+            f"mode={mode} version={version} items={len(videos)} order={order_map}"
+        )
 
     config_timeout = data.get("idle_timeout_sec") if isinstance(data, dict) else None
     idle_mode_enabled = bool(data.get("idle_mode_enabled", True)) if isinstance(data, dict) else True

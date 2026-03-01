@@ -512,7 +512,11 @@ def build_config(hostname):
             item["path"]: hashlib.sha256(item["path"].encode("utf-8")).hexdigest() for item in videos
         }
         playlist_fingerprint = "|".join(
-            f"{item['path']}:{item.get('duration_sec') or 0}:{item.get('media_type') or ''}" for item in videos
+            (
+                f"{item['path']}:{item.get('duration_sec') or 0}:"
+                f"{item.get('media_type') or ''}:{item.get('order_no') or 0}"
+            )
+            for item in videos
         )
         playlist_version = hashlib.sha256(
             f"{playlist.id}:{playlist.loop_mode}:{playlist_fingerprint}".encode("utf-8")
