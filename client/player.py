@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import ctypes
 from pathlib import Path
 
 
@@ -112,9 +113,30 @@ class BorderlessFullscreenPlayer:
     def _build_mpv_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         command_text = self.MPV_IMAGE_TEMPLATE.format(player="mpv", duration=duration, media="{media}")
-        parts = shlex.split(command_text, posix=os.name != "nt")
+        parts = self._split_command_text(command_text)
         command = [media_path if part == "{media}" else part for part in parts]
         return [self._strip_outer_quotes(part) for part in command]
+
+    @staticmethod
+    def _split_windows_command(command_text: str) -> list[str]:
+        argc = ctypes.c_int(0)
+        argv = ctypes.windll.shell32.CommandLineToArgvW(command_text, ctypes.byref(argc))
+        if not argv:
+            return []
+
+        try:
+            return [argv[index] for index in range(argc.value)]
+        finally:
+            ctypes.windll.kernel32.LocalFree(argv)
+
+    def _split_command_text(self, command_text: str) -> list[str]:
+        try:
+            if os.name == "nt":
+                return self._split_windows_command(command_text)
+            return shlex.split(command_text, posix=True)
+        except Exception as exc:
+            _safe_print(f"⚠️ komut ayrıştırılamadı, basit ayrıştırma kullanılacak ({exc})")
+            return command_text.split()
 
     def _build_python_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
@@ -232,7 +254,7 @@ class BorderlessFullscreenPlayer:
         template = self.video_command if self._is_video(media_path) else self.image_command
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         command_text = template.format(media="{media}", duration=duration)
-        parts = shlex.split(command_text, posix=os.name != "nt")
+        parts = self._split_command_text(command_text)
         command = [media_path if part == "{media}" else part for part in parts]
 
         # Windows'ta shlex ile ayrıştırılan quoted executable path'ler ("C:\\...\\vlc.exe")
