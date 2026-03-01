@@ -128,6 +128,57 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(cfg["idle_mode_enabled"], False)
         self.assertEqual(cfg["content_enabled"], False)
 
+    def test_build_config_playlist_version_changes_when_order_changes(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Order Group")
+            playlist = self.main.Playlist(name="Order Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-order")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add_all(
+                [
+                    self.main.PlaylistItem(
+                        playlist_id=playlist.id,
+                        path="https://example.com/a.mp4",
+                        media_type="video",
+                        order_no=0,
+                    ),
+                    self.main.PlaylistItem(
+                        playlist_id=playlist.id,
+                        path="https://example.com/b.mp4",
+                        media_type="video",
+                        order_no=1,
+                    ),
+                ]
+            )
+            db.commit()
+
+            first_version = self.main.build_config("pc-order")["playlist_version"]
+
+            first_item = (
+                db.query(self.main.PlaylistItem)
+                .filter_by(playlist_id=playlist.id, path="https://example.com/a.mp4")
+                .first()
+            )
+            second_item = (
+                db.query(self.main.PlaylistItem)
+                .filter_by(playlist_id=playlist.id, path="https://example.com/b.mp4")
+                .first()
+            )
+            first_item.order_no = 1
+            second_item.order_no = 0
+            db.commit()
+
+            second_version = self.main.build_config("pc-order")["playlist_version"]
+        finally:
+            db.close()
+
+        self.assertNotEqual(first_version, second_version)
+
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:
