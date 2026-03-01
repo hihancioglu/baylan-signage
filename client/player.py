@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import ctypes
+from ctypes import wintypes
 from pathlib import Path
 
 
@@ -119,15 +120,29 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _split_windows_command(command_text: str) -> list[str]:
+        if not isinstance(command_text, str):
+            command_text = str(command_text)
+
+        if not command_text:
+            return []
+
+        command_line_to_argv = ctypes.windll.shell32.CommandLineToArgvW
+        command_line_to_argv.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        command_line_to_argv.restype = ctypes.POINTER(ctypes.c_wchar_p)
+
+        local_free = ctypes.windll.kernel32.LocalFree
+        local_free.argtypes = [wintypes.HLOCAL]
+        local_free.restype = wintypes.HLOCAL
+
         argc = ctypes.c_int(0)
-        argv = ctypes.windll.shell32.CommandLineToArgvW(command_text, ctypes.byref(argc))
+        argv = command_line_to_argv(command_text, ctypes.byref(argc))
         if not argv:
             return []
 
         try:
             return [argv[index] for index in range(argc.value)]
         finally:
-            ctypes.windll.kernel32.LocalFree(argv)
+            local_free(argv)
 
     def _split_command_text(self, command_text: str) -> list[str]:
         try:
