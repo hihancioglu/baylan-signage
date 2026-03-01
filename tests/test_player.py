@@ -61,6 +61,26 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIn("--background-color=0/0/0", cmd)
         self.assertIn("--force-window=immediate", cmd)
 
+
+    def test_split_command_text_windows_uses_commandlinetoargvw(self):
+        player = self._build_player()
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_split_windows_command",
+            return_value=["C:/Program Files/VideoLAN/VLC/vlc.exe", "--fullscreen", "{media}"],
+        ) as split_windows:
+            parts = player._split_command_text('"C:/Program Files/VideoLAN/VLC/vlc.exe" --fullscreen {media}')
+
+        self.assertEqual(parts, ["C:/Program Files/VideoLAN/VLC/vlc.exe", "--fullscreen", "{media}"])
+        split_windows.assert_called_once()
+
+    def test_split_command_text_falls_back_to_simple_split_on_error(self):
+        player = self._build_player()
+        with patch("client.player.shlex.split", side_effect=ValueError("bad quote")):
+            parts = player._split_command_text('mpv --flag {media}')
+
+        self.assertEqual(parts, ["mpv", "--flag", "{media}"])
+
     def test_build_mpv_image_command(self):
         player = self._build_player()
         cmd = player._build_mpv_image_command("/tmp/example.jpg", image_duration_sec=5)
