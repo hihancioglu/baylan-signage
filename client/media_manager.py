@@ -90,7 +90,15 @@ class MediaManager:
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
-        safe_payload = MediaManager._json_safe(payload)
+        # Take a detached snapshot before serialization. Some caller-owned objects
+        # can still be mutated while we're encoding, which is especially risky
+        # when sync callbacks run on background threads.
+        try:
+            payload_snapshot = deepcopy(payload)
+        except Exception:
+            payload_snapshot = payload
+
+        safe_payload = MediaManager._json_safe(payload_snapshot)
 
         for attempt in range(5):
             tmp_path = None
