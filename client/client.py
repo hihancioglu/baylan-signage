@@ -366,12 +366,6 @@ class GuiRuntime:
             if self._shutdown:
                 _hide_download_overlay()
                 _hide_idle_overlay()
-                if _next_tick is not None:
-                    try:
-                        root.after_cancel(_next_tick)
-                    except tk.TclError:
-                        pass
-                    _next_tick = None
                 root.destroy()
                 return
 
@@ -394,6 +388,7 @@ class GuiRuntime:
                     _hide_download_overlay()
                 elif event_name == "shutdown":
                     self._shutdown = True
+                    break
 
         root.after(50, process_events)
         root.mainloop()
@@ -1225,7 +1220,6 @@ def run_state_cycle():
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")
 
     if current_state == ClientState.IDLE_PENDING:
-        idle_background.show()
         playback.start()
         set_state(ClientState.PLAYING, "player_started")
 
