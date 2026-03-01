@@ -15,6 +15,7 @@ import builtins
 import shutil
 import tempfile
 from copy import deepcopy
+from queue import Empty, Queue
 from urllib import request as urllib_request
 from pathlib import Path
 import time
@@ -255,130 +256,174 @@ class _WindowManager:
         return True
 
 
-class DownloadStatusOverlay:
+class GuiRuntime:
     def __init__(self):
-        self._active = False
-        self._message = ""
-        self._lock = threading.Lock()
+        self._queue = Queue()
         self._thread = None
+        self._started = threading.Event()
+        self._shutdown = False
+        self._download_overlay_visible = False
+        self._state_lock = threading.Lock()
 
-    def show(self, message: str):
-        with self._lock:
-            self._message = message
-            if self._active:
-                return
-            self._active = True
-
-        self._thread = threading.Thread(target=self._run, daemon=True)
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._shutdown = False
+        self._started.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="gui-thread")
         self._thread.start()
+        self._started.wait(timeout=3)
 
-    def update(self, message: str):
-        with self._lock:
-            self._message = message
+    def stop(self):
+        self._shutdown = True
+        self.post("shutdown")
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1)
 
-    def hide(self):
-        with self._lock:
-            self._active = False
+    def post(self, event_name: str, payload=None):
+        self._queue.put((event_name, payload))
 
-    def is_active(self) -> bool:
-        with self._lock:
-            return self._active
+    def download_overlay_active(self) -> bool:
+        with self._state_lock:
+            return self._download_overlay_visible
+
+    def _set_download_overlay_state(self, visible: bool):
+        with self._state_lock:
+            self._download_overlay_visible = visible
 
     def _run(self):
         try:
             import tkinter as tk
         except Exception as exc:
-            print(f"⚠️ overlay açılamadı (tkinter yok): {exc}")
+            logging.warning("GUI runtime başlatılamadı: %s", exc)
+            self._started.set()
             return
 
         root = tk.Tk()
-        root.configure(bg="black")
-        root.attributes("-fullscreen", True)
-        root.attributes("-topmost", True)
-        root.title("Baylan Dijital Bilgi")
+        root.withdraw()
+        self._started.set()
 
-        label = tk.Label(
-            root,
-            text="",
-            fg="white",
-            bg="black",
-            font=("Arial", 38, "bold"),
-            justify="center",
-            wraplength=1400,
-        )
-        label.place(relx=0.5, rely=0.5, anchor="center")
+        idle_window = None
+        download_window = None
+        download_label = None
 
-        def refresh():
-            with self._lock:
-                active = self._active
-                message = self._message
-            if not active:
-                root.destroy()
+        def _show_idle_overlay():
+            nonlocal idle_window
+            if idle_window is not None and idle_window.winfo_exists():
                 return
-            label.config(text=message)
-            root.after(200, refresh)
+            idle_window = tk.Toplevel(root)
+            idle_window.configure(bg="black")
+            idle_window.attributes("-fullscreen", True)
+            idle_window.attributes("-topmost", True)
+            idle_window.overrideredirect(True)
+            idle_window.title("Baylan Idle Background")
 
-        root.after(50, refresh)
+        def _hide_idle_overlay():
+            nonlocal idle_window
+            if idle_window is not None and idle_window.winfo_exists():
+                idle_window.destroy()
+            idle_window = None
+
+        def _show_download_overlay(message: str):
+            nonlocal download_window, download_label
+            if download_window is None or not download_window.winfo_exists():
+                download_window = tk.Toplevel(root)
+                download_window.configure(bg="black")
+                download_window.attributes("-fullscreen", True)
+                download_window.attributes("-topmost", True)
+                download_window.title("Baylan Dijital Bilgi")
+                download_label = tk.Label(
+                    download_window,
+                    text="",
+                    fg="white",
+                    bg="black",
+                    font=("Arial", 38, "bold"),
+                    justify="center",
+                    wraplength=1400,
+                )
+                download_label.place(relx=0.5, rely=0.5, anchor="center")
+            if download_label is not None:
+                download_label.config(text=message)
+            self._set_download_overlay_state(True)
+
+        def _hide_download_overlay():
+            nonlocal download_window, download_label
+            if download_window is not None and download_window.winfo_exists():
+                download_window.destroy()
+            download_window = None
+            download_label = None
+            self._set_download_overlay_state(False)
+
+        def process_events():
+            if self._shutdown:
+                _hide_download_overlay()
+                _hide_idle_overlay()
+                root.quit()
+                return
+
+            while True:
+                try:
+                    event_name, payload = self._queue.get_nowait()
+                except Empty:
+                    break
+
+                if event_name == "idle_overlay_show":
+                    _show_idle_overlay()
+                elif event_name == "idle_overlay_hide":
+                    _hide_idle_overlay()
+                elif event_name == "download_overlay_show":
+                    _show_download_overlay(str(payload or ""))
+                elif event_name == "download_overlay_update":
+                    if self.download_overlay_active():
+                        _show_download_overlay(str(payload or ""))
+                elif event_name == "download_overlay_hide":
+                    _hide_download_overlay()
+                elif event_name == "shutdown":
+                    self._shutdown = True
+
+            root.after(50, process_events)
+
+        root.after(50, process_events)
         root.mainloop()
 
 
+class DownloadStatusOverlay:
+    def __init__(self, gui_runtime: GuiRuntime):
+        self._gui_runtime = gui_runtime
+
+    def show(self, message: str):
+        self._gui_runtime.post("download_overlay_show", message)
+
+    def update(self, message: str):
+        self._gui_runtime.post("download_overlay_update", message)
+
+    def hide(self):
+        self._gui_runtime.post("download_overlay_hide")
+
+    def is_active(self) -> bool:
+        return self._gui_runtime.download_overlay_active()
+
+
 class IdleBackgroundOverlay:
-    def __init__(self):
-        self._active = False
-        self._lock = threading.Lock()
-        self._thread = None
+    def __init__(self, gui_runtime: GuiRuntime):
+        self._gui_runtime = gui_runtime
 
     def show(self):
         if not platform.system().lower().startswith("win"):
             return
-
-        with self._lock:
-            if self._active:
-                return
-            self._active = True
-
-        self._thread = threading.Thread(target=self._run, daemon=True, name="idle-blackout")
-        self._thread.start()
+        self._gui_runtime.post("idle_overlay_show")
 
     def hide(self):
-        with self._lock:
-            self._active = False
-
-    def _run(self):
-        try:
-            import tkinter as tk
-        except Exception as exc:
-            logging.warning("IdleBackgroundOverlay başlatılamadı: %s", exc)
-            with self._lock:
-                self._active = False
-            return
-
-        root = tk.Tk()
-        root.configure(bg="black")
-        root.attributes("-fullscreen", True)
-        root.attributes("-topmost", True)
-        root.overrideredirect(True)
-        root.title("Baylan Idle Background")
-
-        def refresh():
-            with self._lock:
-                active = self._active
-            if not active:
-                root.destroy()
-                return
-            root.after(200, refresh)
-
-        root.after(50, refresh)
-        root.mainloop()
+        self._gui_runtime.post("idle_overlay_hide")
 
 
 class PlaybackController:
-    def __init__(self):
+    def __init__(self, gui_runtime: GuiRuntime):
         self.media_manager = MediaManager(
             cache_root=str(_resolve_runtime_path(os.getenv("MEDIA_CACHE_DIR", "client/cache")))
         )
         self.player = BorderlessFullscreenPlayer()
-        self.overlay = DownloadStatusOverlay()
+        self.overlay = DownloadStatusOverlay(gui_runtime)
         cached_entries = self.media_manager.load_last_successful_playlist_entries()
         self._playlist_entries: list[dict] = cached_entries or [
             {"local_path": p, "duration_sec": None, "media_type": None}
@@ -402,7 +447,7 @@ class PlaybackController:
         self._active_item = None
         self._playback_state_lock = threading.Lock()
         self._playback_state = self._sanitize_playback_state(self.media_manager.load_playback_state())
-        self._background_overlay = IdleBackgroundOverlay()
+        self._background_overlay = IdleBackgroundOverlay(gui_runtime)
 
     @staticmethod
     def _sanitize_playback_state(raw_state: dict) -> dict:
@@ -727,8 +772,9 @@ class PlaybackController:
 
 
 window_manager = _WindowManager()
-playback = PlaybackController()
-idle_background = IdleBackgroundOverlay()
+gui_runtime = GuiRuntime()
+playback = PlaybackController(gui_runtime)
+idle_background = IdleBackgroundOverlay(gui_runtime)
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
@@ -1193,6 +1239,7 @@ def main():
     global update_shutdown_requested
     hide_console_window()
     start_console_hider()
+    gui_runtime.start()
     systray.start()
     print("Connecting to:", SERVER_URL)
 
@@ -1262,6 +1309,7 @@ def main():
     except Exception:
         pass
     systray.stop()
+    gui_runtime.stop()
 
     if update_shutdown_requested:
         # Updater waits for this PID to end before swapping the executable.
