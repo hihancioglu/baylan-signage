@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import threading
-from copy import deepcopy
 import shutil
 import tempfile
 import time
@@ -66,19 +65,30 @@ class MediaManager:
         if isinstance(value, dict):
             seen.add(obj_id)
             normalized = {}
-            for key, item in value.items():
-                safe_key = key if isinstance(key, str) else str(key)
+            try:
+                items = list(value.items())
+            except Exception:
+                items = []
+
+            for key, item in items:
+                safe_key = key if isinstance(key, str) else f"<{type(key).__name__}>"
                 normalized[safe_key] = MediaManager._json_safe(item, seen)
             seen.remove(obj_id)
             return normalized
 
         if isinstance(value, (list, tuple, set)):
             seen.add(obj_id)
-            normalized = [MediaManager._json_safe(item, seen) for item in value]
+            try:
+                iterable = list(value)
+            except Exception:
+                iterable = []
+            normalized = [MediaManager._json_safe(item, seen) for item in iterable]
             seen.remove(obj_id)
             return normalized
 
-        return str(value)
+        # Avoid calling user-defined __str__/__repr__ methods from background
+        # threads (e.g. Tkinter objects), which can crash on Windows.
+        return f"<{type(value).__name__}>"
 
     @staticmethod
     def _safe_print(message: str):
@@ -91,15 +101,7 @@ class MediaManager:
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Take a detached snapshot before serialization. Some caller-owned objects
-        # can still be mutated while we're encoding, which is especially risky
-        # when sync callbacks run on background threads.
-        try:
-            payload_snapshot = deepcopy(payload)
-        except Exception:
-            payload_snapshot = payload
-
-        safe_payload = MediaManager._json_safe(payload_snapshot)
+        safe_payload = MediaManager._json_safe(payload)
 
         for attempt in range(5):
             tmp_path = None
@@ -381,5 +383,5 @@ class MediaManager:
     def save_playback_state(self, playback_state: dict):
         with self._state_lock:
             state = self._load_state()
-            state["playback_state"] = deepcopy(playback_state) if isinstance(playback_state, dict) else {}
+            state["playback_state"] = playback_state if isinstance(playback_state, dict) else {}
             self._save_state(state)
