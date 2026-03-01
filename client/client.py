@@ -467,6 +467,18 @@ class PlaybackController:
             state_snapshot = deepcopy(self._playback_state) if isinstance(self._playback_state, dict) else {}
         self.media_manager.save_playback_state(state_snapshot)
 
+    def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
+        for entry in playlist_entries:
+            media_path = str((entry or {}).get("local_path") or "")
+            if not media_path or not self.player.is_image(media_path):
+                continue
+
+            duration_sec = (entry or {}).get("duration_sec")
+            if isinstance(duration_sec, int) and duration_sec > 0 and duration_sec != self.player.image_duration_sec:
+                return False
+
+        return True
+
     def update_from_config(self, config: dict):
         enabled = bool(config.get("enabled", True))
         videos = config.get("videos") or []
@@ -593,7 +605,7 @@ class PlaybackController:
                 if loop_mode == "sequential":
                     playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries]
                     playlist_paths = [path for path in playlist_paths if path]
-                    if self.player.can_play_with_mpv_playlist(playlist_paths):
+                    if self._can_use_mpv_playlist_mode(playlist_entries) and self.player.can_play_with_mpv_playlist(playlist_paths):
                         self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist"}
                         self._active_item_started_at = time.monotonic()
                         ok = self.player.play_mpv_playlist_blocking(playlist_paths)
