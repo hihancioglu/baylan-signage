@@ -354,11 +354,25 @@ class GuiRuntime:
             download_label = None
             self._set_download_overlay_state(False)
 
+        _next_tick = None
+
         def process_events():
+            nonlocal _next_tick
+            try:
+                _next_tick = root.after(50, process_events)
+            except tk.TclError:
+                return
+
             if self._shutdown:
                 _hide_download_overlay()
                 _hide_idle_overlay()
-                root.quit()
+                if _next_tick is not None:
+                    try:
+                        root.after_cancel(_next_tick)
+                    except tk.TclError:
+                        pass
+                    _next_tick = None
+                root.destroy()
                 return
 
             while True:
@@ -380,8 +394,6 @@ class GuiRuntime:
                     _hide_download_overlay()
                 elif event_name == "shutdown":
                     self._shutdown = True
-
-            root.after(50, process_events)
 
         root.after(50, process_events)
         root.mainloop()
@@ -660,7 +672,6 @@ class PlaybackController:
     def _run(self):
         try:
             while self._running:
-                self._background_overlay.show()
                 with self._lock:
                     playlist_entries = self._effective_playlist(list(self._playlist_entries))
                     sync_in_progress = self._sync_in_progress
