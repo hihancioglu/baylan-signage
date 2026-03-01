@@ -14,6 +14,7 @@ import faulthandler
 import builtins
 import shutil
 import tempfile
+from copy import deepcopy
 from urllib import request as urllib_request
 from pathlib import Path
 import time
@@ -463,7 +464,7 @@ class PlaybackController:
 
     def _persist_playback_state(self):
         with self._playback_state_lock:
-            state_snapshot = dict(self._playback_state) if isinstance(self._playback_state, dict) else {}
+            state_snapshot = deepcopy(self._playback_state) if isinstance(self._playback_state, dict) else {}
         self.media_manager.save_playback_state(state_snapshot)
 
     def update_from_config(self, config: dict):
