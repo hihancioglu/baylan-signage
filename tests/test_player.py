@@ -162,5 +162,38 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(popen.call_count, 1)
 
 
+class _FakePlaybackPlayer:
+    image_duration_sec = 8
+
+    @staticmethod
+    def is_image(media_path: str) -> bool:
+        return media_path.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"))
+
+
+class TestPlaybackControllerMpvGate(unittest.TestCase):
+    def _build_controller(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController()
+        controller.player = _FakePlaybackPlayer()
+        return controller
+
+    def test_disables_mpv_playlist_when_image_has_custom_duration(self):
+        controller = self._build_controller()
+        entries = [
+            {"local_path": "/tmp/a.jpg", "duration_sec": 20, "media_type": "image"},
+            {"local_path": "/tmp/b.jpg", "duration_sec": 20, "media_type": "image"},
+        ]
+        self.assertFalse(controller._can_use_mpv_playlist_mode(entries))
+
+    def test_allows_mpv_playlist_when_image_duration_matches_default(self):
+        controller = self._build_controller()
+        entries = [
+            {"local_path": "/tmp/a.jpg", "duration_sec": 8, "media_type": "image"},
+            {"local_path": "/tmp/b.png", "duration_sec": None, "media_type": "image"},
+        ]
+        self.assertTrue(controller._can_use_mpv_playlist_mode(entries))
+
+
 if __name__ == "__main__":
     unittest.main()
