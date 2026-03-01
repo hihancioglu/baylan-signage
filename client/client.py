@@ -176,6 +176,26 @@ def log_info(message: str):
     logging.info(message)
 
 
+def flush_and_shutdown_logging():
+    """Best-effort flush so last shutdown messages are not lost on forced exits."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+
+    try:
+        logging.shutdown()
+    except Exception:
+        pass
+
+
 setup_debug_logging()
 log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
 log_info(f"🏷️ client version: {CLIENT_VERSION}")
@@ -1353,6 +1373,7 @@ def main():
     if update_shutdown_requested:
         # Updater waits for this PID to end before swapping the executable.
         # os._exit guarantees immediate process exit even if background threads are still alive.
+        flush_and_shutdown_logging()
         os._exit(0)
 
 
