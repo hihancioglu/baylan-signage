@@ -194,6 +194,46 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ]
         self.assertTrue(controller._can_use_mpv_playlist_mode(entries))
 
+    def test_sanitize_playback_state_keeps_known_primitive_fields(self):
+        from client.client import PlaybackController
+
+        sanitized = PlaybackController._sanitize_playback_state(
+            {
+                "playlist_key": 123,
+                "random_order": ["/tmp/a.mp4", None, 7],
+                "random_pos": "2",
+                "index": "3",
+                "resume_sec": "4.5",
+                "unexpected": {"nested": "value"},
+            }
+        )
+
+        self.assertEqual(
+            sanitized,
+            {
+                "playlist_key": "123",
+                "random_order": ["/tmp/a.mp4", "7"],
+                "random_pos": 2,
+                "index": 3,
+                "resume_sec": 4.5,
+            },
+        )
+
+    def test_sanitize_playback_state_defaults_invalid_numbers(self):
+        from client.client import PlaybackController
+
+        sanitized = PlaybackController._sanitize_playback_state(
+            {
+                "random_pos": object(),
+                "index": "bad",
+                "resume_sec": object(),
+            }
+        )
+
+        self.assertEqual(sanitized["random_pos"], 0)
+        self.assertEqual(sanitized["index"], 0)
+        self.assertEqual(sanitized["resume_sec"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
