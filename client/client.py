@@ -401,8 +401,44 @@ class PlaybackController:
         self._active_item_started_at = None
         self._active_item = None
         self._playback_state_lock = threading.Lock()
-        self._playback_state = self.media_manager.load_playback_state()
+        self._playback_state = self._sanitize_playback_state(self.media_manager.load_playback_state())
         self._background_overlay = IdleBackgroundOverlay()
+
+    @staticmethod
+    def _sanitize_playback_state(raw_state: dict) -> dict:
+        """
+        Keep persisted playback state JSON-safe and limited to known primitive fields.
+
+        This avoids traversing arbitrary object graphs from background worker threads,
+        which can trigger unstable cross-thread behavior in some Windows runtimes.
+        """
+        state = raw_state if isinstance(raw_state, dict) else {}
+        sanitized: dict = {}
+
+        playlist_key = state.get("playlist_key")
+        if playlist_key is not None:
+            sanitized["playlist_key"] = str(playlist_key)
+
+        random_order = state.get("random_order")
+        if isinstance(random_order, list):
+            sanitized["random_order"] = [str(item) for item in random_order if item is not None]
+
+        try:
+            sanitized["random_pos"] = max(0, int(state.get("random_pos") or 0))
+        except (TypeError, ValueError):
+            sanitized["random_pos"] = 0
+
+        try:
+            sanitized["index"] = max(0, int(state.get("index") or 0))
+        except (TypeError, ValueError):
+            sanitized["index"] = 0
+
+        try:
+            sanitized["resume_sec"] = max(0.0, float(state.get("resume_sec") or 0.0))
+        except (TypeError, ValueError):
+            sanitized["resume_sec"] = 0.0
+
+        return sanitized
 
     def _on_sync_progress(self, progress: dict):
         with self._lock:
@@ -465,6 +501,8 @@ class PlaybackController:
     def _persist_playback_state(self):
         with self._playback_state_lock:
             state_snapshot = deepcopy(self._playback_state) if isinstance(self._playback_state, dict) else {}
+            state_snapshot = self._sanitize_playback_state(state_snapshot)
+            self._playback_state = state_snapshot
         self.media_manager.save_playback_state(state_snapshot)
 
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
