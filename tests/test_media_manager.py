@@ -112,6 +112,18 @@ class TestMediaManagerManifestWrite(unittest.TestCase):
             self.assertGreaterEqual(calls["count"], 2)
             self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"ok": True})
 
+
+    def test_write_json_atomic_handles_circular_references(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "state.json"
+            payload = {"items": []}
+            payload["self"] = payload
+
+            MediaManager._write_json_atomic(target, payload)
+
+            written = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(written["self"], "<circular-reference>")
+
     def test_safe_print_swallows_os_error(self):
         with patch("builtins.print", side_effect=OSError(6, "Invalid handle")):
             MediaManager._safe_print("hello")

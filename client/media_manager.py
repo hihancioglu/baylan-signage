@@ -51,6 +51,35 @@ class MediaManager:
             self._write_json_atomic(self.state_file, safe_state)
 
     @staticmethod
+    def _json_safe(value, seen: set[int] | None = None):
+        if seen is None:
+            seen = set()
+
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+
+        obj_id = id(value)
+        if obj_id in seen:
+            return "<circular-reference>"
+
+        if isinstance(value, dict):
+            seen.add(obj_id)
+            normalized = {}
+            for key, item in value.items():
+                safe_key = key if isinstance(key, str) else str(key)
+                normalized[safe_key] = MediaManager._json_safe(item, seen)
+            seen.remove(obj_id)
+            return normalized
+
+        if isinstance(value, (list, tuple, set)):
+            seen.add(obj_id)
+            normalized = [MediaManager._json_safe(item, seen) for item in value]
+            seen.remove(obj_id)
+            return normalized
+
+        return str(value)
+
+    @staticmethod
     def _safe_print(message: str):
         try:
             print(message)
@@ -61,6 +90,7 @@ class MediaManager:
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict):
         path.parent.mkdir(parents=True, exist_ok=True)
+        safe_payload = MediaManager._json_safe(payload)
 
         for attempt in range(5):
             tmp_path = None
@@ -68,7 +98,7 @@ class MediaManager:
                 with tempfile.NamedTemporaryFile(
                     mode="w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
                 ) as fh:
-                    json.dump(payload, fh, ensure_ascii=False, indent=2)
+                    json.dump(safe_payload, fh, ensure_ascii=False, indent=2)
                     fh.flush()
                     os.fsync(fh.fileno())
                     tmp_path = Path(fh.name)
@@ -309,7 +339,7 @@ class MediaManager:
                     state["last_successful_playlist"] = [entry["local_path"] for entry in local_entries]
                     state["last_successful_playlist_entries"] = local_entries
                     self._save_state(state)
-            except OSError as exc:
+            except Exception as exc:
                 self._safe_print(f"⚠️ manifest/state yazımı başarısız: {manifest_path} | {exc}")
 
         return local_entries
