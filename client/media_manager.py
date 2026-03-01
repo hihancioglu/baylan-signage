@@ -6,6 +6,7 @@ from copy import deepcopy
 import shutil
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
@@ -103,17 +104,16 @@ class MediaManager:
         for attempt in range(5):
             tmp_path = None
             try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
-                ) as fh:
+                tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+                fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(safe_payload, fh, ensure_ascii=False, indent=2)
                     fh.flush()
                     os.fsync(fh.fileno())
-                    tmp_path = Path(fh.name)
 
                 tmp_path.replace(path)
                 return
-            except PermissionError:
+            except (FileExistsError, PermissionError):
                 if attempt == 4:
                     raise
                 time.sleep(0.05 * (attempt + 1))
