@@ -590,6 +590,9 @@ class PlaybackController:
         return True
 
     def update_from_config(self, config: dict):
+        with self._lock:
+            was_fallback_only_mode = self._fallback_only_mode
+
         enabled = bool(config.get("enabled", True))
         videos = config.get("videos") or []
         playlist_version = config.get("playlist_version") or "default"
@@ -636,6 +639,8 @@ class PlaybackController:
             return
 
         if self._version == playlist_version and self._playlist_entries:
+            if was_fallback_only_mode:
+                self.player.stop()
             return
 
         normalized_items = []
@@ -657,6 +662,8 @@ class PlaybackController:
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
+            if was_fallback_only_mode:
+                self.player.stop()
             print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_entries)}")
             return
 
@@ -665,6 +672,8 @@ class PlaybackController:
             with self._lock:
                 self._playlist_entries = fallback
                 self._sync_in_progress = False
+            if was_fallback_only_mode:
+                self.player.stop()
             print("📦 Offline mode: last successful cache playlist ile devam ediliyor")
 
     def start(self):

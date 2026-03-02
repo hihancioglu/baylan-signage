@@ -177,6 +177,10 @@ class _FakePlaybackPlayer:
     def play_mpv_playlist_blocking(media_paths: list[str], image_duration_sec: int | None = None) -> bool:
         return True
 
+    @staticmethod
+    def stop() -> None:
+        return None
+
 
 class _FakeGuiRuntime:
     def download_overlay_active(self) -> bool:
@@ -283,6 +287,31 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         self.assertTrue(player.play_mpv_playlist_blocking.called)
         self.assertTrue(player.play_blocking.called)
+
+    def test_update_from_config_stops_fallback_playback_when_enabled_config_arrives_with_same_version(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        controller.player = player
+
+        controller._fallback_only_mode = True
+        controller._version = "ver-1"
+        controller._playlist_entries = [{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}]
+
+        with patch.object(controller.media_manager, "sync_playlist_entries", return_value=[]):
+            controller.update_from_config(
+                {
+                    "enabled": True,
+                    "videos": [{"path": "https://example.com/a.mp4", "media_type": "video", "duration_sec": None}],
+                    "playlist_version": "ver-1",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                }
+            )
+
+        player.stop.assert_called_once()
 
 
 if __name__ == "__main__":
