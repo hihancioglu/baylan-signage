@@ -732,10 +732,11 @@ class PlaybackController:
                         ok = self.player.play_mpv_playlist_blocking(playlist_paths)
                         self._active_item = None
                         self._active_item_started_at = None
-                        if not ok:
-                            print("⚠️ mpv playlist oynatma başarısız, tekli oynatma moduna dönülüyor")
-                        time.sleep(0.2)
-                        continue
+                        if ok:
+                            time.sleep(0.2)
+                            continue
+
+                        print("⚠️ mpv playlist oynatma başarısız, tekli oynatma moduna dönülüyor")
 
                 if loop_mode == "random":
                     order = runtime_state.get("random_order") or []
