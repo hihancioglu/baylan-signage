@@ -51,6 +51,7 @@ SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
 HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
+CONFIG_PULL_INTERVAL_SEC = float(os.getenv("CONFIG_PULL_INTERVAL_SEC", "30"))
 STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
@@ -1171,6 +1172,7 @@ def connect():
             "content_name": playback.current_content_name(),
         },
     )
+    sio.emit("pull_config", {"hostname": hostname})
 
 
 @sio.event
@@ -1329,6 +1331,7 @@ def main():
             time.sleep(RECONNECT_RETRY_SEC)
 
     next_heartbeat_at = time.monotonic()
+    next_config_pull_at = time.monotonic()
 
     while not shutdown_event.is_set():
         try:
@@ -1365,6 +1368,15 @@ def main():
                     continue
 
                 next_heartbeat_at = now + HEARTBEAT_INTERVAL_SEC
+
+            if CONFIG_PULL_INTERVAL_SEC > 0 and now >= next_config_pull_at:
+                if sio.connected:
+                    try:
+                        sio.emit("pull_config", {"hostname": hostname})
+                        print("🔄 periodic config pull requested")
+                    except Exception as pull_err:
+                        print(f"⚠️ Periodic config pull failed: {pull_err}")
+                next_config_pull_at = now + CONFIG_PULL_INTERVAL_SEC
             time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
         except KeyboardInterrupt:
             print("🛑 Client interrupted")
