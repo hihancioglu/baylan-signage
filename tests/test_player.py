@@ -169,12 +169,28 @@ class _FakePlaybackPlayer:
     def is_image(media_path: str) -> bool:
         return media_path.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"))
 
+    @staticmethod
+    def can_play_with_mpv_playlist(media_paths: list[str]) -> bool:
+        return bool(media_paths)
+
+    @staticmethod
+    def play_mpv_playlist_blocking(media_paths: list[str], image_duration_sec: int | None = None) -> bool:
+        return True
+
+
+class _FakeGuiRuntime:
+    def download_overlay_active(self) -> bool:
+        return False
+
+    def post(self, event_name: str, payload=None):
+        return None
+
 
 class TestPlaybackControllerMpvGate(unittest.TestCase):
     def _build_controller(self):
         from client.client import PlaybackController
 
-        controller = PlaybackController()
+        controller = PlaybackController(_FakeGuiRuntime())
         controller.player = _FakePlaybackPlayer()
         return controller
 
@@ -233,6 +249,40 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertEqual(sanitized["random_pos"], 0)
         self.assertEqual(sanitized["index"], 0)
         self.assertEqual(sanitized["resume_sec"], 0.0)
+
+    def test_failed_mpv_playlist_falls_back_to_single_playback(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_image.return_value = False
+        player.can_play_with_mpv_playlist.return_value = True
+        player.play_mpv_playlist_blocking.return_value = False
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+        controller.player = player
+
+        def _single_playback(*args, **kwargs):
+            controller._running = False
+            return True
+
+        player.play_blocking.side_effect = _single_playback
+
+        with patch.object(controller, "_can_use_mpv_playlist_mode", return_value=True), patch.object(
+            controller,
+            "_effective_playlist",
+            return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}],
+        ), patch.object(controller, "_restore_or_init_runtime_state", return_value={"index": 0, "resume_sec": 0}), patch.object(
+            controller,
+            "_persist_playback_state",
+            return_value=None,
+        ), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        self.assertTrue(player.play_mpv_playlist_blocking.called)
+        self.assertTrue(player.play_blocking.called)
 
 
 if __name__ == "__main__":
