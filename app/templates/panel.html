@@ -307,7 +307,8 @@ async function loadDevices(){
     const tr = document.createElement('tr');
     const safeHostname = encodeURIComponent(d.hostname || '');
     const normalizedState = (d.last_state || d.state_display || '').toUpperCase();
-    const stateText = normalizedState.includes('IDLE') ? 'IDLE' : 'AKTIF';
+    const hasContentOnScreen = Boolean((d.last_content_name || '').trim());
+    const stateText = (normalizedState.includes('IDLE') || hasContentOnScreen) ? 'IDLE' : 'AKTIF';
 
     tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
     body.appendChild(tr);
