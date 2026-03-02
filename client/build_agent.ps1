@@ -23,6 +23,7 @@ Write-Host "[2/4] Building client executable..."
     --noconfirm `
     --clean `
     --onefile `
+    --noconsole `
     --name $Name `
     --distpath $OutputDir `
     $ClientScript
