@@ -1287,11 +1287,13 @@ def run_state_cycle():
 
     if current_state == ClientState.IDLE_PENDING:
         playback.start()
-        # Idle overlay yalnızca ERP ekranını gizlemek için kullanılıyor.
-        # Oynatma başladıktan sonra overlay açık kalırsa (özellikle Windows
-        # yeniden başlatma sonrası) topmost siyah pencere içerikleri kapatabiliyor.
-        idle_background.hide()
+        # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
+        # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
+        # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
         set_state(ClientState.PLAYING, "player_started")
+
+    if current_state == ClientState.PLAYING and playback.current_content_name():
+        idle_background.hide()
 
     played_for_sec = time.monotonic() - playing_started_at
     if (
