@@ -133,6 +133,8 @@ def _resolve_debug_log_path() -> Path:
 
 
 ACTIVE_DEBUG_LOG_PATH = _resolve_debug_log_path()
+INSTANCE_LOCK_PATH = Path(tempfile.gettempdir()) / "baylan-client.lock"
+instance_lock_fd: int | None = None
 
 
 def setup_debug_logging():
@@ -194,6 +196,59 @@ def flush_and_shutdown_logging():
     try:
         logging.shutdown()
     except Exception:
+        pass
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def already_running() -> bool:
+    """Ensure only one client process is active by acquiring a pid lock file."""
+    global instance_lock_fd
+
+    for _ in range(2):
+        try:
+            instance_lock_fd = os.open(str(INSTANCE_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            os.write(instance_lock_fd, str(os.getpid()).encode("utf-8"))
+            return False
+        except FileExistsError:
+            try:
+                raw_pid = INSTANCE_LOCK_PATH.read_text(encoding="utf-8").strip()
+                existing_pid = int(raw_pid)
+            except (OSError, ValueError):
+                existing_pid = 0
+
+            if not _pid_is_running(existing_pid):
+                try:
+                    INSTANCE_LOCK_PATH.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
+
+            log_info(f"⚠️ client zaten çalışıyor (pid={existing_pid}), çıkılıyor.")
+            return True
+
+    return False
+
+
+def release_instance_lock() -> None:
+    global instance_lock_fd
+    if instance_lock_fd is not None:
+        try:
+            os.close(instance_lock_fd)
+        except OSError:
+            pass
+        instance_lock_fd = None
+    try:
+        INSTANCE_LOCK_PATH.unlink(missing_ok=True)
+    except OSError:
         pass
 
 
@@ -1314,95 +1369,102 @@ def run_state_cycle():
 
 def main():
     global update_shutdown_requested
-    hide_console_window()
-    start_console_hider()
-    gui_runtime.start()
-    systray.start()
-    print("Connecting to:", SERVER_URL)
+    if already_running():
+        return
 
-    while not shutdown_event.is_set():
-        try:
-            if not sio.connected:
-                sio.connect(SERVER_URL)
-            break
-        except KeyboardInterrupt:
-            print("🛑 Client interrupted during connect")
-            return
-        except Exception as e:
-            print("Connection failed, retrying...", e)
-            time.sleep(RECONNECT_RETRY_SEC)
+    try:
+        hide_console_window()
+        start_console_hider()
+        gui_runtime.start()
+        systray.start()
+        print("Connecting to:", SERVER_URL)
 
-    next_heartbeat_at = time.monotonic()
-    next_config_pull_at = time.monotonic()
-
-    while not shutdown_event.is_set():
-        try:
-            idle_sec = run_state_cycle()
-            now = time.monotonic()
-            if now >= next_heartbeat_at:
+        while not shutdown_event.is_set():
+            try:
                 if not sio.connected:
+                    sio.connect(SERVER_URL)
+                break
+            except KeyboardInterrupt:
+                print("🛑 Client interrupted during connect")
+                return
+            except Exception as e:
+                print("Connection failed, retrying...", e)
+                time.sleep(RECONNECT_RETRY_SEC)
+
+        next_heartbeat_at = time.monotonic()
+        next_config_pull_at = time.monotonic()
+
+        while not shutdown_event.is_set():
+            try:
+                idle_sec = run_state_cycle()
+                now = time.monotonic()
+                if now >= next_heartbeat_at:
+                    if not sio.connected:
+                        try:
+                            sio.connect(SERVER_URL)
+                        except Exception as reconnect_err:
+                            print(f"⚠️ Reconnect failed: {reconnect_err}")
+                            next_heartbeat_at = now + RECONNECT_RETRY_SEC
+                            time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
+                            continue
+
                     try:
-                        sio.connect(SERVER_URL)
-                    except Exception as reconnect_err:
-                        print(f"⚠️ Reconnect failed: {reconnect_err}")
+                        sio.emit(
+                            "heartbeat",
+                            {
+                                "hostname": hostname,
+                                "current_state": current_state.value,
+                                "state": current_state.value,
+                                "idle_seconds": round(idle_sec, 1),
+                                "os_name": platform.system(),
+                                "agent_version": CLIENT_VERSION,
+                                "content_name": playback.current_content_name(),
+                            },
+                        )
+                        print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
+                    except Exception as heartbeat_err:
+                        print(f"⚠️ Heartbeat send failed: {heartbeat_err}")
                         next_heartbeat_at = now + RECONNECT_RETRY_SEC
                         time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
                         continue
 
-                try:
-                    sio.emit(
-                        "heartbeat",
-                        {
-                            "hostname": hostname,
-                            "current_state": current_state.value,
-                            "state": current_state.value,
-                            "idle_seconds": round(idle_sec, 1),
-                            "os_name": platform.system(),
-                            "agent_version": CLIENT_VERSION,
-                            "content_name": playback.current_content_name(),
-                        },
-                    )
-                    print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
-                except Exception as heartbeat_err:
-                    print(f"⚠️ Heartbeat send failed: {heartbeat_err}")
-                    next_heartbeat_at = now + RECONNECT_RETRY_SEC
-                    time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
-                    continue
+                    next_heartbeat_at = now + HEARTBEAT_INTERVAL_SEC
 
-                next_heartbeat_at = now + HEARTBEAT_INTERVAL_SEC
+                if CONFIG_PULL_INTERVAL_SEC > 0 and now >= next_config_pull_at:
+                    if sio.connected:
+                        try:
+                            sio.emit("pull_config", {"hostname": hostname})
+                            print("🔄 periodic config pull requested")
+                        except Exception as pull_err:
+                            print(f"⚠️ Periodic config pull failed: {pull_err}")
+                    next_config_pull_at = now + CONFIG_PULL_INTERVAL_SEC
+                time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
+            except KeyboardInterrupt:
+                print("🛑 Client interrupted")
+                break
+            except Exception as e:
+                logging.exception("Heartbeat loop error")
+                print(f"⚠️ Heartbeat loop error, retrying: {e}\n{traceback.format_exc()}")
+                time.sleep(max(RECONNECT_RETRY_SEC, STATE_CHECK_INTERVAL_SEC))
+                continue
 
-            if CONFIG_PULL_INTERVAL_SEC > 0 and now >= next_config_pull_at:
-                if sio.connected:
-                    try:
-                        sio.emit("pull_config", {"hostname": hostname})
-                        print("🔄 periodic config pull requested")
-                    except Exception as pull_err:
-                        print(f"⚠️ Periodic config pull failed: {pull_err}")
-                next_config_pull_at = now + CONFIG_PULL_INTERVAL_SEC
-            time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
-        except KeyboardInterrupt:
-            print("🛑 Client interrupted")
-            break
-        except Exception as e:
-            logging.exception("Heartbeat loop error")
-            print(f"⚠️ Heartbeat loop error, retrying: {e}\n{traceback.format_exc()}")
-            time.sleep(max(RECONNECT_RETRY_SEC, STATE_CHECK_INTERVAL_SEC))
-            continue
+        idle_background.hide()
+        playback.stop()
+        try:
+            sio.disconnect()
+        except Exception:
+            pass
+        systray.stop()
+        gui_runtime.stop()
 
-    idle_background.hide()
-    playback.stop()
-    try:
-        sio.disconnect()
-    except Exception:
-        pass
-    systray.stop()
-    gui_runtime.stop()
-
-    if update_shutdown_requested:
-        # Updater waits for this PID to end before swapping the executable.
-        # os._exit guarantees immediate process exit even if background threads are still alive.
-        flush_and_shutdown_logging()
-        os._exit(0)
+        if update_shutdown_requested:
+            # Updater waits for this PID to end before swapping the executable.
+            # os._exit guarantees immediate process exit even if background threads are still alive.
+            release_instance_lock()
+            flush_and_shutdown_logging()
+            os._exit(0)
+    finally:
+        release_instance_lock()
 
 
 if __name__ == "__main__":
