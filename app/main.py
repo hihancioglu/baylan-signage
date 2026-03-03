@@ -171,6 +171,74 @@ def _build_client_updater_payload(db):
     return _build_release_payload(db, "client_updater")
 
 
+def _parse_iso_datetime(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _build_updater_rollout_payload(db, release):
+    devices = db.query(Device).all()
+    if not release:
+        return {
+            "total_clients": len(devices),
+            "updated_clients": 0,
+            "pending_clients": 0,
+            "online_pending_clients": 0,
+            "offline_pending_clients": 0,
+            "complete": False,
+            "clients": [],
+        }
+
+    release_version = str(release.get("version") or "")
+    published_at = _parse_iso_datetime(release.get("published_at"))
+    clients = []
+    updated_clients = 0
+
+    for device in devices:
+        current_version = str(device.agent_version or "")
+        is_updated = bool(current_version and current_version == release_version)
+        if is_updated:
+            updated_clients += 1
+
+        waiting_seconds = None
+        if (not is_updated) and published_at:
+            now_utc = datetime.now(timezone.utc)
+            if published_at.tzinfo is None:
+                now_utc = now_utc.replace(tzinfo=None)
+            waiting_seconds = max(0, int((now_utc - published_at).total_seconds()))
+
+        clients.append(
+            {
+                "hostname": device.hostname,
+                "alias": device.alias,
+                "is_online": bool(device.is_online),
+                "agent_version": device.agent_version,
+                "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+                "is_updated": is_updated,
+                "waiting_seconds": waiting_seconds,
+            }
+        )
+
+    pending_clients = len(devices) - updated_clients
+    online_pending_clients = sum(1 for item in clients if (not item["is_updated"]) and item["is_online"])
+    offline_pending_clients = pending_clients - online_pending_clients
+
+    clients.sort(key=lambda item: (item["is_updated"], item["hostname"]))
+    return {
+        "total_clients": len(devices),
+        "updated_clients": updated_clients,
+        "pending_clients": pending_clients,
+        "online_pending_clients": online_pending_clients,
+        "offline_pending_clients": offline_pending_clients,
+        "complete": len(devices) > 0 and pending_clients == 0,
+        "clients": clients,
+    }
+
+
 def _get_setting(db, key: str, default: str | None = None) -> str | None:
     row = db.query(AppSetting).filter_by(key=key).first()
     return row.value if row else default
@@ -1126,7 +1194,8 @@ def get_updater_settings():
     db = db_session()
     try:
         payload = _build_updater_payload(db)
-        return jsonify({"ok": True, "release": payload})
+        rollout = _build_updater_rollout_payload(db, payload)
+        return jsonify({"ok": True, "release": payload, "rollout": rollout})
     finally:
         db.close()
 
