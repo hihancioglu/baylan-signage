@@ -222,6 +222,23 @@ class TestConfigPush(unittest.TestCase):
         release = body.get("release") or {}
         self.assertEqual(release.get("version"), "build-20260227093045")
 
+    def test_upload_client_updater_detects_embedded_updater_build_version(self):
+        client = self.main.app.test_client()
+        payload = b"abcBAYLAN_UPDATER_BUILD:build-20260303110657xyz"
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = client.post(
+                "/api/client-updater/upload",
+                data={"file": (io.BytesIO(payload), "updater-release.exe")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json() or {}
+        self.assertTrue(body.get("ok"))
+        release = body.get("release") or {}
+        self.assertEqual(release.get("version"), "build-20260303110657")
+
     def test_playlist_items_api_returns_original_media_name_as_label(self):
         db = self.main.db_session()
         try:
