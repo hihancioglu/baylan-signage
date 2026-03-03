@@ -75,18 +75,34 @@ def _wait_for_pid_exit(old_pid: int, attempts: int, delay_sec: float, log_file: 
 
 
 def _copy_with_retry(src: Path, dst: Path, attempts: int, delay_sec: float, log_file: Path) -> bool:
+    if not _looks_like_windows_executable(src, log_file=log_file, label="src"):
+        _log(log_file, f"swap aborted: invalid executable payload in source file: {src}")
+        return False
+
     for idx in range(1, attempts + 1):
+        temp_dst = dst.with_suffix(dst.suffix + ".tmp")
         try:
-            shutil.copy2(src, dst)
+            shutil.copy2(src, temp_dst)
+            if not _looks_like_windows_executable(temp_dst, log_file=log_file, label="temp_dst"):
+                raise OSError(f"copied file is not a valid Windows executable: {temp_dst}")
+            os.replace(temp_dst, dst)
             _log(log_file, f"swap success: src={src} dst={dst}")
             return True
         except OSError as exc:
             _log(log_file, f"swap failed attempt={idx}: {exc}")
+            try:
+                temp_dst.unlink(missing_ok=True)
+            except OSError:
+                pass
             time.sleep(delay_sec)
     return False
 
 
 def _start_process(target: Path, work_dir: Path, log_file: Path) -> bool:
+    if not _looks_like_windows_executable(target, log_file=log_file, label="launch_target"):
+        _log(log_file, f"restart skipped: invalid executable payload in {target}")
+        return False
+
     try:
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen([str(target)], cwd=str(work_dir), creationflags=creation_flags)
@@ -122,6 +138,9 @@ def main() -> int:
         _log(log_file, "swap failed after retries, fallback to downloaded binary")
 
     started = _start_process(launch_target, work_dir=work_dir, log_file=log_file)
+    if not started and launch_target == dst and src.exists():
+        _log(log_file, "restart fallback: trying downloaded source binary")
+        started = _start_process(src, work_dir=work_dir, log_file=log_file)
     if started and launch_target != src:
         try:
             src.unlink(missing_ok=True)
@@ -131,6 +150,20 @@ def main() -> int:
 
     _log(log_file, "=== updater done ===")
     return 0 if started else 1
+
+
+def _looks_like_windows_executable(file_path: Path, log_file: Path, label: str) -> bool:
+    try:
+        with open(file_path, "rb") as fh:
+            magic = fh.read(2)
+    except OSError as exc:
+        _log(log_file, f"{label} read failed: path={file_path} err={exc}")
+        return False
+
+    is_valid = magic == b"MZ"
+    if not is_valid:
+        _log(log_file, f"{label} invalid executable magic: path={file_path} magic={magic!r}")
+    return is_valid
 
 
 if __name__ == "__main__":
