@@ -202,6 +202,29 @@ def flush_and_shutdown_logging():
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
+
+    if platform.system().lower().startswith("win"):
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        SYNCHRONIZE = 0x00100000
+        STILL_ACTIVE = 259
+
+        kernel32 = ctypes.windll.kernel32
+        process_handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            False,
+            pid,
+        )
+        if not process_handle:
+            return False
+
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(process_handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(process_handle)
+
     try:
         os.kill(pid, 0)
         return True
@@ -220,20 +243,26 @@ def already_running() -> bool:
             return False
         except FileExistsError:
             try:
-                raw_pid = INSTANCE_LOCK_PATH.read_text(encoding="utf-8").strip()
-                existing_pid = int(raw_pid)
-            except (OSError, ValueError):
-                existing_pid = 0
-
-            if not _pid_is_running(existing_pid):
                 try:
-                    INSTANCE_LOCK_PATH.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                continue
+                    raw_pid = INSTANCE_LOCK_PATH.read_text(encoding="utf-8").strip()
+                    existing_pid = int(raw_pid)
+                except (OSError, ValueError):
+                    existing_pid = 0
 
-            log_info(f"⚠️ client zaten çalışıyor (pid={existing_pid}), çıkılıyor.")
-            return True
+                if not _pid_is_running(existing_pid):
+                    try:
+                        INSTANCE_LOCK_PATH.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    continue
+
+                log_info(f"⚠️ client zaten çalışıyor (pid={existing_pid}), çıkılıyor.")
+                return True
+            except Exception as lock_err:
+                # Tekrarlı başlatma kontrolü çökerse istemciyi düşürmeyelim.
+                # Bu durumda güvenli davranış: ikinci süreç devam etmesin.
+                print(f"⚠️ lock doğrulama hatası: {lock_err}")
+                return True
 
     return False
 
