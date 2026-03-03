@@ -13,8 +13,8 @@
     .sidebar .nav-link.active { color: #0f172a; background: #38bdf8; font-weight: 600; }
     .content-wrap { max-width: 1100px; }
     .panel-card { border: 0; border-radius: 14px; box-shadow: 0 8px 25px rgba(15, 23, 42, .08); }
-    .online { color: #16a34a; font-weight: 700; }
-    .offline { color: #dc2626; font-weight: 700; }
+    .status-online { color: #16a34a; font-weight: 700; }
+    .status-offline { color: #dc2626; font-weight: 700; }
     .playlist-item { cursor: move; }
     .playlist-item.active { outline: 2px solid #0ea5e9; }
     .mini-card { border: 1px solid #e2e8f0; border-radius: 12px; }
@@ -310,7 +310,7 @@ async function loadDevices(){
     const hasContentOnScreen = Boolean((d.last_content_name || '').trim());
     const stateText = (normalizedState.includes('IDLE') || hasContentOnScreen) ? 'IDLE' : 'AKTIF';
 
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td class="${d.is_online?'online':'offline'}">${d.is_online?'Online':'Offline'}</td><td>${d.last_seen||''}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${d.last_seen||''}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
     body.appendChild(tr);
   });
 
