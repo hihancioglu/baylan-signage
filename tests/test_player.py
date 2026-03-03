@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from client.player import BorderlessFullscreenPlayer
@@ -287,6 +288,40 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         self.assertTrue(player.play_mpv_playlist_blocking.called)
         self.assertTrue(player.play_blocking.called)
+
+
+    def test_unversioned_updater_is_treated_as_missing(self):
+        from client.client import _is_missing_or_unversioned_build
+
+        self.assertTrue(_is_missing_or_unversioned_build(""))
+        self.assertTrue(_is_missing_or_unversioned_build("build-missing"))
+        self.assertTrue(_is_missing_or_unversioned_build("build-unknown"))
+        self.assertFalse(_is_missing_or_unversioned_build("build-20260227093045"))
+
+    def test_client_updater_update_forces_when_local_version_missing(self):
+        from client import client as client_module
+
+        config_data = {
+            "client_updater": {
+                "version": "build-20260227093045",
+                "url": "https://example.com/updater.exe",
+                "file_name": "BaylanUpdater.exe",
+            }
+        }
+
+        with patch.object(client_module, "AUTO_UPDATER_ENABLED", True), patch.object(
+            client_module,
+            "resolve_local_updater_version",
+            return_value="build-missing",
+        ), patch.object(client_module, "_download_release", return_value=Path("/tmp/updater.exe")) as download_mock, patch.object(
+            client_module,
+            "_apply_client_updater_package",
+            return_value="client_updater_swapped",
+        ) as apply_mock:
+            client_module._maybe_run_client_updater_update(config_data)
+
+        download_mock.assert_called_once_with(config_data["client_updater"])
+        apply_mock.assert_called_once()
 
     def test_update_from_config_stops_fallback_playback_when_enabled_config_arrives_with_same_version(self):
         from client.client import PlaybackController
