@@ -1062,6 +1062,11 @@ def _is_newer_version(incoming: str, current: str) -> bool:
         return incoming != current
 
 
+def _is_missing_or_unversioned_build(version: str) -> bool:
+    normalized = (version or "").strip().lower()
+    return normalized in {"", "unknown", "build-unknown", "build-missing", "build-unversioned"}
+
+
 def _download_release(update_info: dict) -> Path:
     url = update_info.get("url")
     file_name = update_info.get("file_name") or Path(url or "update.bin").name
@@ -1159,10 +1164,17 @@ def _maybe_run_client_updater_update(config_data):
         return
 
     local_version = resolve_local_updater_version()
-    if not _is_newer_version(incoming_version, local_version):
+    should_force_update = _is_missing_or_unversioned_build(local_version)
+    if not should_force_update and not _is_newer_version(incoming_version, local_version):
         return
 
-    log_info(f"⬆️ Yeni updater sürümü bulundu: {incoming_version} (current={local_version})")
+    if should_force_update:
+        log_info(
+            f"⬆️ Updater sürümü dosyada bulunamadı, en güncel sürüm zorunlu indiriliyor: "
+            f"{incoming_version} (current={local_version})"
+        )
+    else:
+        log_info(f"⬆️ Yeni updater sürümü bulundu: {incoming_version} (current={local_version})")
     try:
         local_file = _download_release(update_info)
         result = _apply_client_updater_package(local_file)
