@@ -990,6 +990,15 @@ function formatRolloutWait(seconds){
   return `${secs}sn`;
 }
 
+function normalizeRolloutText(value){
+  const cleaned = String(value ?? '')
+    .replace(/\\[rn]/g, ' ')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned || '-';
+}
+
 function renderRollout(rollout, prefix){
   const summary = document.getElementById(`${prefix}-rollout-summary`);
   const overall = document.getElementById(`${prefix}-rollout-overall`);
@@ -1016,12 +1025,14 @@ function renderRollout(rollout, prefix){
   overall.textContent = `Genel update durumu: ${complete ? 'Tamamlandı' : 'Devam ediyor'} | Beklemede: ${pending} (Online: ${onlinePending}, Offline: ${offlinePending})`;
 
   const rows = (rollout.clients || []).map(client => {
-    const label = client.alias || client.hostname || '-';
+    const label = escapeHtml(normalizeRolloutText(client.alias || client.hostname));
+    const hostname = escapeHtml(normalizeRolloutText(client.hostname));
+    const agentVersion = escapeHtml(normalizeRolloutText(client.agent_version));
     const status = client.is_updated
       ? '<span class="badge text-bg-success">Güncel</span>'
       : `<span class="badge ${client.is_online ? 'text-bg-warning' : 'text-bg-secondary'}">${client.is_online ? 'Rollout bekliyor' : 'Offline bekliyor'}</span>`;
     const waitText = client.is_updated ? '-' : formatRolloutWait(client.waiting_seconds);
-    return `<tr><td>${label}<br/><small class="text-secondary">${client.hostname||'-'} | Versiyon: ${client.agent_version || '-'}</small></td><td>${status}</td><td>${waitText}</td></tr>`;
+    return `<tr><td>${label}<br/><small class="text-secondary">${hostname} | Versiyon: ${agentVersion}</small></td><td>${status}</td><td>${waitText}</td></tr>`;
   });
 
   body.innerHTML = rows.length
