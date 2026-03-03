@@ -249,7 +249,10 @@
                   <div class="card-body">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                       <h3 class="h6 mb-0">Rollout Durumu</h3>
-                      <span class="badge text-bg-secondary" id="updater-rollout-summary">-</span>
+                      <div class="d-flex align-items-center gap-2">
+                        <span class="badge text-bg-secondary" id="updater-rollout-summary">-</span>
+                        <button class="btn btn-sm btn-outline-danger" type="button" onclick="cancelPendingUpdaterRollout()">Bekleyen Rollout'u İptal Et</button>
+                      </div>
                     </div>
                     <div class="small text-secondary mb-2" id="updater-rollout-overall">Genel update durumu: -</div>
                     <div class="table-responsive">
@@ -294,7 +297,10 @@
                   <div class="card-body">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                       <h3 class="h6 mb-0">Rollout Durumu</h3>
-                      <span class="badge text-bg-secondary" id="client-updater-rollout-summary">-</span>
+                      <div class="d-flex align-items-center gap-2">
+                        <span class="badge text-bg-secondary" id="client-updater-rollout-summary">-</span>
+                        <button class="btn btn-sm btn-outline-danger" type="button" onclick="cancelPendingClientUpdaterRollout()">Bekleyen Rollout'u İptal Et</button>
+                      </div>
                     </div>
                     <div class="small text-secondary mb-2" id="client-updater-rollout-overall">Genel update durumu: -</div>
                     <div class="table-responsive">
@@ -1077,8 +1083,8 @@ async function uploadClientUpdate(){
   await loadClientUpdater();
 }
 
-async function removeClientUpdate(){
-  if(!confirm('Yayınlanan Client EXE dosyasını kaldırmak istiyor musunuz?')) return;
+async function removeClientUpdate(skipConfirm = false){
+  if(!skipConfirm && !confirm('Yayınlanan Client EXE dosyasını kaldırmak istiyor musunuz?')) return;
 
   const resp = await jdelete('/api/updater');
   if(!resp.ok){
@@ -1088,6 +1094,11 @@ async function removeClientUpdate(){
 
   alert('Client EXE yayından kaldırıldı.');
   await loadUpdater();
+}
+
+async function cancelPendingUpdaterRollout(){
+  if(!confirm('Bekleyen Client EXE rollout\'unu iptal edip yayını kaldırmak istiyor musunuz?')) return;
+  await removeClientUpdate(true);
 }
 
 async function loadClientUpdater(){
@@ -1126,8 +1137,8 @@ async function uploadClientUpdaterUpdate(){
   await loadClientUpdater();
 }
 
-async function removeClientUpdaterUpdate(){
-  if(!confirm('Yayınlanan BaylanUpdater dosyasını kaldırmak istiyor musunuz?')) return;
+async function removeClientUpdaterUpdate(skipConfirm = false){
+  if(!skipConfirm && !confirm('Yayınlanan BaylanUpdater dosyasını kaldırmak istiyor musunuz?')) return;
 
   const resp = await jdelete('/api/client-updater');
   if(!resp.ok){
@@ -1137,6 +1148,11 @@ async function removeClientUpdaterUpdate(){
 
   alert('BaylanUpdater yayından kaldırıldı.');
   await loadClientUpdater();
+}
+
+async function cancelPendingClientUpdaterRollout(){
+  if(!confirm('Bekleyen BaylanUpdater rollout\'unu iptal edip yayını kaldırmak istiyor musunuz?')) return;
+  await removeClientUpdaterUpdate(true);
 }
 
 async function loadLogs(){
