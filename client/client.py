@@ -105,6 +105,12 @@ CLIENT_VERSION = resolve_client_version()
 AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 UPDATER_DOWNLOAD_DIR = _resolve_runtime_path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
+SOCKETIO_LOG_ENABLED = os.getenv("SOCKETIO_LOG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+SOCKETIO_TRANSPORTS = [
+    part.strip()
+    for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
+    if part.strip()
+]
 
 
 def resolve_local_updater_version() -> str:
@@ -192,6 +198,16 @@ def setup_debug_logging():
 def log_info(message: str):
     print(message)
     logging.info(message)
+
+
+def log_warning(message: str):
+    print(message)
+    logging.warning(message)
+
+
+def log_error(message: str):
+    print(message)
+    logging.error(message)
 
 
 def flush_and_shutdown_logging():
@@ -300,8 +316,14 @@ setup_debug_logging()
 log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
 log_info(f"🏷️ client version: {CLIENT_VERSION}")
 
-sio = socketio.Client(reconnection=True)
+sio = socketio.Client(
+    reconnection=False,
+    logger=SOCKETIO_LOG_ENABLED,
+    engineio_logger=SOCKETIO_LOG_ENABLED,
+)
 hostname = socket.gethostname()
+connection_lock = threading.Lock()
+next_connect_attempt_at = 0.0
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 idle_mode_enabled = True
@@ -1359,7 +1381,14 @@ def connect():
 
 @sio.event
 def disconnect():
-    print("❌ Disconnected - offline cache playlist devam edebilir")
+    global next_connect_attempt_at
+    next_connect_attempt_at = 0.0
+    log_warning("❌ Disconnected - offline cache playlist devam edebilir")
+
+
+@sio.event
+def connect_error(data):
+    log_warning(f"⚠️ Connect error: {data}")
 
 
 @sio.on("hello")
@@ -1497,6 +1526,7 @@ def run_state_cycle():
 
 def main():
     global update_shutdown_requested
+    global next_connect_attempt_at
     if already_running():
         return
 
@@ -1507,17 +1537,52 @@ def main():
         systray.start()
         print("Connecting to:", SERVER_URL)
 
+        def force_disconnect(reason: str):
+            if sio.connected:
+                log_warning(f"🔌 socket reset | reason={reason}")
+            try:
+                sio.disconnect()
+            except Exception:
+                pass
+
+        def ensure_socket_connected(now: float) -> bool:
+            global next_connect_attempt_at
+            if sio.connected:
+                return True
+            if now < next_connect_attempt_at:
+                return False
+
+            with connection_lock:
+                if sio.connected:
+                    return True
+                if now < next_connect_attempt_at:
+                    return False
+                next_connect_attempt_at = now + RECONNECT_RETRY_SEC
+                try:
+                    log_info(
+                        f"🔄 Connecting socket | url={SERVER_URL} transports={SOCKETIO_TRANSPORTS or 'default'}"
+                    )
+                    connect_kwargs = {"wait": True, "wait_timeout": 10}
+                    if SOCKETIO_TRANSPORTS:
+                        connect_kwargs["transports"] = SOCKETIO_TRANSPORTS
+                    sio.connect(SERVER_URL, **connect_kwargs)
+                    next_connect_attempt_at = now + HEARTBEAT_INTERVAL_SEC
+                    return True
+                except KeyboardInterrupt:
+                    raise
+                except Exception as connect_err:
+                    log_error(f"⚠️ Connection failed, retrying: {connect_err}")
+                    logging.exception("Socket connection attempt failed")
+                    return False
+
         while not shutdown_event.is_set():
             try:
-                if not sio.connected:
-                    sio.connect(SERVER_URL)
-                break
+                if ensure_socket_connected(time.monotonic()):
+                    break
+                time.sleep(RECONNECT_RETRY_SEC)
             except KeyboardInterrupt:
                 print("🛑 Client interrupted during connect")
                 return
-            except Exception as e:
-                print("Connection failed, retrying...", e)
-                time.sleep(RECONNECT_RETRY_SEC)
 
         next_heartbeat_at = time.monotonic()
         next_config_pull_at = time.monotonic()
@@ -1526,15 +1591,12 @@ def main():
             try:
                 idle_sec = run_state_cycle()
                 now = time.monotonic()
+                ensure_socket_connected(now)
                 if now >= next_heartbeat_at:
                     if not sio.connected:
-                        try:
-                            sio.connect(SERVER_URL)
-                        except Exception as reconnect_err:
-                            print(f"⚠️ Reconnect failed: {reconnect_err}")
-                            next_heartbeat_at = now + RECONNECT_RETRY_SEC
-                            time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
-                            continue
+                        next_heartbeat_at = now + RECONNECT_RETRY_SEC
+                        time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
+                        continue
 
                     try:
                         sio.emit(
@@ -1551,7 +1613,9 @@ def main():
                         )
                         print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
                     except Exception as heartbeat_err:
-                        print(f"⚠️ Heartbeat send failed: {heartbeat_err}")
+                        log_error(f"⚠️ Heartbeat send failed: {heartbeat_err}")
+                        logging.exception("Heartbeat emit failed")
+                        force_disconnect("heartbeat_emit_failed")
                         next_heartbeat_at = now + RECONNECT_RETRY_SEC
                         time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
                         continue
@@ -1564,7 +1628,9 @@ def main():
                             sio.emit("pull_config", {"hostname": hostname})
                             print("🔄 periodic config pull requested")
                         except Exception as pull_err:
-                            print(f"⚠️ Periodic config pull failed: {pull_err}")
+                            log_error(f"⚠️ Periodic config pull failed: {pull_err}")
+                            logging.exception("Periodic config pull failed")
+                            force_disconnect("periodic_pull_failed")
                     next_config_pull_at = now + CONFIG_PULL_INTERVAL_SEC
                 time.sleep(max(0.1, STATE_CHECK_INTERVAL_SEC))
             except KeyboardInterrupt:
