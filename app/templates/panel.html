@@ -234,6 +234,9 @@
                   <div class="col-auto">
                     <button class="btn btn-outline-secondary" onclick="loadUpdater()">Yenile</button>
                   </div>
+                  <div class="col-auto">
+                    <button class="btn btn-outline-danger" onclick="removeClientUpdate()">Kaldır</button>
+                  </div>
                 </div>
                 <div class="text-secondary small" id="updater-current">Yayınlanan dosya: -</div>
                 <p class="text-secondary small mt-2 mb-0">Yeni EXE yüklendiğinde online clientlar config güncellemesi alır, mevcut dosyanın üzerine yazıp uygulamayı otomatik yeniden başlatır.</p>
@@ -252,6 +255,9 @@
                   </div>
                   <div class="col-auto">
                     <button class="btn btn-outline-secondary" onclick="loadClientUpdater()">Yenile</button>
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-outline-danger" onclick="removeClientUpdaterUpdate()">Kaldır</button>
                   </div>
                 </div>
                 <div class="text-secondary small" id="client-updater-current">Yayınlanan dosya: -</div>
@@ -888,6 +894,19 @@ async function uploadClientUpdate(){
   await loadClientUpdater();
 }
 
+async function removeClientUpdate(){
+  if(!confirm('Yayınlanan Client EXE dosyasını kaldırmak istiyor musunuz?')) return;
+
+  const resp = await jdelete('/api/updater');
+  if(!resp.ok){
+    alert(resp.error || 'Client EXE kaldırılamadı');
+    return;
+  }
+
+  alert('Client EXE yayından kaldırıldı.');
+  await loadUpdater();
+}
+
 async function loadClientUpdater(){
   const resp = await jget('/api/client-updater');
   const current = document.getElementById('client-updater-current');
@@ -919,6 +938,19 @@ async function uploadClientUpdaterUpdate(){
   }
   alert('Yeni BaylanUpdater yayınlandı. Clientlar otomatik güncelleme alacak.');
   fileInput.value = '';
+  await loadClientUpdater();
+}
+
+async function removeClientUpdaterUpdate(){
+  if(!confirm('Yayınlanan BaylanUpdater dosyasını kaldırmak istiyor musunuz?')) return;
+
+  const resp = await jdelete('/api/client-updater');
+  if(!resp.ok){
+    alert(resp.error || 'BaylanUpdater kaldırılamadı');
+    return;
+  }
+
+  alert('BaylanUpdater yayından kaldırıldı.');
   await loadClientUpdater();
 }
 
