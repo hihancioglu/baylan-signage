@@ -13,24 +13,65 @@ def _log(log_file: Path, message: str) -> None:
         fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} | {message}\n")
 
 
+def _is_pid_running(pid: int) -> bool:
+    proc = subprocess.run(
+        ["tasklist", "/FO", "CSV", "/NH", "/FI", f"PID eq {pid}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+    )
+    output = (proc.stdout or "").strip().lower()
+    if not output:
+        return False
+    if "no tasks are running" in output:
+        return False
+    return str(pid) in output
+
+
+def _terminate_pid(pid: int, force: bool, log_file: Path) -> bool:
+    cmd = ["taskkill", "/PID", str(pid), "/T"]
+    if force:
+        cmd.append("/F")
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+    )
+    action = "force-kill" if force else "terminate"
+    if proc.returncode == 0:
+        _log(log_file, f"old process {action} requested: pid={pid}")
+        return True
+    output = " | ".join(part.strip() for part in [proc.stdout, proc.stderr] if part and part.strip())
+    _log(log_file, f"old process {action} failed: pid={pid} rc={proc.returncode} msg={output}")
+    return False
+
+
 def _wait_for_pid_exit(old_pid: int, attempts: int, delay_sec: float, log_file: Path) -> None:
     if old_pid <= 0:
         return
 
-    for idx in range(attempts):
-        alive = subprocess.call(
-            ["tasklist", "/FI", f"PID eq {old_pid}"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ) == 0
+    _terminate_pid(old_pid, force=False, log_file=log_file)
+
+    for idx in range(1, attempts + 1):
+        alive = _is_pid_running(old_pid)
         if not alive:
             _log(log_file, f"old process exited: pid={old_pid}")
             return
+        if idx == max(3, attempts // 3):
+            _terminate_pid(old_pid, force=True, log_file=log_file)
         time.sleep(delay_sec)
-        if idx and idx % 10 == 0:
+        if idx % 10 == 0:
             _log(log_file, f"waiting old process to exit: pid={old_pid} attempt={idx}")
 
-    _log(log_file, f"old process still alive after timeout: pid={old_pid}")
+    if _is_pid_running(old_pid):
+        _log(log_file, f"old process still alive after timeout: pid={old_pid}")
+    else:
+        _log(log_file, f"old process exited at timeout boundary: pid={old_pid}")
 
 
 def _copy_with_retry(src: Path, dst: Path, attempts: int, delay_sec: float, log_file: Path) -> bool:
