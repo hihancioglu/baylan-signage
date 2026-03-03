@@ -121,8 +121,6 @@ def resolve_local_updater_version() -> str:
 
 
 CLIENT_UPDATER_VERSION = resolve_local_updater_version()
-
-
 def print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
@@ -1187,16 +1185,11 @@ def _maybe_run_client_updater_update(config_data):
     update_info = config_data.get("client_updater") or {}
     incoming_version = str(update_info.get("version") or "").strip()
     if not incoming_version:
-        log_info("ℹ️ Updater update atlandı: config içinde version alanı yok")
         return
 
     local_version = resolve_local_updater_version()
     should_force_update = _is_missing_or_unversioned_build(local_version)
     if not should_force_update and not _is_newer_version(incoming_version, local_version):
-        log_info(
-            f"ℹ️ Updater update atlandı: yeni sürüm bulunamadı "
-            f"(incoming={incoming_version}, current={local_version})"
-        )
         return
 
     if should_force_update:
@@ -1212,6 +1205,7 @@ def _maybe_run_client_updater_update(config_data):
         log_info(f"✅ Updater auto update sonucu: {result} | file={local_file}")
     except Exception as exc:
         log_info(f"❌ Updater auto update başarısız: {exc}")
+
 
 
 def _maybe_run_auto_update(config_data):
