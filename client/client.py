@@ -1149,21 +1149,30 @@ def _apply_update_package(local_file: Path):
 
 def _apply_client_updater_package(local_file: Path):
     if not platform.system().lower().startswith("win"):
+        log_info("ℹ️ Updater swap atlandı: windows ortamı değil")
         return "client_updater_downloaded_manual_install"
 
     local_file = local_file.resolve()
     if local_file.suffix.lower() != ".exe":
+        log_info(f"ℹ️ Updater swap atlandı: exe olmayan dosya indirildi ({local_file})")
         return "client_updater_downloaded_manual_install"
 
     target_updater = (_runtime_base_dir() / UPDATER_EXECUTABLE_NAME).resolve()
     target_updater.parent.mkdir(parents=True, exist_ok=True)
+    log_info(f"🧩 Updater swap başlatıldı: src={local_file} dst={target_updater}")
+
+    if local_file == target_updater:
+        log_info("ℹ️ Updater swap atlandı: indirilen dosya zaten hedef updater dosyası")
+        return "client_updater_already_in_place"
 
     for idx in range(1, 11):
         try:
             shutil.copy2(local_file, target_updater)
             local_file.unlink(missing_ok=True)
+            log_info(f"✅ Updater swap başarılı: attempt={idx} dst={target_updater}")
             return "client_updater_swapped"
         except OSError as exc:
+            log_info(f"⚠️ Updater swap denemesi başarısız: attempt={idx} err={exc}")
             if idx == 10:
                 raise RuntimeError(f"client_updater_swap_failed:{exc}") from exc
             time.sleep(0.5)
@@ -1171,16 +1180,23 @@ def _apply_client_updater_package(local_file: Path):
 
 def _maybe_run_client_updater_update(config_data):
     if not AUTO_UPDATER_ENABLED or not isinstance(config_data, dict):
+        if not AUTO_UPDATER_ENABLED:
+            log_info("ℹ️ Updater auto update devre dışı (AUTO_UPDATER_ENABLED=false)")
         return
 
     update_info = config_data.get("client_updater") or {}
     incoming_version = str(update_info.get("version") or "").strip()
     if not incoming_version:
+        log_info("ℹ️ Updater update atlandı: config içinde version alanı yok")
         return
 
     local_version = resolve_local_updater_version()
     should_force_update = _is_missing_or_unversioned_build(local_version)
     if not should_force_update and not _is_newer_version(incoming_version, local_version):
+        log_info(
+            f"ℹ️ Updater update atlandı: yeni sürüm bulunamadı "
+            f"(incoming={incoming_version}, current={local_version})"
+        )
         return
 
     if should_force_update:
