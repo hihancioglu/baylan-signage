@@ -113,7 +113,7 @@ def _safe_update_filename(original_name: str) -> str:
 
 
 def _extract_embedded_build_version(file_path: Path) -> str | None:
-    pattern = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
+    pattern = re.compile(rb"BAYLAN_(?:CLIENT|UPDATER)_BUILD:(build-\d{14}|\d{14})")
     try:
         payload = file_path.read_bytes()
     except Exception:
