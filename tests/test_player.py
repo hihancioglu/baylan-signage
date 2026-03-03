@@ -1,3 +1,4 @@
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -328,6 +329,48 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         download_mock.assert_called_once_with(config_data["client_updater"])
         apply_mock.assert_called_once()
+
+
+
+    def test_rollout_wait_runs_only_once_per_version(self):
+        from client import client as client_module
+
+        with patch.object(client_module, "AUTO_UPDATE_ROLLOUT_WINDOW_SEC", 900), patch.object(
+            client_module,
+            "hostname",
+            "test-host",
+        ), patch.object(client_module.shutdown_event, "wait", return_value=False) as wait_mock:
+            client_module._rollout_waited_versions.clear()
+            client_module._rollout_inflight_versions.clear()
+            client_module._wait_for_rollout_slot("client_updater", "build-20260303165001")
+            client_module._wait_for_rollout_slot("client_updater", "build-20260303165001")
+
+        self.assertEqual(wait_mock.call_count, 1)
+
+    def test_rollout_wait_is_deduplicated_across_threads(self):
+        from client import client as client_module
+
+        with patch.object(client_module, "AUTO_UPDATE_ROLLOUT_WINDOW_SEC", 900), patch.object(
+            client_module,
+            "hostname",
+            "test-host",
+        ), patch.object(client_module.shutdown_event, "wait", return_value=False) as wait_mock:
+            client_module._rollout_waited_versions.clear()
+            client_module._rollout_inflight_versions.clear()
+
+            threads = [
+                threading.Thread(
+                    target=client_module._wait_for_rollout_slot,
+                    args=("client_updater", "build-20260303165001"),
+                )
+                for _ in range(8)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        self.assertEqual(wait_mock.call_count, 1)
 
     def test_update_from_config_stops_fallback_playback_when_enabled_config_arrives_with_same_version(self):
         from client.client import PlaybackController

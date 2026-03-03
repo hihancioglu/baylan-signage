@@ -113,6 +113,8 @@ SOCKETIO_TRANSPORTS = [
 ]
 AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "900")))
 _rollout_waited_versions: set[str] = set()
+_rollout_inflight_versions: set[str] = set()
+_rollout_wait_lock = threading.Lock()
 
 
 def resolve_local_updater_version() -> str:
@@ -1109,19 +1111,24 @@ def _wait_for_rollout_slot(channel: str, version: str) -> None:
         return
 
     rollout_key = f"{channel}:{version}"
-    if rollout_key in _rollout_waited_versions:
-        return
+    with _rollout_wait_lock:
+        if rollout_key in _rollout_waited_versions or rollout_key in _rollout_inflight_versions:
+            return
+        _rollout_inflight_versions.add(rollout_key)
 
-    seed = f"{hostname}:{channel}:{version}".encode("utf-8")
-    digest = hashlib.sha256(seed).digest()
-    delay_sec = int.from_bytes(digest[:4], "big") % (AUTO_UPDATE_ROLLOUT_WINDOW_SEC + 1)
-    if delay_sec > 0:
-        log_info(
-            f"⏳ Rollout dengeleme beklemesi: kanal={channel} sürüm={version} gecikme={delay_sec}s"
-        )
-        shutdown_event.wait(delay_sec)
-
-    _rollout_waited_versions.add(rollout_key)
+    try:
+        seed = f"{hostname}:{channel}:{version}".encode("utf-8")
+        digest = hashlib.sha256(seed).digest()
+        delay_sec = int.from_bytes(digest[:4], "big") % (AUTO_UPDATE_ROLLOUT_WINDOW_SEC + 1)
+        if delay_sec > 0:
+            log_info(
+                f"⏳ Rollout dengeleme beklemesi: kanal={channel} sürüm={version} gecikme={delay_sec}s"
+            )
+            shutdown_event.wait(delay_sec)
+    finally:
+        with _rollout_wait_lock:
+            _rollout_inflight_versions.discard(rollout_key)
+            _rollout_waited_versions.add(rollout_key)
 
 
 def _download_release(update_info: dict) -> Path:
