@@ -197,6 +197,71 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(target.get("agent_version"), "build-20260101120000")
 
 
+
+    def test_register_and_heartbeat_store_updater_version(self):
+        self.main.connected.clear()
+        self.main.sid_to_host.clear()
+
+        client_socket = self.main.socketio.test_client(self.main.app)
+        self.assertTrue(client_socket.is_connected())
+
+        client_socket.emit(
+            "register",
+            {
+                "secret": self.main.SHARED_SECRET,
+                "hostname": "pc-updater",
+                "ip": "127.0.0.1",
+                "agent_version": "build-client-1",
+                "updater_version": "build-updater-1",
+            },
+        )
+
+        client_socket.emit(
+            "heartbeat",
+            {
+                "hostname": "pc-updater",
+                "state": "IDLE",
+                "agent_version": "build-client-2",
+                "updater_version": "build-updater-2",
+            },
+        )
+        client_socket.disconnect()
+
+        db = self.main.db_session()
+        try:
+            device = db.query(self.main.Device).filter_by(hostname="pc-updater").first()
+            self.assertIsNotNone(device)
+            self.assertEqual(device.agent_version, "build-client-2")
+            self.assertEqual(device.updater_version, "build-updater-2")
+        finally:
+            db.close()
+
+    def test_client_updater_rollout_uses_updater_version_field(self):
+        db = self.main.db_session()
+        try:
+            db.add_all(
+                [
+                    self.main.Device(hostname="pc-a", agent_version="build-client-old", updater_version="build-upd-new", is_online=True),
+                    self.main.Device(hostname="pc-b", agent_version="build-client-new", updater_version="build-upd-old", is_online=True),
+                ]
+            )
+            self.main._set_setting(db, "client_updater_version", "build-upd-new")
+            self.main._set_setting(db, "client_updater_file_name", "BaylanUpdater.exe")
+            self.main._set_setting(db, "client_updater_file_path", "client-updater/build-upd-new/BaylanUpdater.exe")
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().get("/api/client-updater")
+
+        self.assertEqual(resp.status_code, 200)
+        rollout = (resp.get_json() or {}).get("rollout") or {}
+        clients = {item.get("hostname"): item for item in rollout.get("clients") or []}
+
+        self.assertTrue(clients["pc-a"].get("is_updated"))
+        self.assertFalse(clients["pc-b"].get("is_updated"))
+
     def test_resolve_update_version_prefers_embedded_build_marker(self):
         marker = b"BAYLAN_CLIENT_BUILD:build-20260227091530"
         temp_file = Path(self._tmpdir.name) / "embedded-version.bin"

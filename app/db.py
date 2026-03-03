@@ -25,6 +25,7 @@ def ensure_sqlite_schema():
     table_column_types = {
         "devices": {
             "agent_version": "VARCHAR(64)",
+            "updater_version": "VARCHAR(64)",
             "alias": "VARCHAR(128)",
             "os_version": "VARCHAR(128)",
             "last_error": "VARCHAR(512)",

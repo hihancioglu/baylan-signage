@@ -320,7 +320,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             client_module,
             "resolve_local_updater_version",
             return_value="build-missing",
-        ), patch.object(client_module, "_download_release", return_value=Path("/tmp/updater.exe")) as download_mock, patch.object(
+        ), patch.object(client_module, "_wait_for_rollout_slot", return_value=None), patch.object(client_module, "_download_release", return_value=Path("/tmp/updater.exe")) as download_mock, patch.object(
             client_module,
             "_apply_client_updater_package",
             return_value="client_updater_swapped",
@@ -331,6 +331,42 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         apply_mock.assert_called_once()
 
 
+
+
+    def test_client_updater_update_deduplicates_inflight_version(self):
+        from client import client as client_module
+
+        config_data = {
+            "client_updater": {
+                "version": "build-20260227093045",
+                "url": "https://example.com/updater.exe",
+                "file_name": "BaylanUpdater.exe",
+            }
+        }
+
+        try:
+            with patch.object(client_module, "AUTO_UPDATER_ENABLED", True), patch.object(
+                client_module,
+                "resolve_local_updater_version",
+                return_value="build-20260101010101",
+            ), patch.object(client_module, "_wait_for_rollout_slot", return_value=None), patch.object(
+                client_module,
+                "_download_release",
+                return_value=Path("/tmp/updater.exe"),
+            ) as download_mock, patch.object(
+                client_module,
+                "_apply_client_updater_package",
+                return_value="client_updater_swapped",
+            ):
+                client_module._client_updater_inflight_versions.clear()
+                client_module._client_updater_completed_versions.clear()
+                client_module._client_updater_inflight_versions.add("build-20260227093045")
+                client_module._maybe_run_client_updater_update(config_data)
+
+            download_mock.assert_not_called()
+        finally:
+            client_module._client_updater_inflight_versions.clear()
+            client_module._client_updater_completed_versions.clear()
 
     def test_rollout_wait_runs_only_once_per_version(self):
         from client import client as client_module
