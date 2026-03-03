@@ -1047,13 +1047,28 @@ def _is_newer_version(incoming: str, current: str) -> bool:
     if incoming == current:
         return False
 
+    missing_markers = {"", "unknown", "build-unknown", "build-missing", "build-unversioned"}
+    if current.strip().lower() in missing_markers and incoming.strip().lower() not in missing_markers:
+        return True
+
     def _tokenize(value: str):
+        value = value.strip().lower()
+        if value.startswith("build-"):
+            value = value[6:]
+
         out = []
-        for part in value.replace("-", ".").split("."):
-            if part.isdigit():
-                out.append((0, int(part)))
-            elif part:
+        for part in re.split(r"[._-]+", value):
+            if not part:
+                continue
+            sub_parts = re.findall(r"\d+|[a-z]+", part)
+            if not sub_parts:
                 out.append((1, part))
+                continue
+            for sub_part in sub_parts:
+                if sub_part.isdigit():
+                    out.append((0, int(sub_part)))
+                else:
+                    out.append((1, sub_part))
         return out
 
     try:

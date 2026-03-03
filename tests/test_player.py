@@ -290,6 +290,12 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertTrue(player.play_blocking.called)
 
 
+    def test_is_newer_version_handles_build_prefix_and_unknown_marker(self):
+        from client.client import _is_newer_version
+
+        self.assertTrue(_is_newer_version("build-20260301093045", "build-20260228093045"))
+        self.assertTrue(_is_newer_version("build-20260301093045", "build-unknown"))
+
     def test_unversioned_updater_is_treated_as_missing(self):
         from client.client import _is_missing_or_unversioned_build
 
