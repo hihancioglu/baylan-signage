@@ -180,7 +180,7 @@ def _parse_iso_datetime(value: str | None):
         return None
 
 
-def _build_updater_rollout_payload(db, release):
+def _build_updater_rollout_payload(db, release, *, version_field: str = "agent_version"):
     devices = db.query(Device).all()
     if not release:
         return {
@@ -199,7 +199,7 @@ def _build_updater_rollout_payload(db, release):
     updated_clients = 0
 
     for device in devices:
-        current_version = str(device.agent_version or "")
+        current_version = str(getattr(device, version_field, None) or "")
         is_updated = bool(current_version and current_version == release_version)
         if is_updated:
             updated_clients += 1
@@ -217,6 +217,8 @@ def _build_updater_rollout_payload(db, release):
                 "alias": device.alias,
                 "is_online": bool(device.is_online),
                 "agent_version": device.agent_version,
+                "updater_version": device.updater_version,
+                "current_version": getattr(device, version_field, None),
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
                 "is_updated": is_updated,
                 "waiting_seconds": waiting_seconds,
@@ -420,6 +422,7 @@ def _serialize_device(db, device):
         "state_display": _format_device_state(device),
         "last_content_name": device.last_content_name,
         "agent_version": device.agent_version,
+        "updater_version": device.updater_version,
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
@@ -645,6 +648,7 @@ def handle_register(data):
             device.last_state = incoming_state
             device.last_state_at = datetime.utcnow()
         device.agent_version = data.get("agent_version") or device.agent_version
+        device.updater_version = data.get("updater_version") or device.updater_version
         device.os_version = data.get("os_name") or device.os_version
         device.last_content_name = data.get("content_name") or ""
         device.is_online = True
@@ -676,6 +680,7 @@ def handle_heartbeat(data):
                 device.last_state = incoming_state
                 device.last_state_at = datetime.utcnow()
             device.agent_version = data.get("agent_version") or device.agent_version
+            device.updater_version = data.get("updater_version") or device.updater_version
             device.os_version = data.get("os_name") or device.os_version
             device.last_content_name = data.get("content_name") or ""
             device.is_online = True
@@ -1208,7 +1213,7 @@ def get_client_updater_settings():
     db = db_session()
     try:
         payload = _build_client_updater_payload(db)
-        rollout = _build_updater_rollout_payload(db, payload)
+        rollout = _build_updater_rollout_payload(db, payload, version_field="updater_version")
         return jsonify({"ok": True, "release": payload, "rollout": rollout})
     finally:
         db.close()

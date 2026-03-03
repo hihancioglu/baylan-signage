@@ -15,6 +15,7 @@ class Device(Base):
     is_online = Column(Boolean, default=False)
     last_seen = Column(DateTime(timezone=True), server_default=func.now())
     agent_version = Column(String(64))
+    updater_version = Column(String(64))
     os_version = Column(String(128))
     last_error = Column(String(512))
     last_state = Column(String(64))

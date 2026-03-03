@@ -115,6 +115,9 @@ AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDO
 _rollout_waited_versions: set[str] = set()
 _rollout_inflight_versions: set[str] = set()
 _rollout_wait_lock = threading.Lock()
+_client_updater_update_lock = threading.Lock()
+_client_updater_inflight_versions: set[str] = set()
+_client_updater_completed_versions: set[str] = set()
 
 
 def resolve_local_updater_version() -> str:
@@ -131,6 +134,12 @@ def resolve_local_updater_version() -> str:
 
 
 CLIENT_UPDATER_VERSION = resolve_local_updater_version()
+
+
+def get_runtime_updater_version() -> str:
+    return resolve_local_updater_version()
+
+
 def print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
@@ -1250,13 +1259,28 @@ def _maybe_run_client_updater_update(config_data):
         )
     else:
         log_info(f"⬆️ Yeni updater sürümü bulundu: {incoming_version} (current={local_version})")
+
+    with _client_updater_update_lock:
+        if incoming_version in _client_updater_completed_versions:
+            log_info(f"ℹ️ Updater auto update atlandı: sürüm zaten işlendi ({incoming_version})")
+            return
+        if incoming_version in _client_updater_inflight_versions:
+            log_info(f"ℹ️ Updater auto update atlandı: sürüm zaten başka thread tarafından işleniyor ({incoming_version})")
+            return
+        _client_updater_inflight_versions.add(incoming_version)
+
     try:
         _wait_for_rollout_slot("client_updater", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_client_updater_package(local_file)
         log_info(f"✅ Updater auto update sonucu: {result} | file={local_file}")
+        with _client_updater_update_lock:
+            _client_updater_completed_versions.add(incoming_version)
     except Exception as exc:
         log_info(f"❌ Updater auto update başarısız: {exc}")
+    finally:
+        with _client_updater_update_lock:
+            _client_updater_inflight_versions.discard(incoming_version)
 
 
 
@@ -1404,6 +1428,7 @@ def connect():
             "state": current_state.value,
             "os_name": platform.system(),
             "agent_version": CLIENT_VERSION,
+            "updater_version": get_runtime_updater_version(),
             "content_name": playback.current_content_name(),
         },
     )
@@ -1639,6 +1664,7 @@ def main():
                                 "idle_seconds": round(idle_sec, 1),
                                 "os_name": platform.system(),
                                 "agent_version": CLIENT_VERSION,
+                                "updater_version": get_runtime_updater_version(),
                                 "content_name": playback.current_content_name(),
                             },
                         )
