@@ -42,10 +42,16 @@
           <div class="tab-section" id="section-devices">
             <div class="card panel-card">
               <div class="card-body">
-                <h2 class="h4 mb-3">Cihazlar</h2>
+                <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+                  <h2 class="h4 mb-0">Cihazlar</h2>
+                  <div class="d-flex flex-wrap gap-2 small">
+                    <span class="badge text-bg-success" id="online-count">Online: 0</span>
+                    <span class="badge text-bg-secondary" id="offline-count">Offline: 0</span>
+                  </div>
+                </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Alias</th><th>Hostname</th><th>Versiyon</th><th>Durum</th><th>Son Heartbeat</th><th>State</th><th>Grup</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('is_online')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('last_seen')">Son Heartbeat (UTC+3)</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
                     <tbody id="devices-body"></tbody>
                   </table>
                 </div>
@@ -292,6 +298,8 @@ let cachedGroups = [];
 let cachedDevices = [];
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
+let deviceSortField = 'is_online';
+let deviceSortDirection = 'desc';
 
 function escapeHtml(value){
   return String(value || '').replace(/[&<>\"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
@@ -323,21 +331,87 @@ async function jdelete(url){
   return r.json();
 }
 
+function formatHeartbeatUtc3(value){
+  if(!value) return '-';
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(date);
+}
+
+function getDeviceStateText(device){
+  const normalizedState = (device.last_state || device.state_display || '').toUpperCase();
+  const hasContentOnScreen = Boolean((device.last_content_name || '').trim());
+  return (normalizedState.includes('IDLE') || hasContentOnScreen) ? 'IDLE' : 'AKTIF';
+}
+
+function sortDevices(field){
+  if(deviceSortField === field){
+    deviceSortDirection = deviceSortDirection === 'asc' ? 'desc' : 'asc';
+  }else{
+    deviceSortField = field;
+    deviceSortDirection = (field === 'is_online' || field === 'last_seen') ? 'desc' : 'asc';
+  }
+  renderDevicesTable();
+}
+
+function renderDevicesTable(){
+  const body = document.getElementById('devices-body');
+  if(!body) return;
+
+  const onlineCount = (cachedDevices || []).filter(d => d.is_online).length;
+  const offlineCount = (cachedDevices || []).length - onlineCount;
+  const onlineCounter = document.getElementById('online-count');
+  const offlineCounter = document.getElementById('offline-count');
+  if(onlineCounter) onlineCounter.textContent = `Online: ${onlineCount}`;
+  if(offlineCounter) offlineCounter.textContent = `Offline: ${offlineCount}`;
+
+  const sortedDevices = [...(cachedDevices || [])].sort((a, b) => {
+    const direction = deviceSortDirection === 'asc' ? 1 : -1;
+    let left;
+    let right;
+
+    if(deviceSortField === 'last_seen'){
+      left = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+      right = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+    }else if(deviceSortField === 'is_online'){
+      left = a.is_online ? 1 : 0;
+      right = b.is_online ? 1 : 0;
+    }else if(deviceSortField === 'state_text'){
+      left = getDeviceStateText(a);
+      right = getDeviceStateText(b);
+    }else{
+      left = String(a[deviceSortField] || '').toLocaleLowerCase('tr-TR');
+      right = String(b[deviceSortField] || '').toLocaleLowerCase('tr-TR');
+    }
+
+    if(left < right) return -1 * direction;
+    if(left > right) return 1 * direction;
+    return String(a.hostname || '').localeCompare(String(b.hostname || ''), 'tr-TR');
+  });
+
+  body.innerHTML = '';
+  sortedDevices.forEach(d => {
+    const tr = document.createElement('tr');
+    const safeHostname = encodeURIComponent(d.hostname || '');
+    const stateText = getDeviceStateText(d);
+
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${formatHeartbeatUtc3(d.last_seen)}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
+    body.appendChild(tr);
+  });
+}
+
 async function loadDevices(){
   const devices = await jget('/api/devices');
   cachedDevices = devices || [];
-  const body = document.getElementById('devices-body');
-  body.innerHTML = '';
-  (cachedDevices||[]).forEach(d => {
-    const tr = document.createElement('tr');
-    const safeHostname = encodeURIComponent(d.hostname || '');
-    const normalizedState = (d.last_state || d.state_display || '').toUpperCase();
-    const hasContentOnScreen = Boolean((d.last_content_name || '').trim());
-    const stateText = (normalizedState.includes('IDLE') || hasContentOnScreen) ? 'IDLE' : 'AKTIF';
-
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${d.last_seen||''}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
-    body.appendChild(tr);
-  });
+  renderDevicesTable();
 
   const deviceSelect = document.getElementById('device-select');
   if(deviceSelect){
