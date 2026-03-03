@@ -111,6 +111,8 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
     if part.strip()
 ]
+AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "900")))
+_rollout_waited_versions: set[str] = set()
 
 
 def resolve_local_updater_version() -> str:
@@ -1102,6 +1104,26 @@ def _is_missing_or_unversioned_build(version: str) -> bool:
     return normalized in {"", "unknown", "build-unknown", "build-missing", "build-unversioned"}
 
 
+def _wait_for_rollout_slot(channel: str, version: str) -> None:
+    if AUTO_UPDATE_ROLLOUT_WINDOW_SEC <= 0:
+        return
+
+    rollout_key = f"{channel}:{version}"
+    if rollout_key in _rollout_waited_versions:
+        return
+
+    seed = f"{hostname}:{channel}:{version}".encode("utf-8")
+    digest = hashlib.sha256(seed).digest()
+    delay_sec = int.from_bytes(digest[:4], "big") % (AUTO_UPDATE_ROLLOUT_WINDOW_SEC + 1)
+    if delay_sec > 0:
+        log_info(
+            f"⏳ Rollout dengeleme beklemesi: kanal={channel} sürüm={version} gecikme={delay_sec}s"
+        )
+        shutdown_event.wait(delay_sec)
+
+    _rollout_waited_versions.add(rollout_key)
+
+
 def _download_release(update_info: dict) -> Path:
     url = update_info.get("url")
     file_name = update_info.get("file_name") or Path(url or "update.bin").name
@@ -1222,6 +1244,7 @@ def _maybe_run_client_updater_update(config_data):
     else:
         log_info(f"⬆️ Yeni updater sürümü bulundu: {incoming_version} (current={local_version})")
     try:
+        _wait_for_rollout_slot("client_updater", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_client_updater_package(local_file)
         log_info(f"✅ Updater auto update sonucu: {result} | file={local_file}")
@@ -1243,6 +1266,7 @@ def _maybe_run_auto_update(config_data):
 
     log_info(f"⬆️ Yeni client sürümü bulundu: {incoming_version} (current={CLIENT_VERSION})")
     try:
+        _wait_for_rollout_slot("client", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_update_package(local_file)
         log_info(f"✅ Auto update sonucu: {result} | file={local_file}")
