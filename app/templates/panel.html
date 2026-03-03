@@ -245,6 +245,29 @@
                   </div>
                 </div>
                 <div class="text-secondary small" id="updater-current">Yayınlanan dosya: -</div>
+                <div class="mt-3 mini-card">
+                  <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                      <h3 class="h6 mb-0">Rollout Durumu</h3>
+                      <span class="badge text-bg-secondary" id="updater-rollout-summary">-</span>
+                    </div>
+                    <div class="small text-secondary mb-2" id="updater-rollout-overall">Genel update durumu: -</div>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>Client</th>
+                            <th>Durum</th>
+                            <th>Bekleme Süresi</th>
+                          </tr>
+                        </thead>
+                        <tbody id="updater-rollout-body">
+                          <tr><td colspan="3" class="text-secondary small">Henüz veri yok</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
                 <p class="text-secondary small mt-2 mb-0">Yeni EXE yüklendiğinde online clientlar config güncellemesi alır, mevcut dosyanın üzerine yazıp uygulamayı otomatik yeniden başlatır.</p>
               </div>
             </div>
@@ -933,6 +956,56 @@ async function pushAnnouncement(){
   loadLogs();
 }
 
+function formatRolloutWait(seconds){
+  if(seconds === null || seconds === undefined) return '-';
+  const total = Math.max(0, Number(seconds) || 0);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if(hours > 0) return `${hours}sa ${minutes}dk`;
+  if(minutes > 0) return `${minutes}dk ${secs}sn`;
+  return `${secs}sn`;
+}
+
+function renderUpdaterRollout(rollout){
+  const summary = document.getElementById('updater-rollout-summary');
+  const overall = document.getElementById('updater-rollout-overall');
+  const body = document.getElementById('updater-rollout-body');
+  if(!summary || !overall || !body) return;
+
+  if(!rollout){
+    summary.textContent = '-';
+    summary.className = 'badge text-bg-secondary';
+    overall.textContent = 'Genel update durumu: veri alınamadı';
+    body.innerHTML = '<tr><td colspan="3" class="text-secondary small">Rollout bilgisi alınamadı</td></tr>';
+    return;
+  }
+
+  const total = Number(rollout.total_clients || 0);
+  const updated = Number(rollout.updated_clients || 0);
+  const pending = Number(rollout.pending_clients || 0);
+  const onlinePending = Number(rollout.online_pending_clients || 0);
+  const offlinePending = Number(rollout.offline_pending_clients || 0);
+  const complete = Boolean(rollout.complete);
+
+  summary.textContent = `${updated}/${total} güncel`;
+  summary.className = complete ? 'badge text-bg-success' : 'badge text-bg-warning';
+  overall.textContent = `Genel update durumu: ${complete ? 'Tamamlandı' : 'Devam ediyor'} | Beklemede: ${pending} (Online: ${onlinePending}, Offline: ${offlinePending})`;
+
+  const rows = (rollout.clients || []).map(client => {
+    const label = client.alias || client.hostname || '-';
+    const status = client.is_updated
+      ? '<span class="badge text-bg-success">Güncel</span>'
+      : `<span class="badge ${client.is_online ? 'text-bg-warning' : 'text-bg-secondary'}">${client.is_online ? 'Rollout bekliyor' : 'Offline bekliyor'}</span>`;
+    const waitText = client.is_updated ? '-' : formatRolloutWait(client.waiting_seconds);
+    return `<tr><td>${label}<br/><small class="text-secondary">${client.hostname||'-'} | Versiyon: ${client.agent_version || '-'}</small></td><td>${status}</td><td>${waitText}</td></tr>`;
+  });
+
+  body.innerHTML = rows.length
+    ? rows.join('')
+    : '<tr><td colspan="3" class="text-secondary small">Client bulunamadı</td></tr>';
+}
+
 async function loadUpdater(){
   const resp = await jget('/api/updater');
   const current = document.getElementById('updater-current');
@@ -940,10 +1013,12 @@ async function loadUpdater(){
   if(!current) return;
   if(!release){
     current.textContent = 'Yayınlanan dosya: yok';
+    renderUpdaterRollout(resp?.rollout);
     return;
   }
   const releaseVersion = release.version || '-';
   current.textContent = `Yayınlanan dosya: ${release.file_name} | Build: ${releaseVersion} | Boyut: ${((release.size||0)/(1024*1024)).toFixed(1)} MB`;
+  renderUpdaterRollout(resp?.rollout);
 }
 
 async function uploadClientUpdate(){
