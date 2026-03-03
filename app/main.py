@@ -1208,7 +1208,8 @@ def get_client_updater_settings():
     db = db_session()
     try:
         payload = _build_client_updater_payload(db)
-        return jsonify({"ok": True, "release": payload})
+        rollout = _build_updater_rollout_payload(db, payload)
+        return jsonify({"ok": True, "release": payload, "rollout": rollout})
     finally:
         db.close()
 
