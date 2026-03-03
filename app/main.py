@@ -1144,6 +1144,53 @@ def get_client_updater_settings():
         db.close()
 
 
+
+@app.delete("/api/updater")
+def delete_client_update():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        _set_setting(db, "updater_version", None)
+        _set_setting(db, "updater_file_name", None)
+        _set_setting(db, "updater_file_path", None)
+        _set_setting(db, "updater_sha256", None)
+        _set_setting(db, "updater_size", None)
+        _set_setting(db, "updater_published_at", None)
+        db.commit()
+
+        hostnames = [row[0] for row in db.query(Device.hostname).all()]
+        _emit_config_update(hostnames)
+
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/client-updater")
+def delete_client_updater_update():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        _set_setting(db, "client_updater_version", None)
+        _set_setting(db, "client_updater_file_name", None)
+        _set_setting(db, "client_updater_file_path", None)
+        _set_setting(db, "client_updater_sha256", None)
+        _set_setting(db, "client_updater_size", None)
+        _set_setting(db, "client_updater_published_at", None)
+        db.commit()
+
+        hostnames = [row[0] for row in db.query(Device.hostname).all()]
+        _emit_config_update(hostnames)
+
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
 @app.post("/api/updater/upload")
 def upload_client_update():
     if _auth_failed():
