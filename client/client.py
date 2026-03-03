@@ -63,16 +63,17 @@ DEBUG_LOG_PATH = _resolve_runtime_path(os.getenv("CLIENT_DEBUG_LOG_PATH", "clien
 UPDATER_LAUNCHER_LOG_PATH = _resolve_runtime_path(
     os.getenv("UPDATER_LAUNCHER_LOG_PATH", "client/logs/updater_launcher.log")
 )
-EMBEDDED_BUILD_PATTERN = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
+EMBEDDED_CLIENT_BUILD_PATTERN = re.compile(rb"BAYLAN_CLIENT_BUILD:(build-\d{14}|\d{14})")
+EMBEDDED_UPDATER_BUILD_PATTERN = re.compile(rb"BAYLAN_UPDATER_BUILD:(build-\d{14}|\d{14})")
 
 
-def _read_embedded_build_version(file_path: Path) -> str | None:
+def _read_embedded_build_version(file_path: Path, pattern: re.Pattern[bytes]) -> str | None:
     try:
         payload = file_path.read_bytes()
     except OSError:
         return None
 
-    match = EMBEDDED_BUILD_PATTERN.search(payload)
+    match = pattern.search(payload)
     if not match:
         return None
 
@@ -89,7 +90,7 @@ def resolve_client_version() -> str:
 
     version_source = Path(sys.executable if getattr(sys, "frozen", False) else __file__)
 
-    embedded_version = _read_embedded_build_version(version_source)
+    embedded_version = _read_embedded_build_version(version_source, EMBEDDED_CLIENT_BUILD_PATTERN)
     if embedded_version:
         return embedded_version
 
@@ -104,6 +105,22 @@ CLIENT_VERSION = resolve_client_version()
 AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 UPDATER_DOWNLOAD_DIR = _resolve_runtime_path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
+
+
+def resolve_local_updater_version() -> str:
+    updater_path = (_runtime_base_dir() / UPDATER_EXECUTABLE_NAME).resolve()
+    embedded_version = _read_embedded_build_version(updater_path, EMBEDDED_UPDATER_BUILD_PATTERN)
+    if embedded_version:
+        return embedded_version
+
+    try:
+        mtime = datetime.fromtimestamp(updater_path.stat().st_mtime, tz=timezone.utc)
+        return f"build-{mtime.strftime('%Y%m%d%H%M%S')}"
+    except OSError:
+        return "build-missing"
+
+
+CLIENT_UPDATER_VERSION = resolve_local_updater_version()
 
 
 def print(*args, **kwargs):
@@ -1110,6 +1127,50 @@ def _apply_update_package(local_file: Path):
     return "update_downloaded_manual_install"
 
 
+def _apply_client_updater_package(local_file: Path):
+    if not platform.system().lower().startswith("win"):
+        return "client_updater_downloaded_manual_install"
+
+    local_file = local_file.resolve()
+    if local_file.suffix.lower() != ".exe":
+        return "client_updater_downloaded_manual_install"
+
+    target_updater = (_runtime_base_dir() / UPDATER_EXECUTABLE_NAME).resolve()
+    target_updater.parent.mkdir(parents=True, exist_ok=True)
+
+    for idx in range(1, 11):
+        try:
+            shutil.copy2(local_file, target_updater)
+            local_file.unlink(missing_ok=True)
+            return "client_updater_swapped"
+        except OSError as exc:
+            if idx == 10:
+                raise RuntimeError(f"client_updater_swap_failed:{exc}") from exc
+            time.sleep(0.5)
+
+
+def _maybe_run_client_updater_update(config_data):
+    if not AUTO_UPDATER_ENABLED or not isinstance(config_data, dict):
+        return
+
+    update_info = config_data.get("client_updater") or {}
+    incoming_version = str(update_info.get("version") or "").strip()
+    if not incoming_version:
+        return
+
+    local_version = resolve_local_updater_version()
+    if not _is_newer_version(incoming_version, local_version):
+        return
+
+    log_info(f"⬆️ Yeni updater sürümü bulundu: {incoming_version} (current={local_version})")
+    try:
+        local_file = _download_release(update_info)
+        result = _apply_client_updater_package(local_file)
+        log_info(f"✅ Updater auto update sonucu: {result} | file={local_file}")
+    except Exception as exc:
+        log_info(f"❌ Updater auto update başarısız: {exc}")
+
+
 def _maybe_run_auto_update(config_data):
     if not AUTO_UPDATER_ENABLED or not isinstance(config_data, dict):
         return
@@ -1299,6 +1360,7 @@ def on_config(data):
 
     if isinstance(data, dict):
         playback.update_from_config(data)
+        _maybe_run_client_updater_update(data)
         _maybe_run_auto_update(data)
 
     print(f"🕒 idle_timeout_sec = {idle_timeout_sec} | idle_mode_enabled={idle_mode_enabled} | content_enabled={content_enabled}")

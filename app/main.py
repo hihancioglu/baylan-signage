@@ -146,21 +146,29 @@ def _resolve_update_version(explicit_version: str, filename: str, file_path: Pat
     return str(int(time.time()))
 
 
-def _build_updater_payload(db):
-    version = _get_setting(db, "updater_version")
-    file_name = _get_setting(db, "updater_file_name")
-    file_path = _get_setting(db, "updater_file_path")
+def _build_release_payload(db, key_prefix: str):
+    version = _get_setting(db, f"{key_prefix}_version")
+    file_name = _get_setting(db, f"{key_prefix}_file_name")
+    file_path = _get_setting(db, f"{key_prefix}_file_path")
     if not (version and file_name and file_path):
         return None
 
     return {
         "version": version,
         "url": url_for("download_update_file", file_path=file_path, _external=True),
-        "sha256": _get_setting(db, "updater_sha256") or "",
+        "sha256": _get_setting(db, f"{key_prefix}_sha256") or "",
         "file_name": file_name,
-        "size": int(_get_setting(db, "updater_size") or 0),
-        "published_at": _get_setting(db, "updater_published_at"),
+        "size": int(_get_setting(db, f"{key_prefix}_size") or 0),
+        "published_at": _get_setting(db, f"{key_prefix}_published_at"),
     }
+
+
+def _build_updater_payload(db):
+    return _build_release_payload(db, "updater")
+
+
+def _build_client_updater_payload(db):
+    return _build_release_payload(db, "client_updater")
 
 
 def _get_setting(db, key: str, default: str | None = None) -> str | None:
@@ -464,6 +472,7 @@ def build_config(hostname):
             "idle_mode_enabled": True,
             "content_enabled": True,
             "updater": _build_updater_payload(db),
+            "client_updater": _build_client_updater_payload(db),
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -1122,6 +1131,19 @@ def get_updater_settings():
         db.close()
 
 
+@app.get("/api/client-updater")
+def get_client_updater_settings():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        payload = _build_client_updater_payload(db)
+        return jsonify({"ok": True, "release": payload})
+    finally:
+        db.close()
+
+
 @app.post("/api/updater/upload")
 def upload_client_update():
     if _auth_failed():
@@ -1172,6 +1194,60 @@ def upload_client_update():
         _emit_config_update(hostnames)
 
         return jsonify({"ok": True, "release": _build_updater_payload(db)})
+    finally:
+        db.close()
+
+
+@app.post("/api/client-updater/upload")
+def upload_client_updater_update():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    requested_version = str(request.form.get("version") or "").strip()
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "file required"}), 400
+
+    stored_name = _safe_update_filename(uploaded.filename)
+    temp_name = f".tmp-{uuid.uuid4().hex}{Path(stored_name).suffix}"
+    temp_path = UPDATE_ROOT / temp_name
+    uploaded.save(temp_path)
+
+    version = _resolve_update_version(requested_version, uploaded.filename, temp_path)
+    relative_path = f"client-updater/{version}/{stored_name}"
+    stored_path = UPDATE_ROOT / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path.replace(stored_path)
+
+    try:
+        checksum = hashlib.sha256(stored_path.read_bytes()).hexdigest()
+        file_size = stored_path.stat().st_size
+        published_at = datetime.now(timezone.utc).isoformat()
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        stored_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+
+    db = db_session()
+    try:
+        old_relative_path = _get_setting(db, "client_updater_file_path")
+
+        _set_setting(db, "client_updater_version", version)
+        _set_setting(db, "client_updater_file_name", uploaded.filename)
+        _set_setting(db, "client_updater_file_path", relative_path)
+        _set_setting(db, "client_updater_sha256", checksum)
+        _set_setting(db, "client_updater_size", str(file_size))
+        _set_setting(db, "client_updater_published_at", published_at)
+        db.commit()
+
+        if old_relative_path and old_relative_path != relative_path:
+            old_path = UPDATE_ROOT / old_relative_path
+            old_path.unlink(missing_ok=True)
+
+        hostnames = [row[0] for row in db.query(Device.hostname).all()]
+        _emit_config_update(hostnames)
+
+        return jsonify({"ok": True, "release": _build_client_updater_payload(db)})
     finally:
         db.close()
 

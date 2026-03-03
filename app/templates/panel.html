@@ -220,7 +220,7 @@
           
 
           <div class="tab-section d-none" id="section-updater">
-            <div class="card panel-card">
+            <div class="card panel-card mb-3">
               <div class="card-body">
                 <h2 class="h4 mb-3">Client Updater</h2>
                 <div class="row g-2 align-items-end mb-3">
@@ -237,6 +237,25 @@
                 </div>
                 <div class="text-secondary small" id="updater-current">Yayınlanan dosya: -</div>
                 <p class="text-secondary small mt-2 mb-0">Yeni EXE yüklendiğinde online clientlar config güncellemesi alır, mevcut dosyanın üzerine yazıp uygulamayı otomatik yeniden başlatır.</p>
+              </div>
+            </div>
+            <div class="card panel-card">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Baylan Updater Güncellemesi</h2>
+                <div class="row g-2 align-items-end mb-3">
+                  <div class="col-12 col-md-7">
+                    <label class="form-label">BaylanUpdater.exe Dosyası</label>
+                    <input id="client-updater-file" class="form-control" type="file" accept=".exe,.bin" />
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-primary" onclick="uploadClientUpdaterUpdate()">BaylanUpdater Yükle</button>
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-outline-secondary" onclick="loadClientUpdater()">Yenile</button>
+                  </div>
+                </div>
+                <div class="text-secondary small" id="client-updater-current">Yayınlanan dosya: -</div>
+                <p class="text-secondary small mt-2 mb-0">Yeni BaylanUpdater.exe yüklendiğinde client, kendini kapatmadan güncel updater dosyasını indirip mevcut updater dosyasının üzerine yazar.</p>
               </div>
             </div>
           </div>
@@ -866,6 +885,41 @@ async function uploadClientUpdate(){
   alert('Yeni EXE yayınlandı. Clientlar otomatik güncelleme alacak.');
   fileInput.value = '';
   await loadUpdater();
+  await loadClientUpdater();
+}
+
+async function loadClientUpdater(){
+  const resp = await jget('/api/client-updater');
+  const current = document.getElementById('client-updater-current');
+  const release = resp?.release;
+  if(!current) return;
+  if(!release){
+    current.textContent = 'Yayınlanan dosya: yok';
+    return;
+  }
+  const releaseVersion = release.version || '-';
+  current.textContent = `Yayınlanan dosya: ${release.file_name} | Build: ${releaseVersion} | Boyut: ${((release.size||0)/(1024*1024)).toFixed(1)} MB`;
+}
+
+async function uploadClientUpdaterUpdate(){
+  const fileInput = document.getElementById('client-updater-file');
+  if(!fileInput.files.length){
+    alert('BaylanUpdater.exe seçin');
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+
+  const res = await fetch('/api/client-updater/upload', { method: 'POST', body: fd });
+  const body = await res.json();
+  if(!body.ok){
+    alert(body.error || 'BaylanUpdater yükleme hatası');
+    return;
+  }
+  alert('Yeni BaylanUpdater yayınlandı. Clientlar otomatik güncelleme alacak.');
+  fileInput.value = '';
+  await loadClientUpdater();
 }
 
 async function loadLogs(){
@@ -888,6 +942,7 @@ async function init(){
   await loadLogs();
   await loadFallbackMediaSetting();
   await loadUpdater();
+  await loadClientUpdater();
   setInterval(loadDevices, 15000);
   setInterval(loadLogs, 15000);
 }

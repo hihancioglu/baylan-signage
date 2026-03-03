@@ -7,10 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "[1/3] Installing/upgrading pyinstaller..."
+Write-Host "[1/4] Installing/upgrading pyinstaller..."
 & $Python -m pip install --upgrade pyinstaller
 
-Write-Host "[2/3] Building updater exe..."
+Write-Host "[2/4] Building updater exe..."
 & $Python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -28,4 +28,11 @@ if (!(Test-Path $artifact)) {
     throw "Updater artifact not found: $artifact"
 }
 
-Write-Host "[3/3] Updater build completed: $artifact"
+$buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
+$marker = "BAYLAN_UPDATER_BUILD:$buildVersion"
+
+Write-Host "[3/4] Embedding updater build marker..."
+Add-Content -Path $artifact -Value $marker -Encoding ASCII -NoNewline
+
+Write-Host "[4/4] Updater build completed: $artifact"
+Write-Host "Embedded updater build marker: $buildVersion"
