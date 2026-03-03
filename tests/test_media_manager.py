@@ -70,6 +70,53 @@ class TestMediaManagerDownload(unittest.TestCase):
                 self.assertTrue(Path(slide["image"]).exists())
 
 
+class TestMediaManagerDownloadJitter(unittest.TestCase):
+    def test_sync_playlist_entries_staggers_download_start_when_needed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            manager._download_jitter_max_sec = 5
+            source = "http://example.com/video.mp4"
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            with patch("client.media_manager.random.uniform", return_value=1.25) as uniform_mock:
+                with patch("client.media_manager.time.sleep") as sleep_mock:
+                    with patch("client.media_manager.urlopen", return_value=DummyResponse(b"abc")):
+                        entries = manager.sync_playlist_entries(
+                            [{"path": source, "media_type": "video", "duration_sec": None}],
+                            "v-jitter",
+                            {source: "sig-jitter"},
+                        )
+
+            self.assertEqual(len(entries), 1)
+            uniform_mock.assert_called_once_with(0, 5)
+            sleep_mock.assert_called_once_with(1.25)
+
+    def test_sync_playlist_entries_skips_stagger_when_no_download_needed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            source = "http://example.com/video.mp4"
+            signature = "sig-existing"
+            target = manager._url_cache_target(source, signature)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"existing")
+
+            with patch("client.media_manager.time.sleep") as sleep_mock:
+                entries = manager.sync_playlist_entries(
+                    [{"path": source, "media_type": "video", "duration_sec": None}],
+                    "v-jitter-skip",
+                    {source: signature},
+                )
+
+            self.assertEqual(len(entries), 1)
+            sleep_mock.assert_not_called()
+
+
 class TestMediaManagerManifestWrite(unittest.TestCase):
     def test_sync_playlist_entries_handles_manifest_write_permission_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:

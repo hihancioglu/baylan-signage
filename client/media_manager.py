@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import random
 import threading
 import shutil
 import tempfile
@@ -21,6 +22,7 @@ class MediaManager:
         self.versions_root.mkdir(parents=True, exist_ok=True)
         self.media_store_root.mkdir(parents=True, exist_ok=True)
         self._state_lock = threading.RLock()
+        self._download_jitter_max_sec = max(0.0, float(os.getenv("MEDIA_SYNC_JITTER_MAX_SEC", "20")))
 
     @staticmethod
     def _sha256_text(value: str) -> str:
@@ -172,6 +174,16 @@ class MediaManager:
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 
+    def _maybe_stagger_download_start(self):
+        if self._download_jitter_max_sec <= 0:
+            return
+
+        delay = random.uniform(0, self._download_jitter_max_sec)
+        self._safe_print(
+            f"⏳ medya indirme başlangıcı dengeleniyor | bekleme={delay:.1f}s max={self._download_jitter_max_sec:.1f}s"
+        )
+        time.sleep(delay)
+
 
 
     def _download_slideshow_manifest(self, source_url: str, target_manifest_path: Path, signature: str | None):
@@ -272,6 +284,8 @@ class MediaManager:
             )
 
         report_progress("start")
+        if total_download_count:
+            self._maybe_stagger_download_start()
 
         for raw_item in playlist_items:
             source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
