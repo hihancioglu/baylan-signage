@@ -58,6 +58,7 @@ ensure_sqlite_schema()
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
 UPDATE_ROOT = Path(os.getenv("UPDATE_ROOT", "data/updates")).resolve()
+AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "900")))
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -180,7 +181,16 @@ def _parse_iso_datetime(value: str | None):
         return None
 
 
-def _build_updater_rollout_payload(db, release, *, version_field: str = "agent_version"):
+def _rollout_delay_seconds(hostname: str, channel: str, version: str) -> int:
+    if AUTO_UPDATE_ROLLOUT_WINDOW_SEC <= 0:
+        return 0
+
+    seed = f"{hostname}:{channel}:{version}".encode("utf-8")
+    digest = hashlib.sha256(seed).digest()
+    return int.from_bytes(digest[:4], "big") % (AUTO_UPDATE_ROLLOUT_WINDOW_SEC + 1)
+
+
+def _build_updater_rollout_payload(db, release, *, version_field: str = "agent_version", channel: str = "client"):
     devices = db.query(Device).all()
     if not release:
         return {
@@ -209,7 +219,9 @@ def _build_updater_rollout_payload(db, release, *, version_field: str = "agent_v
             now_utc = datetime.now(timezone.utc)
             if published_at.tzinfo is None:
                 now_utc = now_utc.replace(tzinfo=None)
-            waiting_seconds = max(0, int((now_utc - published_at).total_seconds()))
+            elapsed_seconds = max(0, int((now_utc - published_at).total_seconds()))
+            rollout_delay_seconds = _rollout_delay_seconds(device.hostname or "", channel, release_version)
+            waiting_seconds = max(0, rollout_delay_seconds - elapsed_seconds)
 
         clients.append(
             {
@@ -1205,7 +1217,7 @@ def get_updater_settings():
     db = db_session()
     try:
         payload = _build_updater_payload(db)
-        rollout = _build_updater_rollout_payload(db, payload)
+        rollout = _build_updater_rollout_payload(db, payload, channel="client")
         return jsonify({"ok": True, "release": payload, "rollout": rollout})
     finally:
         db.close()
@@ -1219,7 +1231,7 @@ def get_client_updater_settings():
     db = db_session()
     try:
         payload = _build_client_updater_payload(db)
-        rollout = _build_updater_rollout_payload(db, payload, version_field="updater_version")
+        rollout = _build_updater_rollout_payload(db, payload, version_field="updater_version", channel="client_updater")
         return jsonify({"ok": True, "release": payload, "rollout": rollout})
     finally:
         db.close()
