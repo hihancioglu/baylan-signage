@@ -34,6 +34,8 @@ def ensure_sqlite_schema():
             "last_content_name": "VARCHAR(255)",
             "idle_mode_enabled": "BOOLEAN",
             "content_enabled": "BOOLEAN",
+            "last_client_update_status": "VARCHAR(256)",
+            "last_client_updater_status": "VARCHAR(256)",
         },
         "playlists": {
             "type": "VARCHAR(32) DEFAULT 'normal' NOT NULL",

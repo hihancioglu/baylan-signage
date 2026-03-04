@@ -213,6 +213,8 @@ class TestConfigPush(unittest.TestCase):
                 "ip": "127.0.0.1",
                 "agent_version": "build-client-1",
                 "updater_version": "build-updater-1",
+                "client_update_status": "ok:build-client-1",
+                "client_updater_status": "ok:build-updater-1",
             },
         )
 
@@ -223,6 +225,8 @@ class TestConfigPush(unittest.TestCase):
                 "state": "IDLE",
                 "agent_version": "build-client-2",
                 "updater_version": "build-updater-2",
+                "client_update_status": "failed:build-client-2:update_size_mismatch",
+                "client_updater_status": "failed:build-updater-2:update_size_mismatch",
             },
         )
         client_socket.disconnect()
@@ -233,6 +237,8 @@ class TestConfigPush(unittest.TestCase):
             self.assertIsNotNone(device)
             self.assertEqual(device.agent_version, "build-client-2")
             self.assertEqual(device.updater_version, "build-updater-2")
+            self.assertEqual(device.last_client_update_status, "failed:build-client-2:update_size_mismatch")
+            self.assertEqual(device.last_client_updater_status, "failed:build-updater-2:update_size_mismatch")
         finally:
             db.close()
 
@@ -261,6 +267,7 @@ class TestConfigPush(unittest.TestCase):
 
         self.assertTrue(clients["pc-a"].get("is_updated"))
         self.assertFalse(clients["pc-b"].get("is_updated"))
+        self.assertIn("last_client_updater_status", clients["pc-a"])
 
     def test_resolve_update_version_prefers_embedded_build_marker(self):
         marker = b"BAYLAN_CLIENT_BUILD:build-20260227091530"
