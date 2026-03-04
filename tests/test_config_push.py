@@ -2,6 +2,7 @@ import importlib
 import io
 import os
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -268,6 +269,29 @@ class TestConfigPush(unittest.TestCase):
         self.assertTrue(clients["pc-a"].get("is_updated"))
         self.assertFalse(clients["pc-b"].get("is_updated"))
         self.assertIn("last_client_updater_status", clients["pc-a"])
+
+    def test_rollout_waiting_seconds_reports_remaining_slot_time(self):
+        db = self.main.db_session()
+        try:
+            db.add(self.main.Device(hostname="pc-remaining", agent_version="build-old", is_online=True))
+            db.commit()
+
+            release = {
+                "version": "build-new",
+                "published_at": (datetime.utcnow() - timedelta(seconds=30)).isoformat(),
+            }
+
+            with patch("app.main._rollout_delay_seconds", return_value=120):
+                rollout = self.main._build_updater_rollout_payload(db, release, channel="client")
+        finally:
+            db.close()
+
+        clients = rollout.get("clients") or []
+        self.assertEqual(len(clients), 1)
+        waiting_seconds = clients[0].get("waiting_seconds")
+        self.assertIsNotNone(waiting_seconds)
+        self.assertGreaterEqual(waiting_seconds, 80)
+        self.assertLessEqual(waiting_seconds, 90)
 
     def test_resolve_update_version_prefers_embedded_build_marker(self):
         marker = b"BAYLAN_CLIENT_BUILD:build-20260227091530"
