@@ -134,8 +134,7 @@ def main() -> int:
 
     launch_target = dst
     if not _copy_with_retry(src, dst, attempts=30, delay_sec=1.0, log_file=log_file):
-        launch_target = src
-        _log(log_file, "swap failed after retries, fallback to downloaded binary")
+        _log(log_file, "swap failed after retries, keeping installed binary as primary restart target")
 
     started = _start_process(launch_target, work_dir=work_dir, log_file=log_file)
     if not started and launch_target == dst and src.exists():
