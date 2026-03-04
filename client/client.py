@@ -118,6 +118,9 @@ _rollout_wait_lock = threading.Lock()
 _client_updater_update_lock = threading.Lock()
 _client_updater_inflight_versions: set[str] = set()
 _client_updater_completed_versions: set[str] = set()
+_client_update_lock = threading.Lock()
+_client_update_inflight_versions: set[str] = set()
+_client_update_completed_versions: set[str] = set()
 _last_update_status_lock = threading.Lock()
 _last_update_statuses: dict[str, str] = {
     "client": "",
@@ -1330,15 +1333,30 @@ def _maybe_run_auto_update(config_data):
         return
 
     log_info(f"⬆️ Yeni client sürümü bulundu: {incoming_version} (current={CLIENT_VERSION})")
+
+    with _client_update_lock:
+        if incoming_version in _client_update_completed_versions:
+            log_info(f"ℹ️ Auto update atlandı: sürüm zaten işlendi ({incoming_version})")
+            return
+        if incoming_version in _client_update_inflight_versions:
+            log_info(f"ℹ️ Auto update atlandı: sürüm zaten başka thread tarafından işleniyor ({incoming_version})")
+            return
+        _client_update_inflight_versions.add(incoming_version)
+
     try:
         _wait_for_rollout_slot("client", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_update_package(local_file)
         _set_update_status("client", f"ok:{incoming_version}")
         log_info(f"✅ Auto update sonucu: {result} | file={local_file}")
+        with _client_update_lock:
+            _client_update_completed_versions.add(incoming_version)
     except Exception as exc:
         _set_update_status("client", f"failed:{incoming_version}:{exc}")
         log_info(f"❌ Auto update başarısız: {exc}")
+    finally:
+        with _client_update_lock:
+            _client_update_inflight_versions.discard(incoming_version)
 
 def _parse_issued_at(value):
     if not isinstance(value, str):
