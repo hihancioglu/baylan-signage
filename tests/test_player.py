@@ -454,6 +454,41 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             client_module._client_updater_inflight_versions.clear()
             client_module._client_updater_completed_versions.clear()
 
+    def test_client_update_deduplicates_inflight_version(self):
+        from client import client as client_module
+
+        config_data = {
+            "updater": {
+                "version": "build-20260304090459",
+                "url": "https://example.com/agent.exe",
+                "file_name": "BaylanSignageAgent.exe",
+            }
+        }
+
+        try:
+            with patch.object(client_module, "AUTO_UPDATER_ENABLED", True), patch.object(
+                client_module,
+                "CLIENT_VERSION",
+                "build-20260303235938",
+            ), patch.object(client_module, "_wait_for_rollout_slot", return_value=None), patch.object(
+                client_module,
+                "_download_release",
+                return_value=Path("/tmp/agent.exe"),
+            ) as download_mock, patch.object(
+                client_module,
+                "_apply_update_package",
+                return_value="windows_update_shutdown_requested",
+            ):
+                client_module._client_update_inflight_versions.clear()
+                client_module._client_update_completed_versions.clear()
+                client_module._client_update_inflight_versions.add("build-20260304090459")
+                client_module._maybe_run_auto_update(config_data)
+
+            download_mock.assert_not_called()
+        finally:
+            client_module._client_update_inflight_versions.clear()
+            client_module._client_update_completed_versions.clear()
+
     def test_rollout_wait_runs_only_once_per_version(self):
         from client import client as client_module
 
