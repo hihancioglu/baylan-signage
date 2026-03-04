@@ -1034,11 +1034,17 @@ function renderRollout(rollout, prefix){
     const label = escapeHtml(normalizeRolloutText(client.alias || client.hostname));
     const hostname = escapeHtml(normalizeRolloutText(client.hostname));
     const rolloutVersion = escapeHtml(normalizeRolloutText(client.current_version));
+    const channelStatusRaw = prefix === 'client-updater'
+      ? normalizeRolloutText(client.last_client_updater_status)
+      : normalizeRolloutText(client.last_client_update_status);
+    const channelStatus = channelStatusRaw.toLowerCase();
+    const hasFailed = channelStatus.startsWith('failed:');
     const status = client.is_updated
       ? '<span class="badge text-bg-success">Güncel</span>'
-      : `<span class="badge ${client.is_online ? 'text-bg-warning' : 'text-bg-secondary'}">${client.is_online ? 'Rollout bekliyor' : 'Offline bekliyor'}</span>`;
+      : `<span class="badge ${hasFailed ? 'text-bg-danger' : (client.is_online ? 'text-bg-warning' : 'text-bg-secondary')}">${hasFailed ? 'Güncelleme başarısız' : (client.is_online ? 'Rollout bekliyor' : 'Offline bekliyor')}</span>`;
     const waitText = client.is_updated ? '-' : formatRolloutWait(client.waiting_seconds);
-    return `<tr><td>${label}<br/><small class="text-secondary">${hostname} | Versiyon: ${rolloutVersion}</small></td><td>${status}</td><td>${waitText}</td></tr>`;
+    const failureDetail = hasFailed ? `<br/><small class="text-danger">${escapeHtml(channelStatusRaw)}</small>` : '';
+    return `<tr><td>${label}<br/><small class="text-secondary">${hostname} | Versiyon: ${rolloutVersion}</small></td><td>${status}${failureDetail}</td><td>${waitText}</td></tr>`;
   });
 
   body.innerHTML = rows.length

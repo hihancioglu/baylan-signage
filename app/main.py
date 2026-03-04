@@ -219,6 +219,8 @@ def _build_updater_rollout_payload(db, release, *, version_field: str = "agent_v
                 "agent_version": device.agent_version,
                 "updater_version": device.updater_version,
                 "current_version": getattr(device, version_field, None),
+                "last_client_update_status": device.last_client_update_status,
+                "last_client_updater_status": device.last_client_updater_status,
                 "last_seen": device.last_seen.isoformat() if device.last_seen else None,
                 "is_updated": is_updated,
                 "waiting_seconds": waiting_seconds,
@@ -651,6 +653,8 @@ def handle_register(data):
         device.updater_version = data.get("updater_version") or device.updater_version
         device.os_version = data.get("os_name") or device.os_version
         device.last_content_name = data.get("content_name") or ""
+        device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
+        device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
         device.is_online = True
         device.last_seen = datetime.utcnow()
 
@@ -683,6 +687,8 @@ def handle_heartbeat(data):
             device.updater_version = data.get("updater_version") or device.updater_version
             device.os_version = data.get("os_name") or device.os_version
             device.last_content_name = data.get("content_name") or ""
+            device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
+            device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
             device.is_online = True
             db.commit()
     finally:

@@ -1,5 +1,6 @@
 import threading
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -332,6 +333,91 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
 
 
+
+
+
+    def test_download_release_rejects_size_mismatch(self):
+        from client import client as client_module
+
+        class _FakeResp:
+            def __init__(self, payload: bytes):
+                self._payload = payload
+                self._offset = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size=-1):
+                if self._offset >= len(self._payload):
+                    return b""
+                if size is None or size < 0:
+                    size = len(self._payload) - self._offset
+                chunk = self._payload[self._offset:self._offset + size]
+                self._offset += len(chunk)
+                return chunk
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(client_module, "UPDATER_DOWNLOAD_DIR", Path(tmpdir)), patch.object(
+                client_module.urllib_request,
+                "urlopen",
+                return_value=_FakeResp(b"12345"),
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    client_module._download_release(
+                        {
+                            "url": "https://example.com/updater.exe",
+                            "version": "build-20260304090459",
+                            "file_name": "BaylanSignageAgent.exe",
+                            "size": 23,
+                        }
+                    )
+
+        self.assertIn("update_size_mismatch", str(ctx.exception))
+
+    def test_download_release_accepts_exact_size(self):
+        from client import client as client_module
+
+        class _FakeResp:
+            def __init__(self, payload: bytes):
+                self._payload = payload
+                self._offset = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size=-1):
+                if self._offset >= len(self._payload):
+                    return b""
+                if size is None or size < 0:
+                    size = len(self._payload) - self._offset
+                chunk = self._payload[self._offset:self._offset + size]
+                self._offset += len(chunk)
+                return chunk
+
+        payload = b"12345"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(client_module, "UPDATER_DOWNLOAD_DIR", Path(tmpdir)), patch.object(
+                client_module.urllib_request,
+                "urlopen",
+                return_value=_FakeResp(payload),
+            ):
+                downloaded = client_module._download_release(
+                    {
+                        "url": "https://example.com/updater.exe",
+                        "version": "build-20260304090459",
+                        "file_name": "BaylanSignageAgent.exe",
+                        "size": len(payload),
+                    }
+                )
+
+            self.assertTrue(downloaded.exists())
+            self.assertEqual(downloaded.read_bytes(), payload)
 
     def test_client_updater_update_deduplicates_inflight_version(self):
         from client import client as client_module

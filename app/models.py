@@ -23,6 +23,8 @@ class Device(Base):
     last_content_name = Column(String(255))
     idle_mode_enabled = Column(Boolean)
     content_enabled = Column(Boolean)
+    last_client_update_status = Column(String(256))
+    last_client_updater_status = Column(String(256))
 
 
 class Group(Base):

@@ -118,6 +118,11 @@ _rollout_wait_lock = threading.Lock()
 _client_updater_update_lock = threading.Lock()
 _client_updater_inflight_versions: set[str] = set()
 _client_updater_completed_versions: set[str] = set()
+_last_update_status_lock = threading.Lock()
+_last_update_statuses: dict[str, str] = {
+    "client": "",
+    "client_updater": "",
+}
 
 
 def resolve_local_updater_version() -> str:
@@ -221,6 +226,22 @@ def log_warning(message: str):
 def log_error(message: str):
     print(message)
     logging.error(message)
+
+
+def _set_update_status(channel: str, status: str) -> None:
+    normalized_channel = (channel or "").strip().lower()
+    if not normalized_channel:
+        return
+    with _last_update_status_lock:
+        _last_update_statuses[normalized_channel] = (status or "").strip()
+
+
+def _get_update_status_payload() -> dict[str, str]:
+    with _last_update_status_lock:
+        return {
+            "client_update_status": _last_update_statuses.get("client", ""),
+            "client_updater_status": _last_update_statuses.get("client_updater", ""),
+        }
 
 
 def flush_and_shutdown_logging():
@@ -1148,9 +1169,20 @@ def _download_release(update_info: dict) -> Path:
     UPDATER_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     target = UPDATER_DOWNLOAD_DIR / safe_name
 
+    downloaded_size = 0
     with urllib_request.urlopen(url, timeout=90) as resp:
         with open(target, "wb") as fh:
-            shutil.copyfileobj(resp, fh)
+            while True:
+                chunk = resp.read(1024 * 1024)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                downloaded_size += len(chunk)
+
+    expected_size = int(update_info.get("size") or 0)
+    if expected_size > 0 and downloaded_size != expected_size:
+        target.unlink(missing_ok=True)
+        raise RuntimeError(f"update_size_mismatch:expected={expected_size}:actual={downloaded_size}")
 
     expected_sha = (update_info.get("sha256") or "").strip().lower()
     if expected_sha:
@@ -1273,10 +1305,12 @@ def _maybe_run_client_updater_update(config_data):
         _wait_for_rollout_slot("client_updater", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_client_updater_package(local_file)
+        _set_update_status("client_updater", f"ok:{incoming_version}")
         log_info(f"✅ Updater auto update sonucu: {result} | file={local_file}")
         with _client_updater_update_lock:
             _client_updater_completed_versions.add(incoming_version)
     except Exception as exc:
+        _set_update_status("client_updater", f"failed:{incoming_version}:{exc}")
         log_info(f"❌ Updater auto update başarısız: {exc}")
     finally:
         with _client_updater_update_lock:
@@ -1300,8 +1334,10 @@ def _maybe_run_auto_update(config_data):
         _wait_for_rollout_slot("client", incoming_version)
         local_file = _download_release(update_info)
         result = _apply_update_package(local_file)
+        _set_update_status("client", f"ok:{incoming_version}")
         log_info(f"✅ Auto update sonucu: {result} | file={local_file}")
     except Exception as exc:
+        _set_update_status("client", f"failed:{incoming_version}:{exc}")
         log_info(f"❌ Auto update başarısız: {exc}")
 
 def _parse_issued_at(value):
@@ -1430,6 +1466,7 @@ def connect():
             "agent_version": CLIENT_VERSION,
             "updater_version": get_runtime_updater_version(),
             "content_name": playback.current_content_name(),
+            **_get_update_status_payload(),
         },
     )
     sio.emit("pull_config", {"hostname": hostname})
@@ -1666,6 +1703,7 @@ def main():
                                 "agent_version": CLIENT_VERSION,
                                 "updater_version": get_runtime_updater_version(),
                                 "content_name": playback.current_content_name(),
+                                **_get_update_status_payload(),
                             },
                         )
                         print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
