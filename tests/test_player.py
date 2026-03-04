@@ -1,6 +1,7 @@
 import threading
 import unittest
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -503,6 +504,31 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             client_module._wait_for_rollout_slot("client_updater", "build-20260303165001")
 
         self.assertEqual(wait_mock.call_count, 1)
+
+    def test_rollout_wait_respects_elapsed_time_since_publish(self):
+        from client import client as client_module
+
+        published_at = "2026-03-04T10:40:00+00:00"
+        now_value = datetime(2026, 3, 4, 10, 45, 0, tzinfo=timezone.utc)
+
+        with patch.object(client_module, "AUTO_UPDATE_ROLLOUT_WINDOW_SEC", 900), patch.object(
+            client_module,
+            "hostname",
+            "test-host",
+        ), patch.object(client_module.shutdown_event, "wait", return_value=False) as wait_mock, patch.object(
+            client_module,
+            "_parse_published_at",
+            return_value=datetime.fromisoformat(published_at),
+        ), patch.object(client_module, "datetime") as datetime_mock:
+            datetime_mock.now.return_value = now_value
+            datetime_mock.fromisoformat.side_effect = datetime.fromisoformat
+            client_module._rollout_waited_versions.clear()
+            client_module._rollout_inflight_versions.clear()
+            client_module._wait_for_rollout_slot("client", "build-20260304103445", published_at)
+
+        waited_for = wait_mock.call_args[0][0]
+        self.assertLess(waited_for, 900)
+        self.assertGreaterEqual(waited_for, 0)
 
     def test_rollout_wait_is_deduplicated_across_threads(self):
         from client import client as client_module

@@ -111,7 +111,7 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
     if part.strip()
 ]
-AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "900")))
+AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 _rollout_waited_versions: set[str] = set()
 _rollout_inflight_versions: set[str] = set()
 _rollout_wait_lock = threading.Lock()
@@ -1139,7 +1139,16 @@ def _is_missing_or_unversioned_build(version: str) -> bool:
     return normalized in {"", "unknown", "build-unknown", "build-missing", "build-unversioned"}
 
 
-def _wait_for_rollout_slot(channel: str, version: str) -> None:
+def _parse_published_at(value: str | None):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _wait_for_rollout_slot(channel: str, version: str, published_at: str | None = None) -> None:
     if AUTO_UPDATE_ROLLOUT_WINDOW_SEC <= 0:
         return
 
@@ -1153,6 +1162,13 @@ def _wait_for_rollout_slot(channel: str, version: str) -> None:
         seed = f"{hostname}:{channel}:{version}".encode("utf-8")
         digest = hashlib.sha256(seed).digest()
         delay_sec = int.from_bytes(digest[:4], "big") % (AUTO_UPDATE_ROLLOUT_WINDOW_SEC + 1)
+        published_at_dt = _parse_published_at(published_at)
+        if published_at_dt:
+            now_utc = datetime.now(timezone.utc)
+            if published_at_dt.tzinfo is None:
+                now_utc = now_utc.replace(tzinfo=None)
+            elapsed_sec = max(0, int((now_utc - published_at_dt).total_seconds()))
+            delay_sec = max(0, delay_sec - elapsed_sec)
         if delay_sec > 0:
             log_info(
                 f"⏳ Rollout dengeleme beklemesi: kanal={channel} sürüm={version} gecikme={delay_sec}s"
@@ -1305,7 +1321,7 @@ def _maybe_run_client_updater_update(config_data):
         _client_updater_inflight_versions.add(incoming_version)
 
     try:
-        _wait_for_rollout_slot("client_updater", incoming_version)
+        _wait_for_rollout_slot("client_updater", incoming_version, update_info.get("published_at"))
         local_file = _download_release(update_info)
         result = _apply_client_updater_package(local_file)
         _set_update_status("client_updater", f"ok:{incoming_version}")
@@ -1344,7 +1360,7 @@ def _maybe_run_auto_update(config_data):
         _client_update_inflight_versions.add(incoming_version)
 
     try:
-        _wait_for_rollout_slot("client", incoming_version)
+        _wait_for_rollout_slot("client", incoming_version, update_info.get("published_at"))
         local_file = _download_release(update_info)
         result = _apply_update_package(local_file)
         _set_update_status("client", f"ok:{incoming_version}")
