@@ -58,7 +58,7 @@ ensure_sqlite_schema()
 
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve()
 UPDATE_ROOT = Path(os.getenv("UPDATE_ROOT", "data/updates")).resolve()
-AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "900")))
+AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
