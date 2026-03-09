@@ -29,3 +29,31 @@ Basit LDAP bind akışı:
 İpucu: Kullanıcı adı sadece `ali` gibi gelirse ve `AD_DOMAIN` tanımlıysa uygulama bunu otomatik `DOMAIN\ali` formatına çevirir.
 
 Not: Panel oturum açma ve panel API işlemleri AD oturumu ile korunur; girişte ek `X-SECRET` istenmez.
+
+## Dış Sistem Entegrasyonu: İş Emri Başlatılmamış Uyarısı
+
+Başka bir sistemden aşağıdaki endpoint'e istek atarak ekranlarda kalıcı uyarı açabilirsiniz:
+
+- `POST /api/integrations/work-order-alert`
+- Kimlik doğrulama: `X-Shared-Secret: <SHARED_SECRET>` veya `Authorization: Bearer <SHARED_SECRET>`
+
+Örnek gövde (tüm cihazlar):
+
+```json
+{
+  "active": true,
+  "message": "İŞEMRİ BAŞLATILMAMIŞ"
+}
+```
+
+Örnek gövde (tek cihaz):
+
+```json
+{
+  "hostname": "BAYLAN-CLIENT-01",
+  "active": true,
+  "message": "İŞEMRİ BAŞLATILMAMIŞ"
+}
+```
+
+Uyarıyı kaldırmak için `active` alanını `false` gönderin.

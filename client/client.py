@@ -367,6 +367,8 @@ idle_mode_enabled = True
 content_enabled = True
 current_state = ClientState.ACTIVE
 emergency_active = False
+work_order_alert_active = False
+work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
 playing_started_at = 0.0
 
 SUPPORTED_COMMANDS = {
@@ -442,6 +444,7 @@ class GuiRuntime:
         self._started = threading.Event()
         self._shutdown = False
         self._download_overlay_visible = False
+        self._work_order_overlay_visible = False
         self._state_lock = threading.Lock()
 
     def start(self):
@@ -470,6 +473,14 @@ class GuiRuntime:
         with self._state_lock:
             self._download_overlay_visible = visible
 
+    def work_order_overlay_active(self) -> bool:
+        with self._state_lock:
+            return self._work_order_overlay_visible
+
+    def _set_work_order_overlay_state(self, visible: bool):
+        with self._state_lock:
+            self._work_order_overlay_visible = visible
+
     def _run(self):
         try:
             import tkinter as tk
@@ -485,6 +496,8 @@ class GuiRuntime:
         idle_window = None
         download_window = None
         download_label = None
+        work_order_window = None
+        work_order_label = None
 
         def _show_idle_overlay():
             nonlocal idle_window
@@ -533,6 +546,37 @@ class GuiRuntime:
             download_label = None
             self._set_download_overlay_state(False)
 
+        def _show_work_order_overlay(message: str):
+            nonlocal work_order_window, work_order_label
+            if work_order_window is None or not work_order_window.winfo_exists():
+                work_order_window = tk.Toplevel(root)
+                work_order_window.configure(bg="#8B0000")
+                work_order_window.attributes("-fullscreen", True)
+                work_order_window.attributes("-topmost", True)
+                work_order_window.overrideredirect(True)
+                work_order_window.title("Baylan İş Emri Uyarısı")
+                work_order_label = tk.Label(
+                    work_order_window,
+                    text="",
+                    fg="white",
+                    bg="#8B0000",
+                    font=("Arial", 70, "bold"),
+                    justify="center",
+                    wraplength=1700,
+                )
+                work_order_label.place(relx=0.5, rely=0.5, anchor="center")
+            if work_order_label is not None:
+                work_order_label.config(text=message)
+            self._set_work_order_overlay_state(True)
+
+        def _hide_work_order_overlay():
+            nonlocal work_order_window, work_order_label
+            if work_order_window is not None and work_order_window.winfo_exists():
+                work_order_window.destroy()
+            work_order_window = None
+            work_order_label = None
+            self._set_work_order_overlay_state(False)
+
         _next_tick = None
 
         def process_events():
@@ -544,6 +588,7 @@ class GuiRuntime:
 
             if self._shutdown:
                 _hide_download_overlay()
+                _hide_work_order_overlay()
                 _hide_idle_overlay()
                 root.destroy()
                 return
@@ -565,6 +610,13 @@ class GuiRuntime:
                         _show_download_overlay(str(payload or ""))
                 elif event_name == "download_overlay_hide":
                     _hide_download_overlay()
+                elif event_name == "work_order_alert_show":
+                    _show_work_order_overlay(str(payload or "İŞEMRİ BAŞLATILMAMIŞ"))
+                elif event_name == "work_order_alert_update":
+                    if self.work_order_overlay_active():
+                        _show_work_order_overlay(str(payload or "İŞEMRİ BAŞLATILMAMIŞ"))
+                elif event_name == "work_order_alert_hide":
+                    _hide_work_order_overlay()
                 elif event_name == "shutdown":
                     self._shutdown = True
                     break
@@ -601,6 +653,23 @@ class IdleBackgroundOverlay:
 
     def hide(self):
         self._gui_runtime.post("idle_overlay_hide")
+
+
+class WorkOrderAlertOverlay:
+    def __init__(self, gui_runtime: GuiRuntime):
+        self._gui_runtime = gui_runtime
+
+    def show(self, message: str):
+        self._gui_runtime.post("work_order_alert_show", message)
+
+    def update(self, message: str):
+        self._gui_runtime.post("work_order_alert_update", message)
+
+    def hide(self):
+        self._gui_runtime.post("work_order_alert_hide")
+
+    def is_active(self) -> bool:
+        return self._gui_runtime.work_order_overlay_active()
 
 
 class PlaybackController:
@@ -991,6 +1060,7 @@ window_manager = _WindowManager()
 gui_runtime = GuiRuntime()
 playback = PlaybackController(gui_runtime)
 idle_background = IdleBackgroundOverlay(gui_runtime)
+work_order_alert_overlay = WorkOrderAlertOverlay(gui_runtime)
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
@@ -1526,6 +1596,7 @@ def on_hello(data):
 @sio.on("config")
 def on_config(data):
     global idle_timeout_sec, idle_mode_enabled, content_enabled
+    global work_order_alert_active, work_order_alert_message
 
     print("📥 CONFIG RECEIVED:")
     print(data)
@@ -1546,6 +1617,21 @@ def on_config(data):
     config_timeout = data.get("idle_timeout_sec") if isinstance(data, dict) else None
     idle_mode_enabled = bool(data.get("idle_mode_enabled", True)) if isinstance(data, dict) else True
     content_enabled = bool(data.get("content_enabled", True)) if isinstance(data, dict) else True
+    if isinstance(data, dict):
+        work_order_alert_active = bool(data.get("work_order_alert_active", False))
+        work_order_alert_message = str(data.get("work_order_alert_message") or "İŞEMRİ BAŞLATILMAMIŞ")
+    else:
+        work_order_alert_active = False
+        work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
+
+    if work_order_alert_active:
+        if work_order_alert_overlay.is_active():
+            work_order_alert_overlay.update(work_order_alert_message)
+        else:
+            work_order_alert_overlay.show(work_order_alert_message)
+    elif work_order_alert_overlay.is_active():
+        work_order_alert_overlay.hide()
+
     if isinstance(config_timeout, (int, float)) and config_timeout > 0:
         idle_timeout_sec = int(config_timeout)
     else:

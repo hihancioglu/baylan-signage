@@ -76,6 +76,9 @@ COMMAND_TYPES = {
     "PING",
 }
 
+WORK_ORDER_ALERT_ACTIVE_KEY = "work_order_alert_active"
+WORK_ORDER_ALERT_MESSAGE_KEY = "work_order_alert_message"
+
 
 def _is_allowed_media(filename: str) -> bool:
     suffix = Path(filename or "").suffix.lower()
@@ -266,6 +269,29 @@ def _set_setting(db, key: str, value: str | None):
         row = AppSetting(key=key)
     row.value = value
     db.add(row)
+
+
+def _parse_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "active"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "inactive"}:
+            return False
+    return default
+
+
+def _integration_auth_failed() -> bool:
+    provided = request.headers.get("X-Shared-Secret") or ""
+    if not provided:
+        auth_header = request.headers.get("Authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            provided = auth_header[7:].strip()
+    return not provided or provided != SHARED_SECRET
 
 
 @app.route("/")
@@ -546,6 +572,11 @@ def build_config(hostname):
     try:
         fallback_media = _get_setting(db, "fallback_media_url")
         fallback_version = _get_setting(db, "fallback_media_version", "0")
+        global_work_order_alert_active = _parse_bool(_get_setting(db, WORK_ORDER_ALERT_ACTIVE_KEY), False)
+        global_work_order_alert_message = (
+            _get_setting(db, WORK_ORDER_ALERT_MESSAGE_KEY, "İŞEMRİ BAŞLATILMAMIŞ")
+            or "İŞEMRİ BAŞLATILMAMIŞ"
+        )
 
         base_config = {
             "enabled": False,
@@ -558,6 +589,8 @@ def build_config(hostname):
             "content_enabled": True,
             "updater": _build_updater_payload(db),
             "client_updater": _build_client_updater_payload(db),
+            "work_order_alert_active": global_work_order_alert_active,
+            "work_order_alert_message": global_work_order_alert_message,
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -576,6 +609,14 @@ def build_config(hostname):
                 base_config["idle_mode_enabled"] = bool(group.idle_mode_enabled)
             if group.content_enabled is not None:
                 base_config["content_enabled"] = bool(group.content_enabled)
+
+        device_work_order_alert_active = _get_setting(db, f"{WORK_ORDER_ALERT_ACTIVE_KEY}:{hostname}")
+        if device_work_order_alert_active is not None:
+            base_config["work_order_alert_active"] = _parse_bool(device_work_order_alert_active, False)
+
+        device_work_order_alert_message = _get_setting(db, f"{WORK_ORDER_ALERT_MESSAGE_KEY}:{hostname}")
+        if device_work_order_alert_message:
+            base_config["work_order_alert_message"] = device_work_order_alert_message
 
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
@@ -1710,6 +1751,40 @@ def push_announcement():
         db.close()
 
     return jsonify({"ok": True, "command": cmd})
+
+
+@app.post("/api/integrations/work-order-alert")
+def set_work_order_alert_state():
+    if _integration_auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    hostname = str(body.get("hostname") or "").strip()
+    message = str(body.get("message") or "İŞEMRİ BAŞLATILMAMIŞ").strip() or "İŞEMRİ BAŞLATILMAMIŞ"
+    active = _parse_bool(body.get("active"), True)
+
+    db = db_session()
+    try:
+        if hostname:
+            device = db.query(Device).filter_by(hostname=hostname).first()
+            if not device:
+                return jsonify({"error": "device not found"}), 404
+
+            _set_setting(db, f"{WORK_ORDER_ALERT_ACTIVE_KEY}:{hostname}", "1" if active else "0")
+            _set_setting(db, f"{WORK_ORDER_ALERT_MESSAGE_KEY}:{hostname}", message)
+            db.commit()
+            _emit_config_update([hostname])
+            return jsonify({"ok": True, "scope": "device", "hostname": hostname, "active": active, "message": message})
+
+        _set_setting(db, WORK_ORDER_ALERT_ACTIVE_KEY, "1" if active else "0")
+        _set_setting(db, WORK_ORDER_ALERT_MESSAGE_KEY, message)
+        db.commit()
+
+        hostnames = [row.hostname for row in db.query(Device).all()]
+        _emit_config_update(hostnames)
+        return jsonify({"ok": True, "scope": "global", "active": active, "message": message})
+    finally:
+        db.close()
 
 
 @app.get("/api/commands/logs")
