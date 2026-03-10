@@ -495,6 +495,43 @@ def _emit_config_update(hostnames):
         socketio.emit("config", build_config(hostname), room=f"device:{hostname}")
 
 
+def _announcement_matches_device(announcement, hostname: str, group_id: int | None) -> bool:
+    target_type = announcement.target_type
+    target_value = announcement.target_value
+
+    if target_type == "all":
+        return True
+    if target_type == "group":
+        if group_id is None:
+            return False
+        try:
+            return int(target_value) == int(group_id)
+        except (TypeError, ValueError):
+            return False
+    if target_type == "device":
+        return str(target_value or "").strip() == hostname
+    if target_type == "devices":
+        try:
+            values = json.loads(target_value or "[]")
+        except Exception:
+            return False
+        return hostname in [str(item).strip() for item in (values or []) if str(item).strip()]
+    return False
+
+
+def _active_announcement_for_device(db, hostname: str, group_id: int | None):
+    rows = (
+        db.query(Announcement)
+        .filter(Announcement.is_active.is_(True))
+        .order_by(Announcement.published_at.desc(), Announcement.id.desc())
+        .all()
+    )
+    for row in rows:
+        if _announcement_matches_device(row, hostname, group_id):
+            return row
+    return None
+
+
 def _hostnames_for_group(db, group_id):
     rows = (
         db.query(Device.hostname)
@@ -592,6 +629,8 @@ def build_config(hostname):
             "client_updater": _build_client_updater_payload(db),
             "work_order_alert_active": global_work_order_alert_active,
             "work_order_alert_message": global_work_order_alert_message,
+            "announcement_active": False,
+            "announcement_message": "",
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -599,10 +638,8 @@ def build_config(hostname):
             return base_config
 
         dg = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).first()
-        if not dg:
-            return base_config
-
-        group = db.query(Group).filter_by(id=dg.group_id).first()
+        group_id = dg.group_id if dg else None
+        group = db.query(Group).filter_by(id=group_id).first() if group_id is not None else None
         if group:
             if isinstance(group.idle_timeout_sec, int) and group.idle_timeout_sec > 0:
                 base_config["idle_timeout_sec"] = group.idle_timeout_sec
@@ -618,6 +655,14 @@ def build_config(hostname):
         device_work_order_alert_message = _get_setting(db, f"{WORK_ORDER_ALERT_MESSAGE_KEY}:{hostname}")
         if device_work_order_alert_message:
             base_config["work_order_alert_message"] = device_work_order_alert_message
+
+        active_announcement = _active_announcement_for_device(db, hostname, group_id)
+        if active_announcement:
+            base_config["announcement_active"] = True
+            base_config["announcement_message"] = str(active_announcement.message or "").strip()
+
+        if not dg:
+            return base_config
 
         gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
         if not gp:
@@ -1857,20 +1902,15 @@ def publish_announcement(announcement_id):
             return jsonify({"error": "announcement not found"}), 404
 
         target_type, target_value = _announcement_target(announcement)
-        cmd = build_command_contract(
-            command_type="EMERGENCY_START",
-            payload={"message": announcement.message, "preview": announcement.message, "title": announcement.title},
-            ttl_sec=announcement.ttl_sec,
-            priority=10,
-        )
-        _emit_command(db, cmd, target_type, target_value)
+        target_hostnames = _target_hostnames(db, target_type, target_value)
 
         announcement.is_active = True
         announcement.published_at = datetime.now(timezone.utc)
         announcement.unpublished_at = None
         db.commit()
+        _emit_config_update(target_hostnames)
 
-        return jsonify({"ok": True, "command": cmd, "announcement_id": announcement.id})
+        return jsonify({"ok": True, "announcement_id": announcement.id, "hostnames": target_hostnames})
     finally:
         db.close()
 
@@ -1887,19 +1927,14 @@ def unpublish_announcement(announcement_id):
             return jsonify({"error": "announcement not found"}), 404
 
         target_type, target_value = _announcement_target(announcement)
-        cmd = build_command_contract(
-            command_type="EMERGENCY_STOP",
-            payload={"announcement_id": announcement.id, "title": announcement.title},
-            ttl_sec=announcement.ttl_sec,
-            priority=10,
-        )
-        _emit_command(db, cmd, target_type, target_value)
+        target_hostnames = _target_hostnames(db, target_type, target_value)
 
         announcement.is_active = False
         announcement.unpublished_at = datetime.now(timezone.utc)
         db.commit()
+        _emit_config_update(target_hostnames)
 
-        return jsonify({"ok": True, "command": cmd, "announcement_id": announcement.id})
+        return jsonify({"ok": True, "announcement_id": announcement.id, "hostnames": target_hostnames})
     finally:
         db.close()
 
