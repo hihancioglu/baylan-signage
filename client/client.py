@@ -20,6 +20,7 @@ from urllib import request as urllib_request
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
+from logging.handlers import TimedRotatingFileHandler
 
 import socketio
 
@@ -111,6 +112,7 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
     if part.strip()
 ]
+CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT = max(1, int(os.getenv("CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT", "30")))
 AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 _rollout_waited_versions: set[str] = set()
 _rollout_inflight_versions: set[str] = set()
@@ -180,7 +182,15 @@ instance_lock_fd: int | None = None
 
 
 def setup_debug_logging():
-    handlers = [logging.FileHandler(ACTIVE_DEBUG_LOG_PATH, encoding="utf-8")]
+    file_handler = TimedRotatingFileHandler(
+        ACTIVE_DEBUG_LOG_PATH,
+        when="midnight",
+        interval=1,
+        backupCount=CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.suffix = "%Y-%m-%d"
+    handlers = [file_handler]
     if not platform.system().lower().startswith("win"):
         handlers.append(logging.StreamHandler(sys.stdout))
 
