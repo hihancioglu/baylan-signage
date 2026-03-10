@@ -125,3 +125,18 @@ class CommandAck(Base):
     status = Column(String(32), default="ok", nullable=False)
     error_detail = Column(String(1024))
     ack_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Announcement(Base):
+    __tablename__ = "announcements"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(128), nullable=False)
+    message = Column(String(1024), nullable=False)
+    target_type = Column(String(16), default="group", nullable=False)
+    target_value = Column(String(128), nullable=False)
+    ttl_sec = Column(Integer, default=120, nullable=False)
+    is_active = Column(Boolean, default=False, nullable=False)
+    published_at = Column(DateTime(timezone=True))
+    unpublished_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
