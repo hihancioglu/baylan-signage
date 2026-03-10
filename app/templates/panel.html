@@ -217,6 +217,7 @@
                   <div class="col-12 col-md-4"><input id="announce-target-value" class="form-control" placeholder="grup id veya cihaz1,cihaz2" /></div>
                   <div class="col-12 col-md-2"><input id="announce-ttl" class="form-control" type="number" value="120" min="10" /></div>
                   <div class="col-12 col-md-2"><select id="announce-mode" class="form-select"><option value="temporary" selected>Geçici</option><option value="persistent">Kalıcı</option></select></div>
+                  <div class="col-12 col-md-2"><select id="announce-display-mode" class="form-select"><option value="normal" selected>Normal</option><option value="flash">Flash (Yanıp Sönme)</option></select></div>
                 </div>
                 <textarea id="announce-message" rows="3" class="form-control mb-2" placeholder="Duyuru metni"></textarea>
                 <div class="mb-2"><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
@@ -1034,6 +1035,7 @@ async function createAnnouncement(){
   const mode = document.getElementById('announce-mode').value;
   const isPersistent = mode === 'persistent';
   const ttl = Number(document.getElementById('announce-ttl').value||120);
+  const displayMode = document.getElementById('announce-display-mode').value;
   const message = document.getElementById('announce-message').value.trim();
   const title = document.getElementById('announce-title').value.trim() || 'Duyuru';
   if(!message){
@@ -1045,6 +1047,7 @@ async function createAnnouncement(){
     target: { type: targetType, value: targetValue },
     ttl_sec: ttl,
     is_persistent: isPersistent,
+    display_mode: displayMode,
     message
   });
   if(!res.ok){
@@ -1101,10 +1104,11 @@ async function loadAnnouncements(){
   (rows || []).forEach(item=>{
     const tr = document.createElement('tr');
     const modeText = item.is_persistent ? 'Kalıcı' : `${item.ttl_sec} sn`;
+    const displayModeText = item.display_mode === 'flash' ? 'Flash' : 'Normal';
     const actionButton = item.is_active
       ? `<button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button>`
       : `<button class="btn btn-sm btn-outline-primary" onclick="publishAnnouncement(${item.id})">Yayına Al</button>`;
-    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.is_active ? 'Aktif' : 'Pasif'} / ${modeText}</td><td><div class="d-flex gap-1 flex-wrap">${actionButton}<button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.is_active ? 'Aktif' : 'Pasif'} / ${modeText} / ${displayModeText}</td><td><div class="d-flex gap-1 flex-wrap">${actionButton}<button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
   if(!body.innerHTML){

@@ -642,6 +642,7 @@ def build_config(hostname):
             "work_order_alert_message": global_work_order_alert_message,
             "announcement_active": False,
             "announcement_message": "",
+            "announcement_display_mode": "normal",
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
@@ -671,6 +672,7 @@ def build_config(hostname):
         if active_announcement:
             base_config["announcement_active"] = True
             base_config["announcement_message"] = str(active_announcement.message or "").strip()
+            base_config["announcement_display_mode"] = str(getattr(active_announcement, "display_mode", "normal") or "normal")
 
         if not dg:
             return base_config
@@ -1796,6 +1798,7 @@ def list_announcements():
                 "target_value": row.target_value,
                 "ttl_sec": row.ttl_sec,
                 "is_persistent": bool(row.is_persistent),
+                "display_mode": str(getattr(row, "display_mode", "normal") or "normal"),
                 "is_active": bool(row.is_active),
                 "published_at": row.published_at.isoformat() if row.published_at else None,
                 "unpublished_at": row.unpublished_at.isoformat() if row.unpublished_at else None,
@@ -1829,6 +1832,7 @@ def list_active_announcements():
                 "target_value": row.target_value,
                 "ttl_sec": row.ttl_sec,
                 "is_persistent": bool(row.is_persistent),
+                "display_mode": str(getattr(row, "display_mode", "normal") or "normal"),
                 "published_at": row.published_at.isoformat() if row.published_at else None,
             }
             for row in rows
@@ -1850,9 +1854,12 @@ def create_announcement():
     title = str(body.get("title") or "").strip() or "Duyuru"
     ttl_sec = int(body.get("ttl_sec", 120))
     is_persistent = bool(body.get("is_persistent", False))
+    display_mode = str(body.get("display_mode") or "normal").strip().lower()
 
     if target_type not in {"all", "group", "device", "devices"}:
         return jsonify({"error": "invalid target"}), 400
+    if display_mode not in {"normal", "flash"}:
+        return jsonify({"error": "invalid display mode"}), 400
     if not message:
         return jsonify({"error": "message required"}), 400
     if not is_persistent and ttl_sec < 10:
@@ -1884,6 +1891,7 @@ def create_announcement():
             target_value=stored_target_value,
             ttl_sec=ttl_sec,
             is_persistent=is_persistent,
+            display_mode=display_mode,
             is_active=False,
         )
         db.add(announcement)

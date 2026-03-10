@@ -137,6 +137,7 @@ class Announcement(Base):
     target_value = Column(String(128), nullable=False)
     ttl_sec = Column(Integer, default=120, nullable=False)
     is_persistent = Column(Boolean, default=False, nullable=False)
+    display_mode = Column(String(16), default="normal", nullable=False)
     is_active = Column(Boolean, default=False, nullable=False)
     published_at = Column(DateTime(timezone=True))
     unpublished_at = Column(DateTime(timezone=True))
