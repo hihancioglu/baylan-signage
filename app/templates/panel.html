@@ -216,6 +216,7 @@
                   <div class="col-12 col-md-3"><select id="announce-target" class="form-select" onchange="onTargetChange()"><option value="group">Grup</option><option value="all">Tüm Cihazlar</option><option value="devices">Seçili Cihazlar</option><option value="device">Tek Cihaz</option></select></div>
                   <div class="col-12 col-md-4"><input id="announce-target-value" class="form-control" placeholder="grup id veya cihaz1,cihaz2" /></div>
                   <div class="col-12 col-md-2"><input id="announce-ttl" class="form-control" type="number" value="120" min="10" /></div>
+                  <div class="col-12 col-md-2"><select id="announce-mode" class="form-select"><option value="temporary" selected>Geçici</option><option value="persistent">Kalıcı</option></select></div>
                 </div>
                 <textarea id="announce-message" rows="3" class="form-control mb-2" placeholder="Duyuru metni"></textarea>
                 <div class="mb-2"><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
@@ -996,6 +997,18 @@ function onTargetChange(){
   else if(targetType === 'device') input.placeholder = 'hostname';
   else input.placeholder = 'all';
 }
+
+function onAnnouncementModeChange(){
+  const mode = document.getElementById('announce-mode').value;
+  const ttlInput = document.getElementById('announce-ttl');
+  const isPersistent = mode === 'persistent';
+  ttlInput.disabled = isPersistent;
+  ttlInput.required = !isPersistent;
+  if(isPersistent){
+    ttlInput.value = 120;
+  }
+}
+
 document.getElementById('announce-message').addEventListener('input', e=>{
   document.getElementById('announce-preview').textContent = e.target.value;
 });
@@ -1018,6 +1031,8 @@ function formatAnnouncementTarget(item){
 
 async function createAnnouncement(){
   const {targetType, targetValue} = parseAnnouncementTarget();
+  const mode = document.getElementById('announce-mode').value;
+  const isPersistent = mode === 'persistent';
   const ttl = Number(document.getElementById('announce-ttl').value||120);
   const message = document.getElementById('announce-message').value.trim();
   const title = document.getElementById('announce-title').value.trim() || 'Duyuru';
@@ -1029,6 +1044,7 @@ async function createAnnouncement(){
     title,
     target: { type: targetType, value: targetValue },
     ttl_sec: ttl,
+    is_persistent: isPersistent,
     message
   });
   if(!res.ok){
@@ -1061,6 +1077,20 @@ async function unpublishAnnouncement(id){
   await loadLogs();
 }
 
+async function deleteAnnouncement(id){
+  if(!confirm('Bu duyuru kalıcı olarak silinsin mi?')){
+    return;
+  }
+  const res = await jdelete(`/api/announcements/${id}`);
+  if(!res.ok){
+    alert(res.error || 'Duyuru silinemedi');
+    return;
+  }
+  alert('Duyuru silindi');
+  await loadAnnouncements();
+  await loadLogs();
+}
+
 async function loadAnnouncements(){
   const rows = await jget('/api/announcements');
   const activeRows = await jget('/api/announcements/active');
@@ -1070,7 +1100,11 @@ async function loadAnnouncements(){
   body.innerHTML = '';
   (rows || []).forEach(item=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.is_active ? 'Aktif' : 'Pasif'}</td><td>${item.is_active ? `<button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button>` : `<button class="btn btn-sm btn-outline-primary" onclick="publishAnnouncement(${item.id})">Yayına Al</button>`}</td>`;
+    const modeText = item.is_persistent ? 'Kalıcı' : `${item.ttl_sec} sn`;
+    const actionButton = item.is_active
+      ? `<button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button>`
+      : `<button class="btn btn-sm btn-outline-primary" onclick="publishAnnouncement(${item.id})">Yayına Al</button>`;
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.is_active ? 'Aktif' : 'Pasif'} / ${modeText}</td><td><div class="d-flex gap-1 flex-wrap">${actionButton}<button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
   if(!body.innerHTML){
@@ -1080,7 +1114,7 @@ async function loadAnnouncements(){
   activeBody.innerHTML = '';
   (activeRows || []).forEach(item=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.published_at || '-'}</td><td><button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button></td>`;
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.published_at || '-'}</td><td><div class="d-flex gap-1 flex-wrap"><button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button><button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
     activeBody.appendChild(tr);
   });
   if(!activeBody.innerHTML){
@@ -1284,6 +1318,8 @@ async function init(){
   await loadLogs();
   await loadAnnouncements();
   onTargetChange();
+onAnnouncementModeChange();
+document.getElementById('announce-mode').addEventListener('change', onAnnouncementModeChange);
   await loadFallbackMediaSetting();
   await loadUpdater();
   await loadClientUpdater();

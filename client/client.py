@@ -590,6 +590,7 @@ class GuiRuntime:
                 )
                 work_order_label.place(relx=0.5, rely=0.5, anchor="center")
             try:
+                work_order_window.attributes("-topmost", True)
                 work_order_window.lift()
             except tk.TclError:
                 pass
@@ -649,6 +650,13 @@ class GuiRuntime:
                 elif event_name == "shutdown":
                     self._shutdown = True
                     break
+
+            if work_order_window is not None and work_order_window.winfo_exists():
+                try:
+                    work_order_window.attributes("-topmost", True)
+                    work_order_window.lift()
+                except tk.TclError:
+                    pass
 
         root.after(50, process_events)
         root.mainloop()
