@@ -30,6 +30,7 @@ from .models import (
     CommandAck,
     MediaAsset,
     AppSetting,
+    Announcement,
 )
 from .config import (
     SHARED_SECRET,
@@ -1722,35 +1723,205 @@ def delete_media_asset(media_id):
         db.close()
 
 
-@app.post("/api/announcements/push")
-def push_announcement():
+@app.get("/api/announcements")
+def list_announcements():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        rows = db.query(Announcement).order_by(Announcement.created_at.desc(), Announcement.id.desc()).all()
+        return jsonify([
+            {
+                "id": row.id,
+                "title": row.title,
+                "message": row.message,
+                "target_type": row.target_type,
+                "target_value": row.target_value,
+                "ttl_sec": row.ttl_sec,
+                "is_active": bool(row.is_active),
+                "published_at": row.published_at.isoformat() if row.published_at else None,
+                "unpublished_at": row.unpublished_at.isoformat() if row.unpublished_at else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ])
+    finally:
+        db.close()
+
+
+@app.get("/api/announcements/active")
+def list_active_announcements():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        rows = (
+            db.query(Announcement)
+            .filter(Announcement.is_active.is_(True))
+            .order_by(Announcement.published_at.desc(), Announcement.id.desc())
+            .all()
+        )
+        return jsonify([
+            {
+                "id": row.id,
+                "title": row.title,
+                "message": row.message,
+                "target_type": row.target_type,
+                "target_value": row.target_value,
+                "ttl_sec": row.ttl_sec,
+                "published_at": row.published_at.isoformat() if row.published_at else None,
+            }
+            for row in rows
+        ])
+    finally:
+        db.close()
+
+
+@app.post("/api/announcements")
+def create_announcement():
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
     body = request.json or {}
     target = body.get("target") or {}
-    target_type = target.get("type")
+    target_type = str(target.get("type") or "group")
     target_value = target.get("value")
-    message = body.get("message")
+    message = str(body.get("message") or "").strip()
+    title = str(body.get("title") or "").strip() or "Duyuru"
     ttl_sec = int(body.get("ttl_sec", 120))
 
     if target_type not in {"all", "group", "device", "devices"}:
         return jsonify({"error": "invalid target"}), 400
+    if not message:
+        return jsonify({"error": "message required"}), 400
+    if ttl_sec < 10:
+        return jsonify({"error": "ttl too low"}), 400
 
-    cmd = build_command_contract(
-        command_type="EMERGENCY_START",
-        payload={"message": message, "preview": body.get("preview", message)},
-        ttl_sec=ttl_sec,
-        priority=10,
-    )
+    stored_target_value = target_value
+    if target_type == "group":
+        try:
+            stored_target_value = str(int(target_value))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid group id"}), 400
+    elif target_type == "devices":
+        if not isinstance(target_value, list):
+            return jsonify({"error": "invalid devices"}), 400
+        stored_target_value = json.dumps([str(x).strip() for x in target_value if str(x).strip()])
+    elif target_type == "device":
+        stored_target_value = str(target_value or "").strip()
+        if not stored_target_value:
+            return jsonify({"error": "invalid device"}), 400
+    else:
+        stored_target_value = str(target_value or "all")
 
     db = db_session()
     try:
-        _emit_command(db, cmd, target_type, target_value)
+        announcement = Announcement(
+            title=title,
+            message=message,
+            target_type=target_type,
+            target_value=stored_target_value,
+            ttl_sec=ttl_sec,
+            is_active=False,
+        )
+        db.add(announcement)
+        db.commit()
+        return jsonify({"ok": True, "announcement_id": announcement.id})
     finally:
         db.close()
 
-    return jsonify({"ok": True, "command": cmd})
+
+def _announcement_target(announcement):
+    target_value = announcement.target_value
+    if announcement.target_type == "group":
+        return announcement.target_type, int(target_value)
+    if announcement.target_type == "devices":
+        try:
+            return announcement.target_type, json.loads(target_value)
+        except Exception:
+            return announcement.target_type, []
+    return announcement.target_type, target_value
+
+
+@app.post("/api/announcements/<int:announcement_id>/publish")
+def publish_announcement(announcement_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        announcement = db.query(Announcement).filter_by(id=announcement_id).first()
+        if not announcement:
+            return jsonify({"error": "announcement not found"}), 404
+
+        target_type, target_value = _announcement_target(announcement)
+        cmd = build_command_contract(
+            command_type="EMERGENCY_START",
+            payload={"message": announcement.message, "preview": announcement.message, "title": announcement.title},
+            ttl_sec=announcement.ttl_sec,
+            priority=10,
+        )
+        _emit_command(db, cmd, target_type, target_value)
+
+        announcement.is_active = True
+        announcement.published_at = datetime.now(timezone.utc)
+        announcement.unpublished_at = None
+        db.commit()
+
+        return jsonify({"ok": True, "command": cmd, "announcement_id": announcement.id})
+    finally:
+        db.close()
+
+
+@app.post("/api/announcements/<int:announcement_id>/unpublish")
+def unpublish_announcement(announcement_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        announcement = db.query(Announcement).filter_by(id=announcement_id).first()
+        if not announcement:
+            return jsonify({"error": "announcement not found"}), 404
+
+        target_type, target_value = _announcement_target(announcement)
+        cmd = build_command_contract(
+            command_type="EMERGENCY_STOP",
+            payload={"announcement_id": announcement.id, "title": announcement.title},
+            ttl_sec=announcement.ttl_sec,
+            priority=10,
+        )
+        _emit_command(db, cmd, target_type, target_value)
+
+        announcement.is_active = False
+        announcement.unpublished_at = datetime.now(timezone.utc)
+        db.commit()
+
+        return jsonify({"ok": True, "command": cmd, "announcement_id": announcement.id})
+    finally:
+        db.close()
+
+
+@app.post("/api/announcements/push")
+def push_announcement():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    create_resp = create_announcement()
+    if isinstance(create_resp, tuple):
+        payload, status = create_resp
+        if status != 200:
+            return create_resp
+        create_json = payload.get_json()
+    else:
+        create_json = create_resp.get_json()
+
+    announcement_id = create_json.get("announcement_id")
+    if not announcement_id:
+        return jsonify({"error": "announcement create failed"}), 500
+    return publish_announcement(int(announcement_id))
 
 
 @app.post("/api/integrations/work-order-alert")
@@ -1826,7 +1997,6 @@ def push_device_command(hostname):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    body = request.json or {}
     command_type = body.get("type")
     if command_type not in COMMAND_TYPES:
         return jsonify({"error": "unsupported command type"}), 400
@@ -1851,7 +2021,6 @@ def push_group_command(group_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
-    body = request.json or {}
     command_type = body.get("type")
     if command_type not in COMMAND_TYPES:
         return jsonify({"error": "unsupported command type"}), 400

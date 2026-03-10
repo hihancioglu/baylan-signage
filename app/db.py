@@ -100,6 +100,23 @@ def ensure_sqlite_schema():
                 ")"
             ))
 
+
+        if not _existing_columns(connection, "announcements"):
+            connection.execute(text(
+                "CREATE TABLE announcements ("
+                "id INTEGER PRIMARY KEY, "
+                "title VARCHAR(128) NOT NULL, "
+                "message VARCHAR(1024) NOT NULL, "
+                "target_type VARCHAR(16) DEFAULT 'group' NOT NULL, "
+                "target_value VARCHAR(128) NOT NULL, "
+                "ttl_sec INTEGER DEFAULT 120 NOT NULL, "
+                "is_active BOOLEAN DEFAULT 0 NOT NULL, "
+                "published_at DATETIME, "
+                "unpublished_at DATETIME, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL"
+                ")"
+            ))
+
         for table_name, wanted_columns in table_column_types.items():
             existing_columns = _existing_columns(connection, table_name)
             if not existing_columns:

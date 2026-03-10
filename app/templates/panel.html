@@ -208,17 +208,43 @@
           </div>
 
           <div class="tab-section d-none" id="section-announcement">
-            <div class="card panel-card">
+            <div class="card panel-card mb-3">
               <div class="card-body">
-                <h2 class="h4 mb-3">Acil Duyuru</h2>
+                <h2 class="h4 mb-3">Duyuru Yönetimi</h2>
                 <div class="row g-2 align-items-center mb-2">
-                  <div class="col-12 col-md-3"><select id="announce-target" class="form-select" onchange="onTargetChange()"><option value="all">Tüm Cihazlar</option><option value="group">Grup</option><option value="devices">Seçili Cihazlar</option></select></div>
+                  <div class="col-12 col-md-3"><input id="announce-title" class="form-control" placeholder="Duyuru başlığı" /></div>
+                  <div class="col-12 col-md-3"><select id="announce-target" class="form-select" onchange="onTargetChange()"><option value="group">Grup</option><option value="all">Tüm Cihazlar</option><option value="devices">Seçili Cihazlar</option><option value="device">Tek Cihaz</option></select></div>
                   <div class="col-12 col-md-4"><input id="announce-target-value" class="form-control" placeholder="grup id veya cihaz1,cihaz2" /></div>
                   <div class="col-12 col-md-2"><input id="announce-ttl" class="form-control" type="number" value="120" min="10" /></div>
                 </div>
                 <textarea id="announce-message" rows="3" class="form-control mb-2" placeholder="Duyuru metni"></textarea>
                 <div class="mb-2"><strong>Önizleme:</strong> <span id="announce-preview"></span></div>
-                <button class="btn btn-danger" onclick="pushAnnouncement()">Push</button>
+                <div class="d-flex gap-2 flex-wrap">
+                  <button class="btn btn-primary" onclick="createAnnouncement()">Duyuru Ekle</button>
+                  <button class="btn btn-outline-secondary" onclick="loadAnnouncements()">Listeyi Yenile</button>
+                </div>
+              </div>
+            </div>
+            <div class="card panel-card mb-3">
+              <div class="card-body">
+                <h3 class="h5">Aktif Duyurular</h3>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light"><tr><th>ID</th><th>Başlık</th><th>Mesaj</th><th>Hedef</th><th>Yayına Alınma</th><th>İşlem</th></tr></thead>
+                    <tbody id="active-announcements-body"><tr><td colspan="6" class="text-secondary small">Aktif duyuru yok</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div class="card panel-card">
+              <div class="card-body">
+                <h3 class="h5">Tüm Duyurular</h3>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light"><tr><th>ID</th><th>Başlık</th><th>Mesaj</th><th>Hedef</th><th>Durum</th><th>İşlem</th></tr></thead>
+                    <tbody id="announcements-body"><tr><td colspan="6" class="text-secondary small">Henüz duyuru yok</td></tr></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -962,27 +988,104 @@ async function saveOrder(){
   alert('Sıralama kaydedildi');
 }
 
-function onTargetChange(){}
+function onTargetChange(){
+  const targetType = document.getElementById('announce-target').value;
+  const input = document.getElementById('announce-target-value');
+  if(targetType === 'group') input.placeholder = 'grup id';
+  else if(targetType === 'devices') input.placeholder = 'cihaz1,cihaz2';
+  else if(targetType === 'device') input.placeholder = 'hostname';
+  else input.placeholder = 'all';
+}
 document.getElementById('announce-message').addEventListener('input', e=>{
   document.getElementById('announce-preview').textContent = e.target.value;
 });
 
-async function pushAnnouncement(){
+function parseAnnouncementTarget(){
   const targetType = document.getElementById('announce-target').value;
   const rawVal = document.getElementById('announce-target-value').value;
   let targetValue = rawVal;
   if(targetType==='group') targetValue = Number(rawVal);
   if(targetType==='devices') targetValue = rawVal.split(',').map(x=>x.trim()).filter(Boolean);
+  return {targetType, targetValue};
+}
+
+function formatAnnouncementTarget(item){
+  if(item.target_type === 'group') return `group:${item.target_value}`;
+  if(item.target_type === 'devices') return `devices:${item.target_value}`;
+  if(item.target_type === 'device') return `device:${item.target_value}`;
+  return 'all';
+}
+
+async function createAnnouncement(){
+  const {targetType, targetValue} = parseAnnouncementTarget();
   const ttl = Number(document.getElementById('announce-ttl').value||120);
-  const message = document.getElementById('announce-message').value;
-  const res = await jpost('/api/announcements/push', {
+  const message = document.getElementById('announce-message').value.trim();
+  const title = document.getElementById('announce-title').value.trim() || 'Duyuru';
+  if(!message){
+    alert('Duyuru metni girin');
+    return;
+  }
+  const res = await jpost('/api/announcements', {
+    title,
     target: { type: targetType, value: targetValue },
     ttl_sec: ttl,
-    message,
-    preview: message
+    message
   });
-  alert(res.ok ? 'Duyuru gönderildi' : (res.error || 'hata'));
-  loadLogs();
+  if(!res.ok){
+    alert(res.error || 'Duyuru eklenemedi');
+    return;
+  }
+  alert('Duyuru eklendi');
+  await loadAnnouncements();
+}
+
+async function publishAnnouncement(id){
+  const res = await jpost(`/api/announcements/${id}/publish`, {});
+  if(!res.ok){
+    alert(res.error || 'Duyuru yayına alınamadı');
+    return;
+  }
+  alert('Duyuru yayına alındı');
+  await loadAnnouncements();
+  await loadLogs();
+}
+
+async function unpublishAnnouncement(id){
+  const res = await jpost(`/api/announcements/${id}/unpublish`, {});
+  if(!res.ok){
+    alert(res.error || 'Duyuru yayından kaldırılamadı');
+    return;
+  }
+  alert('Duyuru yayından kaldırıldı');
+  await loadAnnouncements();
+  await loadLogs();
+}
+
+async function loadAnnouncements(){
+  const rows = await jget('/api/announcements');
+  const activeRows = await jget('/api/announcements/active');
+  const body = document.getElementById('announcements-body');
+  const activeBody = document.getElementById('active-announcements-body');
+
+  body.innerHTML = '';
+  (rows || []).forEach(item=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.is_active ? 'Aktif' : 'Pasif'}</td><td>${item.is_active ? `<button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button>` : `<button class="btn btn-sm btn-outline-primary" onclick="publishAnnouncement(${item.id})">Yayına Al</button>`}</td>`;
+    body.appendChild(tr);
+  });
+  if(!body.innerHTML){
+    body.innerHTML = '<tr><td colspan="6" class="text-secondary small">Henüz duyuru yok</td></tr>';
+  }
+
+  activeBody.innerHTML = '';
+  (activeRows || []).forEach(item=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.published_at || '-'}</td><td><button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button></td>`;
+    activeBody.appendChild(tr);
+  });
+  if(!activeBody.innerHTML){
+    activeBody.innerHTML = '<tr><td colspan="6" class="text-secondary small">Aktif duyuru yok</td></tr>';
+  }
 }
 
 function formatRolloutWait(seconds){
@@ -1179,6 +1282,8 @@ async function init(){
   await loadGroupsPlaylists();
   await loadMedia();
   await loadLogs();
+  await loadAnnouncements();
+  onTargetChange();
   await loadFallbackMediaSetting();
   await loadUpdater();
   await loadClientUpdater();
