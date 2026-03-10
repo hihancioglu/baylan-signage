@@ -520,6 +520,7 @@ def _announcement_matches_device(announcement, hostname: str, group_id: int | No
 
 
 def _active_announcement_for_device(db, hostname: str, group_id: int | None):
+    now = datetime.now(timezone.utc)
     rows = (
         db.query(Announcement)
         .filter(Announcement.is_active.is_(True))
@@ -527,6 +528,16 @@ def _active_announcement_for_device(db, hostname: str, group_id: int | None):
         .all()
     )
     for row in rows:
+        if not bool(getattr(row, "is_persistent", False)):
+            published_at = row.published_at
+            if published_at and published_at.tzinfo is None:
+                published_at = published_at.replace(tzinfo=timezone.utc)
+            ttl_sec = max(0, int(row.ttl_sec or 0))
+            if not published_at or now >= published_at + timedelta(seconds=ttl_sec):
+                row.is_active = False
+                row.unpublished_at = now
+                db.commit()
+                continue
         if _announcement_matches_device(row, hostname, group_id):
             return row
     return None
@@ -1784,6 +1795,7 @@ def list_announcements():
                 "target_type": row.target_type,
                 "target_value": row.target_value,
                 "ttl_sec": row.ttl_sec,
+                "is_persistent": bool(row.is_persistent),
                 "is_active": bool(row.is_active),
                 "published_at": row.published_at.isoformat() if row.published_at else None,
                 "unpublished_at": row.unpublished_at.isoformat() if row.unpublished_at else None,
@@ -1816,6 +1828,7 @@ def list_active_announcements():
                 "target_type": row.target_type,
                 "target_value": row.target_value,
                 "ttl_sec": row.ttl_sec,
+                "is_persistent": bool(row.is_persistent),
                 "published_at": row.published_at.isoformat() if row.published_at else None,
             }
             for row in rows
@@ -1836,12 +1849,13 @@ def create_announcement():
     message = str(body.get("message") or "").strip()
     title = str(body.get("title") or "").strip() or "Duyuru"
     ttl_sec = int(body.get("ttl_sec", 120))
+    is_persistent = bool(body.get("is_persistent", False))
 
     if target_type not in {"all", "group", "device", "devices"}:
         return jsonify({"error": "invalid target"}), 400
     if not message:
         return jsonify({"error": "message required"}), 400
-    if ttl_sec < 10:
+    if not is_persistent and ttl_sec < 10:
         return jsonify({"error": "ttl too low"}), 400
 
     stored_target_value = target_value
@@ -1869,6 +1883,7 @@ def create_announcement():
             target_type=target_type,
             target_value=stored_target_value,
             ttl_sec=ttl_sec,
+            is_persistent=is_persistent,
             is_active=False,
         )
         db.add(announcement)
@@ -1935,6 +1950,31 @@ def unpublish_announcement(announcement_id):
         _emit_config_update(target_hostnames)
 
         return jsonify({"ok": True, "announcement_id": announcement.id, "hostnames": target_hostnames})
+    finally:
+        db.close()
+
+
+
+
+@app.delete("/api/announcements/<int:announcement_id>")
+def delete_announcement(announcement_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        announcement = db.query(Announcement).filter_by(id=announcement_id).first()
+        if not announcement:
+            return jsonify({"error": "announcement not found"}), 404
+
+        target_type, target_value = _announcement_target(announcement)
+        target_hostnames = _target_hostnames(db, target_type, target_value)
+
+        db.delete(announcement)
+        db.commit()
+        _emit_config_update(target_hostnames)
+
+        return jsonify({"ok": True})
     finally:
         db.close()
 

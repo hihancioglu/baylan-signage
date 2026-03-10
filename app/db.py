@@ -60,6 +60,9 @@ def ensure_sqlite_schema():
             "idle_mode_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
             "content_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
         },
+        "announcements": {
+            "is_persistent": "BOOLEAN DEFAULT 0 NOT NULL",
+        },
     }
 
     Base.metadata.create_all(bind=engine)
@@ -110,6 +113,7 @@ def ensure_sqlite_schema():
                 "target_type VARCHAR(16) DEFAULT 'group' NOT NULL, "
                 "target_value VARCHAR(128) NOT NULL, "
                 "ttl_sec INTEGER DEFAULT 120 NOT NULL, "
+                "is_persistent BOOLEAN DEFAULT 0 NOT NULL, "
                 "is_active BOOLEAN DEFAULT 0 NOT NULL, "
                 "published_at DATETIME, "
                 "unpublished_at DATETIME, "
