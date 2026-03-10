@@ -500,6 +500,16 @@ class GuiRuntime:
         download_label = None
         work_order_window = None
         work_order_label = None
+        work_order_container = None
+
+        def _work_order_geometry(screen_w: int, screen_h: int) -> str:
+            panel_w = max(640, int(screen_w * 0.7))
+            panel_h = max(180, int(screen_h * 0.28))
+            panel_w = min(panel_w, max(640, screen_w - 80))
+            panel_h = min(panel_h, max(180, screen_h - 80))
+            x = max(0, (screen_w - panel_w) // 2)
+            y = max(0, (screen_h - panel_h) // 2)
+            return f"{panel_w}x{panel_h}+{x}+{y}"
 
         def _show_idle_overlay():
             nonlocal idle_window
@@ -549,34 +559,51 @@ class GuiRuntime:
             self._set_download_overlay_state(False)
 
         def _show_work_order_overlay(message: str):
-            nonlocal work_order_window, work_order_label
+            nonlocal work_order_window, work_order_label, work_order_container
             if work_order_window is None or not work_order_window.winfo_exists():
                 work_order_window = tk.Toplevel(root)
-                work_order_window.configure(bg="#8B0000")
-                work_order_window.attributes("-fullscreen", True)
+                work_order_window.configure(bg="black")
                 work_order_window.attributes("-topmost", True)
                 work_order_window.overrideredirect(True)
                 work_order_window.title("Baylan İş Emri Uyarısı")
-                work_order_label = tk.Label(
+                work_order_window.geometry(
+                    _work_order_geometry(
+                        work_order_window.winfo_screenwidth(),
+                        work_order_window.winfo_screenheight(),
+                    )
+                )
+                work_order_container = tk.Frame(
                     work_order_window,
+                    bg="#8B0000",
+                    bd=6,
+                    relief="ridge",
+                )
+                work_order_container.place(relx=0.5, rely=0.5, relwidth=1.0, relheight=1.0, anchor="center")
+                work_order_label = tk.Label(
+                    work_order_container,
                     text="",
                     fg="white",
                     bg="#8B0000",
-                    font=("Arial", 70, "bold"),
+                    font=("Arial", 52, "bold"),
                     justify="center",
-                    wraplength=1700,
+                    wraplength=max(600, int(work_order_window.winfo_screenwidth() * 0.62)),
                 )
                 work_order_label.place(relx=0.5, rely=0.5, anchor="center")
+            try:
+                work_order_window.lift()
+            except tk.TclError:
+                pass
             if work_order_label is not None:
                 work_order_label.config(text=message)
             self._set_work_order_overlay_state(True)
 
         def _hide_work_order_overlay():
-            nonlocal work_order_window, work_order_label
+            nonlocal work_order_window, work_order_label, work_order_container
             if work_order_window is not None and work_order_window.winfo_exists():
                 work_order_window.destroy()
             work_order_window = None
             work_order_label = None
+            work_order_container = None
             self._set_work_order_overlay_state(False)
 
         _next_tick = None
