@@ -369,6 +369,8 @@ current_state = ClientState.ACTIVE
 emergency_active = False
 work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
+announcement_active = False
+announcement_message = ""
 playing_started_at = 0.0
 
 SUPPORTED_COMMANDS = {
@@ -1597,6 +1599,7 @@ def on_hello(data):
 def on_config(data):
     global idle_timeout_sec, idle_mode_enabled, content_enabled
     global work_order_alert_active, work_order_alert_message
+    global announcement_active, announcement_message
 
     print("📥 CONFIG RECEIVED:")
     print(data)
@@ -1620,15 +1623,26 @@ def on_config(data):
     if isinstance(data, dict):
         work_order_alert_active = bool(data.get("work_order_alert_active", False))
         work_order_alert_message = str(data.get("work_order_alert_message") or "İŞEMRİ BAŞLATILMAMIŞ")
+        announcement_active = bool(data.get("announcement_active", False))
+        announcement_message = str(data.get("announcement_message") or "").strip()
     else:
         work_order_alert_active = False
         work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
+        announcement_active = False
+        announcement_message = ""
 
-    if work_order_alert_active:
+    effective_work_order_alert_active = work_order_alert_active
+    effective_work_order_alert_message = work_order_alert_message
+    if announcement_active:
+        effective_work_order_alert_active = True
+        if announcement_message:
+            effective_work_order_alert_message = announcement_message
+
+    if effective_work_order_alert_active:
         if work_order_alert_overlay.is_active():
-            work_order_alert_overlay.update(work_order_alert_message)
+            work_order_alert_overlay.update(effective_work_order_alert_message)
         else:
-            work_order_alert_overlay.show(work_order_alert_message)
+            work_order_alert_overlay.show(effective_work_order_alert_message)
     elif work_order_alert_overlay.is_active():
         work_order_alert_overlay.hide()
 

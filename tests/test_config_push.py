@@ -371,6 +371,99 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].get("label"), "Kampanya Videosu Final.mp4")
 
+    def test_build_config_includes_active_announcement_for_target_device(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Ann Group")
+            device = self.main.Device(hostname="pc-ann")
+            db.add_all([group, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(
+                self.main.Announcement(
+                    title="Duyuru",
+                    message="Bakım bildirimi",
+                    target_type="group",
+                    target_value=str(group.id),
+                    ttl_sec=120,
+                    is_active=True,
+                    published_at=datetime.utcnow(),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-ann")
+        self.assertTrue(cfg.get("announcement_active"))
+        self.assertEqual(cfg.get("announcement_message"), "Bakım bildirimi")
+
+    def test_publish_announcement_sets_active_and_emits_config_update(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Ann Pub Group")
+            device = self.main.Device(hostname="pc-ann-pub")
+            announcement = self.main.Announcement(
+                title="Duyuru",
+                message="Yayınlandı",
+                target_type="group",
+                target_value="0",
+                ttl_sec=120,
+                is_active=False,
+            )
+            db.add_all([group, device, announcement])
+            db.commit()
+
+            announcement.target_value = str(group.id)
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.commit()
+            announcement_id = announcement.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            with patch("app.main._emit_config_update") as mock_emit_config:
+                with patch("app.main._emit_command") as mock_emit_command:
+                    resp = self.main.app.test_client().post(f"/api/announcements/{announcement_id}/publish")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(mock_emit_command.called)
+        mock_emit_config.assert_called_once_with(["pc-ann-pub"])
+
+    def test_unpublish_announcement_sets_passive_and_emits_config_update(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Ann Unpub Group")
+            device = self.main.Device(hostname="pc-ann-unpub")
+            announcement = self.main.Announcement(
+                title="Duyuru",
+                message="Yayından kaldırıldı",
+                target_type="group",
+                target_value="0",
+                ttl_sec=120,
+                is_active=True,
+                published_at=datetime.utcnow(),
+            )
+            db.add_all([group, device, announcement])
+            db.commit()
+
+            announcement.target_value = str(group.id)
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.commit()
+            announcement_id = announcement.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            with patch("app.main._emit_config_update") as mock_emit_config:
+                with patch("app.main._emit_command") as mock_emit_command:
+                    resp = self.main.app.test_client().post(f"/api/announcements/{announcement_id}/unpublish")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(mock_emit_command.called)
+        mock_emit_config.assert_called_once_with(["pc-ann-unpub"])
+
 
 if __name__ == "__main__":
     unittest.main()
