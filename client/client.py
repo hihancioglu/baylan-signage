@@ -381,6 +381,7 @@ work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
 announcement_active = False
 announcement_message = ""
+announcement_display_mode = "normal"
 playing_started_at = 0.0
 
 SUPPORTED_COMMANDS = {
@@ -568,8 +569,40 @@ class GuiRuntime:
             download_label = None
             self._set_download_overlay_state(False)
 
-        def _show_work_order_overlay(message: str):
-            nonlocal work_order_window, work_order_label, work_order_container
+
+        work_order_flash_job = None
+        work_order_flash_on = False
+
+        def _set_work_order_colors(is_flash_on: bool):
+            nonlocal work_order_container, work_order_label
+            bg_color = "#FFFFFF" if is_flash_on else "#8B0000"
+            fg_color = "#000000" if is_flash_on else "#FFFFFF"
+            if work_order_container is not None and work_order_container.winfo_exists():
+                work_order_container.configure(bg=bg_color)
+            if work_order_label is not None and work_order_label.winfo_exists():
+                work_order_label.configure(bg=bg_color, fg=fg_color)
+
+        def _start_work_order_flash():
+            nonlocal work_order_window, work_order_flash_job, work_order_flash_on
+            if work_order_window is None or not work_order_window.winfo_exists():
+                return
+            work_order_flash_on = not work_order_flash_on
+            _set_work_order_colors(work_order_flash_on)
+            work_order_flash_job = work_order_window.after(350, _start_work_order_flash)
+
+        def _stop_work_order_flash():
+            nonlocal work_order_window, work_order_flash_job, work_order_flash_on
+            if work_order_flash_job is not None and work_order_window is not None and work_order_window.winfo_exists():
+                try:
+                    work_order_window.after_cancel(work_order_flash_job)
+                except tk.TclError:
+                    pass
+            work_order_flash_job = None
+            work_order_flash_on = False
+            _set_work_order_colors(False)
+
+        def _show_work_order_overlay(message: str, flash: bool = False):
+            nonlocal work_order_window, work_order_label, work_order_container, work_order_flash_job, work_order_flash_on
             if work_order_window is None or not work_order_window.winfo_exists():
                 work_order_window = tk.Toplevel(root)
                 work_order_window.configure(bg="black")
@@ -606,10 +639,16 @@ class GuiRuntime:
                 pass
             if work_order_label is not None:
                 work_order_label.config(text=message)
+            if flash:
+                if work_order_flash_job is None:
+                    _start_work_order_flash()
+            else:
+                _stop_work_order_flash()
             self._set_work_order_overlay_state(True)
 
         def _hide_work_order_overlay():
             nonlocal work_order_window, work_order_label, work_order_container
+            _stop_work_order_flash()
             if work_order_window is not None and work_order_window.winfo_exists():
                 work_order_window.destroy()
             work_order_window = None
@@ -651,10 +690,14 @@ class GuiRuntime:
                 elif event_name == "download_overlay_hide":
                     _hide_download_overlay()
                 elif event_name == "work_order_alert_show":
-                    _show_work_order_overlay(str(payload or "İŞEMRİ BAŞLATILMAMIŞ"))
+                    message = str(payload.get("message") or "İŞEMRİ BAŞLATILMAMIŞ") if isinstance(payload, dict) else str(payload or "İŞEMRİ BAŞLATILMAMIŞ")
+                    flash = bool(payload.get("flash", False)) if isinstance(payload, dict) else False
+                    _show_work_order_overlay(message, flash)
                 elif event_name == "work_order_alert_update":
                     if self.work_order_overlay_active():
-                        _show_work_order_overlay(str(payload or "İŞEMRİ BAŞLATILMAMIŞ"))
+                        message = str(payload.get("message") or "İŞEMRİ BAŞLATILMAMIŞ") if isinstance(payload, dict) else str(payload or "İŞEMRİ BAŞLATILMAMIŞ")
+                        flash = bool(payload.get("flash", False)) if isinstance(payload, dict) else False
+                        _show_work_order_overlay(message, flash)
                 elif event_name == "work_order_alert_hide":
                     _hide_work_order_overlay()
                 elif event_name == "shutdown":
@@ -706,11 +749,11 @@ class WorkOrderAlertOverlay:
     def __init__(self, gui_runtime: GuiRuntime):
         self._gui_runtime = gui_runtime
 
-    def show(self, message: str):
-        self._gui_runtime.post("work_order_alert_show", message)
+    def show(self, message: str, flash: bool = False):
+        self._gui_runtime.post("work_order_alert_show", {"message": message, "flash": bool(flash)})
 
-    def update(self, message: str):
-        self._gui_runtime.post("work_order_alert_update", message)
+    def update(self, message: str, flash: bool = False):
+        self._gui_runtime.post("work_order_alert_update", {"message": message, "flash": bool(flash)})
 
     def hide(self):
         self._gui_runtime.post("work_order_alert_hide")
@@ -1644,7 +1687,7 @@ def on_hello(data):
 def on_config(data):
     global idle_timeout_sec, idle_mode_enabled, content_enabled
     global work_order_alert_active, work_order_alert_message
-    global announcement_active, announcement_message
+    global announcement_active, announcement_message, announcement_display_mode
 
     print("📥 CONFIG RECEIVED:")
     print(data)
@@ -1670,24 +1713,28 @@ def on_config(data):
         work_order_alert_message = str(data.get("work_order_alert_message") or "İŞEMRİ BAŞLATILMAMIŞ")
         announcement_active = bool(data.get("announcement_active", False))
         announcement_message = str(data.get("announcement_message") or "").strip()
+        announcement_display_mode = str(data.get("announcement_display_mode") or "normal").strip().lower()
     else:
         work_order_alert_active = False
         work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
         announcement_active = False
         announcement_message = ""
+        announcement_display_mode = "normal"
 
     effective_work_order_alert_active = work_order_alert_active
     effective_work_order_alert_message = work_order_alert_message
+    effective_work_order_alert_flash = False
     if announcement_active:
         effective_work_order_alert_active = True
+        effective_work_order_alert_flash = announcement_display_mode == "flash"
         if announcement_message:
             effective_work_order_alert_message = announcement_message
 
     if effective_work_order_alert_active:
         if work_order_alert_overlay.is_active():
-            work_order_alert_overlay.update(effective_work_order_alert_message)
+            work_order_alert_overlay.update(effective_work_order_alert_message, flash=effective_work_order_alert_flash)
         else:
-            work_order_alert_overlay.show(effective_work_order_alert_message)
+            work_order_alert_overlay.show(effective_work_order_alert_message, flash=effective_work_order_alert_flash)
     elif work_order_alert_overlay.is_active():
         work_order_alert_overlay.hide()
 

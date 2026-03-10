@@ -62,6 +62,7 @@ def ensure_sqlite_schema():
         },
         "announcements": {
             "is_persistent": "BOOLEAN DEFAULT 0 NOT NULL",
+            "display_mode": "VARCHAR(16) DEFAULT 'normal' NOT NULL",
         },
     }
 
@@ -114,6 +115,7 @@ def ensure_sqlite_schema():
                 "target_value VARCHAR(128) NOT NULL, "
                 "ttl_sec INTEGER DEFAULT 120 NOT NULL, "
                 "is_persistent BOOLEAN DEFAULT 0 NOT NULL, "
+                "display_mode VARCHAR(16) DEFAULT 'normal' NOT NULL, "
                 "is_active BOOLEAN DEFAULT 0 NOT NULL, "
                 "published_at DATETIME, "
                 "unpublished_at DATETIME, "
