@@ -671,6 +671,11 @@ function clearFallbackSelection(){
   if(select) select.value = '';
 }
 
+function deviceLabel(device){
+  const alias = String(device?.alias || '').trim();
+  return alias || String(device?.hostname || '');
+}
+
 function renderGroupsTable(){
   const body = document.getElementById('groups-body');
   body.innerHTML = '';
@@ -678,7 +683,7 @@ function renderGroupsTable(){
     const groupDevices = (cachedDevices || []).filter(d => d.group === g.name);
     const deviceOptions = (cachedDevices || [])
       .filter(d => !d.group || d.group === g.name)
-      .map(d => `<option value="${d.hostname}">${d.hostname}${d.group === g.name ? ' (grupta)' : ''}</option>`)
+      .map(d => `<option value="${d.hostname}">${deviceLabel(d)}${d.group === g.name ? ' (grupta)' : ''}</option>`)
       .join('');
     const groupDeviceBadges = groupDevices.length
       ? groupDevices.map(d => `<span class="badge text-bg-light border d-inline-flex align-items-center gap-2 me-1 mb-1">${d.hostname}<button type="button" class="btn-close btn-close-sm" aria-label="Cihazı gruptan çıkar" onclick="removeDeviceFromGroup(decodeURIComponent('${encodeURIComponent(d.hostname)}'))"></button></span>`).join('')
