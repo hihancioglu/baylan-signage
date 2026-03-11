@@ -588,7 +588,7 @@ class GuiRuntime:
                 return
             work_order_flash_on = not work_order_flash_on
             _set_work_order_colors(work_order_flash_on)
-            work_order_flash_job = work_order_window.after(350, _start_work_order_flash)
+            work_order_flash_job = work_order_window.after(800, _start_work_order_flash)
 
         def _stop_work_order_flash():
             nonlocal work_order_window, work_order_flash_job, work_order_flash_on
