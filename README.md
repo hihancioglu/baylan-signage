@@ -60,12 +60,15 @@ Uyarıyı kaldırmak için `active` alanını `false` gönderin.
 
 
 ## Widget Tam Ekran Gösterim (Windows)
-Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici eklendi (`client/widget_viewer.py`). Bu yol `pywebview` kullanır ve widget'ı çerçevesiz tam ekran açar.
+Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici vardır (`client/widget_viewer.py`). Gösterici artık hem `cefpython3` (tercihli) hem de `pywebview` backend'lerini destekler.
 
 Ortam değişkenleri:
-- `WIDGET_USE_PYTHON_VIEWER` (`0` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir (Windows taskbar görünürse `0` bırakın).
+- `WIDGET_USE_PYTHON_VIEWER` (`0` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir.
 - `PYTHON_WIDGET_VIEWER_ENABLED` (`1` varsayılan): Python widget göstericiyi global olarak aç/kapatır.
+- `WIDGET_VIEWER_BACKEND` (`auto` varsayılan): `auto`, `cef`, `pywebview`.
+- `WIDGET_SINGLE_ENGINE` (`0` varsayılan): `1/true/yes` ise URL widget doğrudan açılmak yerine `client/widget_engine.html` içine tek Chromium instance mantığıyla `iframe` olarak yüklenir.
+- `CEF_EXTRA_SWITCHES`: Virgülle ayrılmış ek CEF switch listesi (`switch` veya `switch=value`).
 
 Notlar:
-- Bu gösterici Windows için hedeflenmiştir.
-- Python gösterici kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
+- CEF backend, kiosk için Chrome uyumlu switch'lerle (`--kiosk`, `--disable-translate`, `--disable-infobars`, `--disable-session-crashed-bubble`, `--disable-features=TranslateUI`) başlatılır.
+- Backend başlatılamazsa diğer backend denenir; Python gösterici tamamen kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
