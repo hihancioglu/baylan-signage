@@ -277,6 +277,12 @@ class BorderlessFullscreenPlayer:
             if command:
                 return command
 
+        if self._is_widget_url(widget_source):
+            windows_browser = self._resolve_windows_kiosk_browser()
+            if windows_browser:
+                executable, extra_flags = windows_browser
+                return [executable, *extra_flags, widget_source]
+
         if os.name == "nt":
             return ["cmd", "/c", "start", "", widget_source]
 
@@ -285,6 +291,62 @@ class BorderlessFullscreenPlayer:
             return [opener, widget_source]
 
         return []
+
+    @staticmethod
+    def _is_widget_url(widget_source: str) -> bool:
+        normalized = str(widget_source or "").strip().lower()
+        return normalized.startswith("http://") or normalized.startswith("https://")
+
+    @staticmethod
+    def _resolve_windows_kiosk_browser() -> tuple[str, list[str]] | None:
+        if os.name != "nt":
+            return None
+
+        candidates: list[tuple[str, list[str]]] = [
+            ("msedge", ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"]),
+            ("chrome", ["--new-window", "--kiosk"]),
+        ]
+        absolute_candidates = [
+            (
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"],
+            ),
+            (
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"],
+            ),
+            (r"C:\Program Files\Google\Chrome\Application\chrome.exe", ["--new-window", "--kiosk"]),
+        ]
+
+        for candidate, flags in candidates:
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved, flags
+
+        for candidate, flags in absolute_candidates:
+            if Path(candidate).is_file():
+                return candidate, flags
+
+        return None
+
+    def _wait_widget_until_stop(self, process: subprocess.Popen) -> bool:
+        while True:
+            if self._stop_requested:
+                break
+            if process.poll() is not None:
+                break
+            time.sleep(0.2)
+
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+        interrupted = self._stop_requested
+        self._last_interrupted = interrupted
+        return (process.returncode in (0, None)) or interrupted
 
     def play_widget_blocking(self, widget_source: str, duration_sec: int) -> bool:
         source = str(widget_source or "").strip()
@@ -306,6 +368,10 @@ class BorderlessFullscreenPlayer:
             self._stop_requested = False
             process = subprocess.Popen(command)
             self._widget_process = process
+
+            if self._is_widget_url(source):
+                return self._wait_widget_until_stop(process)
+
             deadline = time.monotonic() + max(1, int(duration_sec))
             while time.monotonic() < deadline:
                 if self._stop_requested:
