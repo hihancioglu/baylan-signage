@@ -177,6 +177,13 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(command, ["python", "client/widget_viewer.py", "https://example.com"])
 
+    def test_python_widget_viewer_disabled_by_default(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
+
+        with patch.dict("os.environ", {"WIDGET_USE_PYTHON_VIEWER": "1"}, clear=True):
+            self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
+
     def test_should_use_python_widget_viewer_requires_url_and_runtime_flags(self):
         player = self._build_player()
         player._python_widget_viewer_supported = True

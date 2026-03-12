@@ -63,7 +63,7 @@ Uyarıyı kaldırmak için `active` alanını `false` gönderin.
 Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici eklendi (`client/widget_viewer.py`). Bu yol `pywebview` kullanır ve widget'ı çerçevesiz tam ekran açar.
 
 Ortam değişkenleri:
-- `WIDGET_USE_PYTHON_VIEWER` (`1` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir.
+- `WIDGET_USE_PYTHON_VIEWER` (`0` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir (Windows taskbar görünürse `0` bırakın).
 - `PYTHON_WIDGET_VIEWER_ENABLED` (`1` varsayılan): Python widget göstericiyi global olarak aç/kapatır.
 
 Notlar:

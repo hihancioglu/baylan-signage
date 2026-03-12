@@ -98,7 +98,7 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
-        return os.getenv("WIDGET_USE_PYTHON_VIEWER", "1").strip().lower() in {"1", "true", "yes"}
+        return os.getenv("WIDGET_USE_PYTHON_VIEWER", "0").strip().lower() in {"1", "true", "yes"}
 
     @staticmethod
     def _find_frozen_widget_viewer_executable() -> str | None:
