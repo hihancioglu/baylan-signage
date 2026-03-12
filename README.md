@@ -57,3 +57,15 @@ Başka bir sistemden aşağıdaki endpoint'e istek atarak ekranlarda kalıcı uy
 ```
 
 Uyarıyı kaldırmak için `active` alanını `false` gönderin.
+
+
+## Widget Tam Ekran Gösterim (Windows)
+Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici eklendi (`client/widget_viewer.py`). Bu yol `pywebview` kullanır ve widget'ı çerçevesiz tam ekran açar.
+
+Ortam değişkenleri:
+- `WIDGET_USE_PYTHON_VIEWER` (`1` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir.
+- `PYTHON_WIDGET_VIEWER_ENABLED` (`1` varsayılan): Python widget göstericiyi global olarak aç/kapatır.
+
+Notlar:
+- Bu gösterici Windows için hedeflenmiştir.
+- Python gösterici kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
