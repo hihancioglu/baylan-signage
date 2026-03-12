@@ -165,6 +165,36 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             self.assertFalse(player.play_blocking("/tmp/slides.json", image_duration_sec=5))
         self.assertEqual(popen.call_count, 1)
 
+    def test_build_widget_command_uses_windows_kiosk_browser_for_url(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_resolve_windows_kiosk_browser",
+            return_value=("msedge", ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"]),
+        ):
+            command = player._build_widget_command("https://example.com")
+
+        self.assertEqual(
+            command,
+            ["msedge", "--new-window", "--kiosk", "--edge-kiosk-type=fullscreen", "https://example.com"],
+        )
+
+    def test_play_widget_url_waits_until_stop_request(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.side_effect = [None, None, None]
+        process.returncode = 0
+
+        with patch.object(player, "_build_widget_command", return_value=["msedge", "--kiosk", "https://example.com"]), patch(
+            "subprocess.Popen", return_value=process
+        ), patch("time.sleep", side_effect=lambda *_args, **_kwargs: setattr(player, "_stop_requested", True)):
+            result = player.play_widget_blocking("https://example.com", duration_sec=1)
+
+        self.assertTrue(result)
+        process.terminate.assert_called_once()
+
+
 
 class _FakePlaybackPlayer:
     image_duration_sec = 8
