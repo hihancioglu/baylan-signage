@@ -46,9 +46,13 @@ def ensure_sqlite_schema():
         },
         "playlist_items": {
             "media_type": "VARCHAR(64) DEFAULT 'video'",
+            "item_type": "VARCHAR(32) DEFAULT 'media' NOT NULL",
             "duration_sec": "INTEGER",
             "checksum": "VARCHAR(128)",
             "source_url": "VARCHAR(1024)",
+            "widget_id": "INTEGER",
+            "widget_payload": "TEXT",
+            "widget_url": "VARCHAR(1024)",
         },
         "device_groups": {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL",
