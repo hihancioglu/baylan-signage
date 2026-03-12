@@ -272,6 +272,41 @@ def _set_setting(db, key: str, value: str | None):
     db.add(row)
 
 
+def _load_widgets(db) -> list[dict]:
+    raw = _get_setting(db, "panel_widgets", "[]") or "[]"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    widgets: list[dict] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        widget_id = item.get("id")
+        try:
+            widget_id = int(widget_id)
+        except (TypeError, ValueError):
+            continue
+        widgets.append(
+            {
+                "id": widget_id,
+                "name": str(item.get("name") or "").strip(),
+                "type": str(item.get("type") or "html").strip().lower() or "html",
+                "content": str(item.get("content") or "").strip(),
+            }
+        )
+    widgets.sort(key=lambda item: item["id"])
+    return widgets
+
+
+def _save_widgets(db, widgets: list[dict]):
+    _set_setting(db, "panel_widgets", json.dumps(widgets, ensure_ascii=False))
+
+
 def _parse_bool(value, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -1355,6 +1390,101 @@ def upload_media_asset():
                 },
             }
         )
+    finally:
+        db.close()
+
+
+@app.get("/api/widgets")
+def list_widgets():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        return jsonify(_load_widgets(db))
+    finally:
+        db.close()
+
+
+@app.post("/api/widgets")
+def create_widget():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.json or {}
+    name = str(body.get("name") or "").strip()
+    widget_type = str(body.get("type") or "html").strip().lower()
+    content = str(body.get("content") or "").strip()
+
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    if widget_type not in {"html", "url"}:
+        return jsonify({"error": "type must be one of: html, url"}), 400
+
+    db = db_session()
+    try:
+        widgets = _load_widgets(db)
+        next_id = (max((item["id"] for item in widgets), default=0) + 1)
+        widgets.append({"id": next_id, "name": name, "type": widget_type, "content": content})
+        _save_widgets(db, widgets)
+        db.commit()
+        return jsonify({"ok": True, "id": next_id})
+    finally:
+        db.close()
+
+
+@app.patch("/api/widgets/<int:widget_id>")
+def update_widget(widget_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.json or {}
+    name = str(body.get("name") or "").strip()
+    widget_type = str(body.get("type") or "html").strip().lower()
+    content = str(body.get("content") or "").strip()
+
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    if widget_type not in {"html", "url"}:
+        return jsonify({"error": "type must be one of: html, url"}), 400
+
+    db = db_session()
+    try:
+        widgets = _load_widgets(db)
+        target = next((item for item in widgets if item["id"] == widget_id), None)
+        if not target:
+            return jsonify({"error": "widget not found"}), 404
+
+        target["name"] = name
+        target["type"] = widget_type
+        target["content"] = content
+        _save_widgets(db, widgets)
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+@app.delete("/api/widgets/<int:widget_id>")
+def delete_widget(widget_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        widgets = _load_widgets(db)
+        original_count = len(widgets)
+        widgets = [item for item in widgets if item["id"] != widget_id]
+        if len(widgets) == original_count:
+            return jsonify({"error": "widget not found"}), 404
+
+        _save_widgets(db, widgets)
+        db.commit()
+        return jsonify({"ok": True})
     finally:
         db.close()
 
