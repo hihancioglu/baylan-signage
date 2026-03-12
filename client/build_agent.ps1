@@ -41,7 +41,28 @@ $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
 
 Write-Host "[3/4] Embedding build marker..."
-Add-Content -Path $artifact -Value $marker -Encoding ASCII -NoNewline
+$maxAttempts = 10
+$delaySeconds = 1
+$markerEmbedded = $false
+
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        Add-Content -Path $artifact -Value $marker -Encoding ASCII -NoNewline
+        $markerEmbedded = $true
+        break
+    } catch {
+        if ($attempt -eq $maxAttempts) {
+            throw "Unable to embed build marker into '$artifact' after $maxAttempts attempts. Last error: $($_.Exception.Message)"
+        }
+
+        Write-Host "File is currently in use. Retrying in $delaySeconds second(s)... ($attempt/$maxAttempts)"
+        Start-Sleep -Seconds $delaySeconds
+    }
+}
+
+if (-not $markerEmbedded) {
+    throw "Unable to embed build marker into '$artifact'."
+}
 
 Write-Host "[4/4] Client build completed: $artifact"
 Write-Host "Embedded build marker: $buildVersion"
