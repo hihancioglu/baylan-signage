@@ -42,6 +42,27 @@ class BorderlessFullscreenPlayer:
         "--image-display-duration={duration} {media}"
     )
     PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".json"}
+    _WINDOWS_BROWSER_KIOSK_FLAGS = [
+        "--kiosk",
+        "--edge-kiosk-type=fullscreen",
+        "--start-fullscreen",
+        "--window-position=0,0",
+        "--disable-features=Translate,TranslateUI,msUndersideButton",
+        "--disable-translate",
+        "--disable-infobars",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    _WINDOWS_BROWSER_KIOSK_FLAGS_CHROME = [
+        "--kiosk",
+        "--start-fullscreen",
+        "--window-position=0,0",
+        "--disable-features=Translate,TranslateUI",
+        "--disable-translate",
+        "--disable-infobars",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
@@ -316,83 +337,25 @@ class BorderlessFullscreenPlayer:
         candidates: list[tuple[str, list[str]]] = [
             (
                 "msedge",
-                [
-                    "--new-window",
-                    "--kiosk",
-                    "--edge-kiosk-type=fullscreen",
-                    "--start-fullscreen",
-                    "--window-position=0,0",
-                    "--disable-features=Translate,TranslateUI",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--app={widget}",
-                ],
+                BorderlessFullscreenPlayer._WINDOWS_BROWSER_KIOSK_FLAGS,
             ),
             (
                 "chrome",
-                [
-                    "--new-window",
-                    "--kiosk",
-                    "--start-fullscreen",
-                    "--window-position=0,0",
-                    "--disable-features=Translate,TranslateUI",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--app={widget}",
-                ],
+                BorderlessFullscreenPlayer._WINDOWS_BROWSER_KIOSK_FLAGS_CHROME,
             ),
         ]
         absolute_candidates = [
             (
                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                [
-                    "--new-window",
-                    "--kiosk",
-                    "--edge-kiosk-type=fullscreen",
-                    "--start-fullscreen",
-                    "--window-position=0,0",
-                    "--disable-features=Translate,TranslateUI",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--app={widget}",
-                ],
+                BorderlessFullscreenPlayer._WINDOWS_BROWSER_KIOSK_FLAGS,
             ),
             (
                 r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                [
-                    "--new-window",
-                    "--kiosk",
-                    "--edge-kiosk-type=fullscreen",
-                    "--start-fullscreen",
-                    "--window-position=0,0",
-                    "--disable-features=Translate,TranslateUI",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--app={widget}",
-                ],
+                BorderlessFullscreenPlayer._WINDOWS_BROWSER_KIOSK_FLAGS,
             ),
             (
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                [
-                    "--new-window",
-                    "--kiosk",
-                    "--start-fullscreen",
-                    "--window-position=0,0",
-                    "--disable-features=Translate,TranslateUI",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--app={widget}",
-                ],
+                BorderlessFullscreenPlayer._WINDOWS_BROWSER_KIOSK_FLAGS_CHROME,
             ),
         ]
 
