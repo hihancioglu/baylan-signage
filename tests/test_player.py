@@ -219,6 +219,23 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         process.terminate.assert_called_once()
 
+    def test_play_widget_url_nonzero_exit_does_not_disable_python_viewer(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.side_effect = [None, 1]
+        process.returncode = 1
+        player._python_widget_viewer_runtime_enabled = True
+
+        with patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["python", "client/widget_viewer.py", "https://example.com"],
+        ), patch("subprocess.Popen", return_value=process), patch("time.sleep", return_value=None):
+            result = player.play_widget_blocking("https://example.com", duration_sec=1)
+
+        self.assertFalse(result)
+        self.assertTrue(player._python_widget_viewer_runtime_enabled)
+
 
 
 class _FakePlaybackPlayer:
