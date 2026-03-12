@@ -281,7 +281,18 @@ class BorderlessFullscreenPlayer:
             windows_browser = self._resolve_windows_kiosk_browser()
             if windows_browser:
                 executable, extra_flags = windows_browser
-                return [executable, *extra_flags, widget_source]
+                command = [executable]
+                widget_arg_included = False
+                for flag in extra_flags:
+                    if "{widget}" in flag:
+                        widget_arg_included = True
+                        command.append(flag.replace("{widget}", widget_source))
+                    else:
+                        command.append(flag)
+
+                if not widget_arg_included:
+                    command.append(widget_source)
+                return command
 
         if os.name == "nt":
             return ["cmd", "/c", "start", "", widget_source]
@@ -303,19 +314,86 @@ class BorderlessFullscreenPlayer:
             return None
 
         candidates: list[tuple[str, list[str]]] = [
-            ("msedge", ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"]),
-            ("chrome", ["--new-window", "--kiosk"]),
+            (
+                "msedge",
+                [
+                    "--new-window",
+                    "--kiosk",
+                    "--edge-kiosk-type=fullscreen",
+                    "--start-fullscreen",
+                    "--window-position=0,0",
+                    "--disable-features=Translate,TranslateUI",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--app={widget}",
+                ],
+            ),
+            (
+                "chrome",
+                [
+                    "--new-window",
+                    "--kiosk",
+                    "--start-fullscreen",
+                    "--window-position=0,0",
+                    "--disable-features=Translate,TranslateUI",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--app={widget}",
+                ],
+            ),
         ]
         absolute_candidates = [
             (
                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"],
+                [
+                    "--new-window",
+                    "--kiosk",
+                    "--edge-kiosk-type=fullscreen",
+                    "--start-fullscreen",
+                    "--window-position=0,0",
+                    "--disable-features=Translate,TranslateUI",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--app={widget}",
+                ],
             ),
             (
                 r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                ["--new-window", "--kiosk", "--edge-kiosk-type=fullscreen"],
+                [
+                    "--new-window",
+                    "--kiosk",
+                    "--edge-kiosk-type=fullscreen",
+                    "--start-fullscreen",
+                    "--window-position=0,0",
+                    "--disable-features=Translate,TranslateUI",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--app={widget}",
+                ],
             ),
-            (r"C:\Program Files\Google\Chrome\Application\chrome.exe", ["--new-window", "--kiosk"]),
+            (
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                [
+                    "--new-window",
+                    "--kiosk",
+                    "--start-fullscreen",
+                    "--window-position=0,0",
+                    "--disable-features=Translate,TranslateUI",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--app={widget}",
+                ],
+            ),
         ]
 
         for candidate, flags in candidates:
