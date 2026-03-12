@@ -496,8 +496,6 @@ class BorderlessFullscreenPlayer:
 
             if self._is_widget_url(source):
                 result = self._wait_widget_until_stop(process)
-                if not result and using_python_widget_viewer and not self._stop_requested:
-                    self._python_widget_viewer_runtime_enabled = False
                 return result
 
             deadline = time.monotonic() + max(1, int(duration_sec))
