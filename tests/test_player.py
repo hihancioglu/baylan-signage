@@ -171,13 +171,13 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch("client.player.os.name", "nt"), patch.object(
             player,
             "_resolve_windows_kiosk_browser",
-            return_value=("msedge", ["--kiosk", "--edge-kiosk-type=fullscreen"]),
+            return_value=("msedge", ["--kiosk", "--edge-kiosk-type=fullscreen", "--app={widget}"]),
         ):
             command = player._build_widget_command("https://example.com")
 
         self.assertEqual(
             command,
-            ["msedge", "--kiosk", "--edge-kiosk-type=fullscreen", "https://example.com"],
+            ["msedge", "--kiosk", "--edge-kiosk-type=fullscreen", "--app=https://example.com"],
         )
 
     def test_play_widget_url_waits_until_stop_request(self):
