@@ -692,23 +692,73 @@ def build_config(hostname):
             .all()
         )
 
-        videos = [
-            {
-                "path": i.path,
-                "media_type": i.media_type or _media_kind_from_path(i.path),
-                "duration_sec": i.duration_sec,
-                "order_no": i.order_no,
-            }
-            for i in items
-            if i.path
-        ]
+        videos = []
+        for i in items:
+            item_type = str(i.item_type or "media").strip().lower()
+            if item_type == "widget":
+                videos.append(
+                    {
+                        "path": i.path or i.widget_url or i.source_url,
+                        "item_type": "widget",
+                        "media_type": "widget",
+                        "duration_sec": i.duration_sec,
+                        "order_no": i.order_no,
+                        "widget_id": i.widget_id,
+                        "widget_payload": i.widget_payload,
+                        "widget_url": i.widget_url or i.source_url,
+                    }
+                )
+                continue
+
+            if not i.path:
+                continue
+
+            videos.append(
+                {
+                    "path": i.path,
+                    "item_type": "media",
+                    "media_type": i.media_type or _media_kind_from_path(i.path),
+                    "duration_sec": i.duration_sec,
+                    "order_no": i.order_no,
+                    "widget_id": None,
+                    "widget_payload": None,
+                    "widget_url": None,
+                }
+            )
+
         media_signatures = {
-            item["path"]: hashlib.sha256(item["path"].encode("utf-8")).hexdigest() for item in videos
+            f"{item.get('item_type') or 'media'}:{item.get('path') or item.get('widget_url') or item.get('widget_id')}": hashlib.sha256(
+                json.dumps(
+                    {
+                        "item_type": item.get("item_type") or "media",
+                        "path": item.get("path"),
+                        "media_type": item.get("media_type"),
+                        "duration_sec": item.get("duration_sec") or 0,
+                        "order_no": item.get("order_no") or 0,
+                        "widget_id": item.get("widget_id"),
+                        "widget_payload": item.get("widget_payload"),
+                        "widget_url": item.get("widget_url"),
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            for item in videos
         }
         playlist_fingerprint = "|".join(
-            (
-                f"{item['path']}:{item.get('duration_sec') or 0}:"
-                f"{item.get('media_type') or ''}:{item.get('order_no') or 0}"
+            json.dumps(
+                {
+                    "item_type": item.get("item_type") or "media",
+                    "path": item.get("path"),
+                    "media_type": item.get("media_type"),
+                    "duration_sec": item.get("duration_sec") or 0,
+                    "order_no": item.get("order_no") or 0,
+                    "widget_id": item.get("widget_id"),
+                    "widget_payload": item.get("widget_payload"),
+                    "widget_url": item.get("widget_url"),
+                },
+                sort_keys=True,
+                ensure_ascii=False,
             )
             for item in videos
         )
@@ -1511,7 +1561,12 @@ def list_playlist_items(playlist_id):
             for media in db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
         }
 
-        def _resolve_playlist_label(item_path: str) -> str:
+        def _resolve_playlist_label(item) -> str:
+            item_type = str(item.item_type or "media").strip().lower()
+            if item_type == "widget":
+                return f"Widget #{item.widget_id}" if item.widget_id else "Widget"
+
+            item_path = item.path
             relative_path = _extract_relative_media_path(item_path)
             if relative_path and relative_path in media_assets_by_relative_path:
                 return media_assets_by_relative_path[relative_path]
@@ -1522,9 +1577,17 @@ def list_playlist_items(playlist_id):
                 "id": i.id,
                 "path": i.path,
                 "order_no": i.order_no,
-                "media_type": i.media_type or _media_kind_from_path(i.path),
+                "item_type": str(i.item_type or "media").strip().lower(),
+                "media_type": (
+                    "widget"
+                    if str(i.item_type or "media").strip().lower() == "widget"
+                    else (i.media_type or _media_kind_from_path(i.path))
+                ),
                 "duration_sec": i.duration_sec,
-                "label": _resolve_playlist_label(i.path),
+                "widget_id": i.widget_id,
+                "widget_payload": i.widget_payload,
+                "widget_url": i.widget_url or i.source_url,
+                "label": _resolve_playlist_label(i),
             }
             for i in items
         ])
@@ -1589,27 +1652,71 @@ def add_playlist_item(playlist_id):
 
     body = request.json or {}
     media_id = body.get("media_id")
+    widget_id = body.get("widget_id")
+    widget_payload = body.get("widget_payload")
+    widget_url = str(body.get("widget_url") or body.get("source_url") or "").strip()
+    item_type = str(body.get("item_type") or "media").strip().lower()
     order_no = body.get("order_no", 0)
     duration_sec = body.get("duration_sec")
 
+    if item_type not in {"media", "widget"}:
+        return jsonify({"error": "item_type must be one of: media, widget"}), 400
+
     db = db_session()
     try:
-        asset = db.query(MediaAsset).filter_by(id=media_id).first()
-        if not asset:
-            return jsonify({"error": "media not found"}), 404
+        if item_type == "media":
+            if not media_id:
+                return jsonify({"error": "media_id required for media item"}), 400
 
-        media_path = _media_url(asset.relative_path)
-        media_type = _media_kind_from_path(media_path)
-        duration = None
-        if media_type == "image":
-            try:
-                duration = int(duration_sec) if duration_sec is not None else 8
-            except (TypeError, ValueError):
-                return jsonify({"error": "invalid duration_sec"}), 400
-            if duration <= 0:
-                return jsonify({"error": "duration_sec must be > 0"}), 400
+            asset = db.query(MediaAsset).filter_by(id=media_id).first()
+            if not asset:
+                return jsonify({"error": "media not found"}), 404
 
-        item = PlaylistItem(playlist_id=playlist_id, path=media_path, order_no=order_no, media_type=media_type, duration_sec=duration)
+            media_path = _media_url(asset.relative_path)
+            media_type = _media_kind_from_path(media_path)
+            duration = None
+            if media_type == "image":
+                try:
+                    duration = int(duration_sec) if duration_sec is not None else 8
+                except (TypeError, ValueError):
+                    return jsonify({"error": "invalid duration_sec"}), 400
+                if duration <= 0:
+                    return jsonify({"error": "duration_sec must be > 0"}), 400
+
+            item = PlaylistItem(
+                playlist_id=playlist_id,
+                path=media_path,
+                order_no=order_no,
+                item_type="media",
+                media_type=media_type,
+                duration_sec=duration,
+                widget_id=None,
+                widget_payload=None,
+                widget_url=None,
+            )
+        else:
+            if media_id:
+                return jsonify({"error": "media_id cannot be used for widget item"}), 400
+            if widget_id is None and not widget_url:
+                return jsonify({"error": "widget_id or widget_url required for widget item"}), 400
+            if widget_url:
+                parsed = urlparse(widget_url)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    return jsonify({"error": "widget_url must be a valid http/https URL"}), 400
+
+            item = PlaylistItem(
+                playlist_id=playlist_id,
+                path=widget_url or None,
+                order_no=order_no,
+                item_type="widget",
+                media_type="widget",
+                duration_sec=None,
+                widget_id=widget_id,
+                widget_payload=(json.dumps(widget_payload, ensure_ascii=False) if isinstance(widget_payload, (dict, list)) else (str(widget_payload) if widget_payload is not None else None)),
+                widget_url=widget_url or None,
+                source_url=widget_url or None,
+            )
+
         db.add(item)
         db.commit()
 

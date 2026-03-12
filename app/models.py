@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
 from .db import Base
 
@@ -58,9 +58,13 @@ class PlaylistItem(Base):
     path = Column(String(512))
     order_no = Column(Integer, default=0)
     media_type = Column(String(64), default="video")
+    item_type = Column(String(32), default="media", nullable=False)
     duration_sec = Column(Integer)
     checksum = Column(String(128))
     source_url = Column(String(1024))
+    widget_id = Column(Integer)
+    widget_payload = Column(Text)
+    widget_url = Column(String(1024))
 
 
 class MediaAsset(Base):
