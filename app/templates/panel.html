@@ -31,6 +31,7 @@
           <button class="nav-link text-start" data-section="section-media" type="button">Medya Yönetimi</button>
           <button class="nav-link text-start" data-section="section-groups" type="button">Grup Yönetimi</button>
           <button class="nav-link text-start" data-section="section-playlists" type="button">Playlist Yönetimi</button>
+          <button class="nav-link text-start" data-section="section-widgets" type="button">Widget Yönetimi</button>
           <button class="nav-link text-start" data-section="section-announcement" type="button">Acil Duyuru</button>
           <button class="nav-link text-start" data-section="section-logs" type="button">Operasyon Logları</button>
           <button class="nav-link text-start" data-section="section-updater" type="button">Updater</button>
@@ -125,14 +126,16 @@
 
                 <div class="card mini-card mt-3">
                   <div class="card-body">
-                    <h3 class="h6">Playliste Medya Ekle</h3>
+                    <h3 class="h6">İçerik Ekle (Medya/Widget)</h3>
                     <div class="row g-2 mb-2 align-items-center">
-                      <div class="col-12 col-md-4"><select id="playlist-add-select" class="form-select"></select></div>
-                      <div class="col-12 col-md-4"><select id="media-select" class="form-select"></select></div>
-                      <div class="col-12 col-md-3"><input id="playlist-image-duration" class="form-control" type="number" min="1" value="8" placeholder="Görsel süre (sn)" /></div>
-                      <div class="col-auto"><button class="btn btn-primary" onclick="addMediaToPlaylist()">Medya Ekle</button></div>
+                      <div class="col-12 col-md-3"><select id="playlist-add-select" class="form-select"></select></div>
+                      <div class="col-12 col-md-2"><select id="playlist-item-type" class="form-select" onchange="togglePlaylistItemInputs()"><option value="media">Medya</option><option value="widget">Widget</option></select></div>
+                      <div class="col-12 col-md-3" id="playlist-media-col"><select id="media-select" class="form-select"></select></div>
+                      <div class="col-12 col-md-3 d-none" id="playlist-widget-col"><select id="widget-select" class="form-select"></select></div>
+                      <div class="col-12 col-md-2" id="playlist-duration-col"><input id="playlist-image-duration" class="form-control" type="number" min="1" value="8" placeholder="Görsel süre (sn)" /></div>
+                      <div class="col-auto"><button class="btn btn-primary" onclick="addItemToPlaylist()">Playliste Ekle</button></div>
                     </div>
-                    <div class="form-text">Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.</div>
+                    <div class="form-text" id="playlist-add-help">Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.</div>
                   </div>
                 </div>
 
@@ -150,6 +153,56 @@
                     </div>
                     <div class="form-text">Item seçmek için listeden bir medyaya tıklayın.</div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-section d-none" id="section-widgets">
+            <div class="card panel-card mb-3">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Widget Yönetimi</h2>
+                <div class="row g-2 align-items-end">
+                  <input type="hidden" id="widget-id" />
+                  <div class="col-12 col-md-4">
+                    <label class="form-label">Widget adı</label>
+                    <input id="widget-name" class="form-control" placeholder="Widget adı" />
+                  </div>
+                  <div class="col-12 col-md-3">
+                    <label class="form-label">Tür</label>
+                    <select id="widget-type" class="form-select" onchange="updateWidgetPreview()">
+                      <option value="html">HTML</option>
+                      <option value="url">URL</option>
+                    </select>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label">İçerik alanı</label>
+                    <textarea id="widget-content" class="form-control" rows="5" placeholder="HTML içeriği veya URL" oninput="updateWidgetPreview()"></textarea>
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <h3 class="h6">Widget Önizleme</h3>
+                  <div id="widget-preview" class="border rounded p-3 bg-light small text-break">Önizleme için içerik girin.</div>
+                </div>
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                  <button class="btn btn-primary" onclick="createWidget()">Widget Ekle</button>
+                  <button class="btn btn-outline-primary" onclick="updateWidget()">Kaydet</button>
+                  <button class="btn btn-outline-secondary" onclick="resetWidgetForm()">Formu Temizle</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card panel-card">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h3 class="h5 mb-0">Widget Listesi</h3>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="loadWidgets()">Listeyi Yenile</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>Ad</th><th>Tür</th><th>İçerik</th><th>İşlem</th></tr></thead>
+                    <tbody id="widgets-body"></tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -378,6 +431,7 @@ let cachedGroups = [];
 let cachedDevices = [];
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
+let cachedWidgets = [];
 let deviceSortField = 'is_online';
 let deviceSortDirection = 'desc';
 
@@ -532,6 +586,11 @@ async function loadGroupsPlaylists(){
   pa.innerHTML = rawOpts;
   po.innerHTML = rawOpts;
 
+  const ws = document.getElementById('widget-select');
+  if(ws){
+    ws.innerHTML = '<option value="">Widget seçin</option>' + (cachedWidgets||[]).map(w=>`<option value="${w.id}">${escapeHtml(w.name || `Widget #${w.id}`)}</option>`).join('');
+  }
+
   renderGroupsTable();
   renderPlaylistsTable();
   const selectedOrderingPlaylistId = document.getElementById('playlist-order-select').value;
@@ -561,6 +620,152 @@ async function loadMedia(){
     tr.innerHTML = `<td>${escapeHtml(a.name)}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="previewMedia(${a.id})">Preview</button><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></div></td>`;
     body.appendChild(tr);
   });
+}
+
+
+function renderWidgetsTable(){
+  const body = document.getElementById('widgets-body');
+  if(!body) return;
+  body.innerHTML = '';
+
+  if(!(cachedWidgets || []).length){
+    body.innerHTML = '<tr><td colspan="4" class="text-secondary small">Henüz widget yok</td></tr>';
+    return;
+  }
+
+  (cachedWidgets || []).forEach(w => {
+    const tr = document.createElement('tr');
+    const summary = String(w.content || w.payload || w.widget_payload || w.url || '').slice(0, 120);
+    tr.innerHTML = `<td>${escapeHtml(w.name || `Widget #${w.id}`)}</td><td>${escapeHtml((w.type || 'html').toUpperCase())}</td><td class="small">${escapeHtml(summary || '-')}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="fillWidgetForm(${w.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteWidget(${w.id})">Sil</button></div></td>`;
+    body.appendChild(tr);
+  });
+}
+
+function resetWidgetForm(){
+  document.getElementById('widget-id').value = '';
+  document.getElementById('widget-name').value = '';
+  document.getElementById('widget-type').value = 'html';
+  document.getElementById('widget-content').value = '';
+  updateWidgetPreview();
+}
+
+function fillWidgetForm(widgetId){
+  const widget = (cachedWidgets || []).find(w => w.id === Number(widgetId));
+  if(!widget){
+    alert('Widget bulunamadı');
+    return;
+  }
+  document.getElementById('widget-id').value = widget.id;
+  document.getElementById('widget-name').value = widget.name || '';
+  document.getElementById('widget-type').value = (widget.type || 'html').toLowerCase();
+  document.getElementById('widget-content').value = widget.content || widget.payload || widget.widget_payload || widget.url || '';
+  updateWidgetPreview();
+}
+
+function updateWidgetPreview(){
+  const type = document.getElementById('widget-type').value;
+  const content = document.getElementById('widget-content').value.trim();
+  const preview = document.getElementById('widget-preview');
+  if(!content){
+    preview.textContent = 'Önizleme için içerik girin.';
+    return;
+  }
+
+  if(type === 'url'){
+    preview.innerHTML = `<a href="${escapeHtml(content)}" target="_blank" rel="noopener">${escapeHtml(content)}</a>`;
+    return;
+  }
+
+  preview.innerHTML = content;
+}
+
+function togglePlaylistItemInputs(){
+  const itemType = document.getElementById('playlist-item-type').value;
+  const mediaCol = document.getElementById('playlist-media-col');
+  const widgetCol = document.getElementById('playlist-widget-col');
+  const durationCol = document.getElementById('playlist-duration-col');
+  const helpText = document.getElementById('playlist-add-help');
+
+  const mediaMode = itemType === 'media';
+  mediaCol.classList.toggle('d-none', !mediaMode);
+  widgetCol.classList.toggle('d-none', mediaMode);
+  durationCol.classList.toggle('d-none', !mediaMode);
+  helpText.textContent = mediaMode
+    ? 'Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.'
+    : 'Widget seçimi yaparak Playliste Ekle butonunu kullanın.';
+}
+
+async function loadWidgets(){
+  const widgets = await jget('/api/widgets');
+  cachedWidgets = Array.isArray(widgets) ? widgets : [];
+  if(!Array.isArray(widgets) && widgets?.error){
+    console.warn('Widget listesi alınamadı:', widgets.error);
+  }
+
+  const ws = document.getElementById('widget-select');
+  if(ws){
+    ws.innerHTML = '<option value="">Widget seçin</option>' + (cachedWidgets||[]).map(w=>`<option value="${w.id}">${escapeHtml(w.name || `Widget #${w.id}`)}</option>`).join('');
+  }
+
+  renderWidgetsTable();
+}
+
+async function createWidget(){
+  const name = document.getElementById('widget-name').value.trim();
+  const type = document.getElementById('widget-type').value;
+  const content = document.getElementById('widget-content').value.trim();
+  if(!name || !content){
+    alert('Widget adı ve içerik alanı zorunlu');
+    return;
+  }
+
+  const resp = await jpost('/api/widgets', {name, type, content});
+  if(!resp.ok){
+    alert(resp.error || 'Widget eklenemedi');
+    return;
+  }
+
+  alert('Widget Ekle işlemi başarılı');
+  resetWidgetForm();
+  await loadWidgets();
+}
+
+async function updateWidget(){
+  const widgetId = Number(document.getElementById('widget-id').value);
+  const name = document.getElementById('widget-name').value.trim();
+  const type = document.getElementById('widget-type').value;
+  const content = document.getElementById('widget-content').value.trim();
+
+  if(!widgetId){
+    alert('Önce düzenlenecek bir widget seçin');
+    return;
+  }
+  if(!name || !content){
+    alert('Widget adı ve içerik alanı zorunlu');
+    return;
+  }
+
+  const resp = await jpatch(`/api/widgets/${widgetId}`, {name, type, content});
+  if(!resp.ok){
+    alert(resp.error || 'Widget güncellenemedi');
+    return;
+  }
+
+  alert('Widget kaydedildi');
+  await loadWidgets();
+}
+
+async function deleteWidget(widgetId){
+  if(!confirm('Widget silinsin mi?')) return;
+  const resp = await jdelete(`/api/widgets/${widgetId}`);
+  if(!resp.ok){
+    alert(resp.error || 'Widget silinemedi');
+    return;
+  }
+
+  alert('Widget silindi');
+  if(Number(document.getElementById('widget-id').value) === Number(widgetId)) resetWidgetForm();
+  await loadWidgets();
 }
 
 function previewMedia(mediaId){
@@ -889,24 +1094,51 @@ async function deletePlaylist(playlistId){
   await loadGroupsPlaylists();
 }
 
-async function addMediaToPlaylist(){
+async function addItemToPlaylist(){
   const playlistId = Number(document.getElementById('playlist-add-select').value);
-  const mediaId = Number(document.getElementById('media-select').value);
-  if(!playlistId || !mediaId){
-    alert('Playlist ve medya seçin');
+  const itemType = document.getElementById('playlist-item-type').value;
+  if(!playlistId){
+    alert('Playlist seçin');
     return;
   }
 
-  const selectedMedia = (cachedMediaAssets || []).find(a => a.id === mediaId);
-  const isImage = (selectedMedia?.content_type || '').startsWith('image/');
-  const payload = { media_id: mediaId };
-  if(isImage){
-    const durationSec = Number(document.getElementById('playlist-image-duration').value || 8);
-    if(!durationSec || durationSec <= 0){
-      alert('Görsel süresi 1 sn veya daha büyük olmalı');
+  const payload = { item_type: itemType };
+  if(itemType === 'widget'){
+    const widgetId = Number(document.getElementById('widget-select').value);
+    if(!widgetId){
+      alert('Widget seçin');
       return;
     }
-    payload.duration_sec = durationSec;
+
+    const selectedWidget = (cachedWidgets || []).find(w => w.id === widgetId);
+    payload.widget_id = widgetId;
+    payload.widget_payload = {
+      name: selectedWidget?.name || '',
+      type: selectedWidget?.type || 'html',
+      content: selectedWidget?.content || selectedWidget?.payload || selectedWidget?.widget_payload || selectedWidget?.url || ''
+    };
+    if((selectedWidget?.type || '').toLowerCase() === 'url'){
+      payload.widget_url = selectedWidget?.content || selectedWidget?.url || '';
+    }
+  }else{
+    const mediaId = Number(document.getElementById('media-select').value);
+    if(!mediaId){
+      alert('Medya seçin');
+      return;
+    }
+
+    const selectedMedia = (cachedMediaAssets || []).find(a => a.id === mediaId);
+    const isImage = (selectedMedia?.content_type || '').startsWith('image/');
+    payload.media_id = mediaId;
+
+    if(isImage){
+      const durationSec = Number(document.getElementById('playlist-image-duration').value || 8);
+      if(!durationSec || durationSec <= 0){
+        alert('Görsel süresi 1 sn veya daha büyük olmalı');
+        return;
+      }
+      payload.duration_sec = durationSec;
+    }
   }
 
   const resp = await jpost(`/api/playlists/${playlistId}/items`, payload);
@@ -914,12 +1146,12 @@ async function addMediaToPlaylist(){
     alert(resp.error || 'Ekleme hatası');
     return;
   }
-  alert('Medya playlist eklendi');
+
+  alert('Playliste Ekle işlemi başarılı');
   if(String(playlistId) === document.getElementById('playlist-order-select').value){
     await loadItems();
   }
 }
-
 
 let dragId = null;
 async function loadItems(){
@@ -972,7 +1204,7 @@ async function savePlaylistLoopMode(){
 async function removeSelectedPlaylistItem(){
   const pid = Number(document.getElementById('playlist-order-select').value);
   if(!pid || !selectedPlaylistItemId){
-    alert('Önce listeden bir video seçin');
+    alert('Önce listeden bir içerik seçin');
     return;
   }
   const resp = await jdelete(`/api/playlists/${pid}/items/${selectedPlaylistItemId}`);
@@ -980,7 +1212,7 @@ async function removeSelectedPlaylistItem(){
     alert(resp.error || 'Playlist item silinemedi');
     return;
   }
-  alert('Video playlistten çıkarıldı');
+  alert('İçerik playlistten çıkarıldı');
   await loadItems();
 }
 
@@ -1322,8 +1554,11 @@ async function loadLogs(){
 async function init(){
   activateSection('section-devices');
   await loadDevices();
+  await loadWidgets();
   await loadGroupsPlaylists();
   await loadMedia();
+  togglePlaylistItemInputs();
+  updateWidgetPreview();
   await loadLogs();
   await loadAnnouncements();
   onTargetChange();
