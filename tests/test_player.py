@@ -3,6 +3,7 @@ import unittest
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 from client.player import BorderlessFullscreenPlayer
@@ -183,6 +184,38 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         with patch.dict("os.environ", {"WIDGET_USE_PYTHON_VIEWER": "1"}, clear=True):
             self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
+
+    def test_detect_widget_viewer_support_accepts_cef_backend(self):
+        fake_cef_module = ModuleType("cefpython3")
+        fake_cefpython = ModuleType("cefpython3.cefpython")
+        fake_cef_module.cefpython = fake_cefpython
+
+        with patch("client.player.os.name", "nt"), patch.dict(
+            "os.environ",
+            {"WIDGET_VIEWER_BACKEND": "cef"},
+            clear=False,
+        ), patch("client.player.getattr", return_value=False), patch.dict(
+            "sys.modules",
+            {"cefpython3": fake_cef_module, "cefpython3.cefpython": fake_cefpython},
+            clear=False,
+        ):
+            player = BorderlessFullscreenPlayer()
+
+        self.assertTrue(player._python_widget_viewer_supported)
+
+    def test_detect_widget_viewer_support_rejects_when_backends_missing(self):
+        with patch("client.player.os.name", "nt"), patch.dict(
+            "os.environ",
+            {"WIDGET_VIEWER_BACKEND": "auto"},
+            clear=False,
+        ), patch("client.player.getattr", return_value=False), patch.dict(
+            "sys.modules",
+            {"webview": None, "cefpython3": None, "cefpython3.cefpython": None},
+            clear=False,
+        ):
+            player = BorderlessFullscreenPlayer()
+
+        self.assertFalse(player._python_widget_viewer_supported)
 
     def test_should_use_python_widget_viewer_requires_url_and_runtime_flags(self):
         player = self._build_player()

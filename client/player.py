@@ -126,13 +126,27 @@ class BorderlessFullscreenPlayer:
             )
             return False
 
+        backend = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
         try:
-            import webview
+            if backend in {"auto", "cef"}:
+                from cefpython3 import cefpython as cef
 
-            return bool(webview)
-        except Exception as exc:
-            _safe_print(f"⚠️ Python widget viewer pasif: pywebview kullanılamıyor ({exc})")
-            return False
+                if cef:
+                    return True
+        except Exception:
+            pass
+
+        try:
+            if backend in {"auto", "pywebview"}:
+                import webview
+
+                if webview:
+                    return True
+        except Exception:
+            pass
+
+        _safe_print("⚠️ Python widget viewer pasif: ne cefpython3 ne de pywebview kullanılabilir")
+        return False
 
     def _should_use_python_widget_viewer(self, widget_source: str) -> bool:
         if not self._is_widget_url(widget_source):

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Baylan Widget Engine</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
+    #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
+    .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
+    iframe.widget { width: 100%; height: 100%; }
+    .card { padding: 16px; font-size: 24px; display: flex; align-items: center; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div id="widgets"></div>
+  <script>
+    function parseConfig() {
+      const params = new URLSearchParams(window.location.search);
+      const configB64 = params.get("config_b64");
+      if (configB64) {
+        try {
+          return JSON.parse(atob(decodeURIComponent(configB64).replace(/-/g, "+").replace(/_/g, "/")));
+        } catch (_err) {
+          return { widgets: [] };
+        }
+      }
+      const url = params.get("url");
+      if (url) {
+        return { widgets: [{ type: "iframe", url }] };
+      }
+      return { widgets: [] };
+    }
+
+    function applyLayout(config) {
+      const container = document.getElementById("widgets");
+      container.style.setProperty("--cols", String(Math.max(1, Number(config.columns || 1))));
+    }
+
+    function loadWidgets(config) {
+      const container = document.getElementById("widgets");
+      container.innerHTML = "";
+      (config.widgets || []).forEach((w) => {
+        if (w.type === "iframe") {
+          const frame = document.createElement("iframe");
+          frame.className = "widget";
+          frame.src = w.url;
+          frame.loading = "eager";
+          frame.referrerPolicy = "no-referrer";
+          container.appendChild(frame);
+          return;
+        }
+        if (w.type === "card") {
+          const card = document.createElement("div");
+          card.className = "widget card";
+          card.innerHTML = w.html || "";
+          container.appendChild(card);
+        }
+      });
+    }
+
+    const config = parseConfig();
+    applyLayout(config);
+    loadWidgets(config);
+  </script>
+</body>
+</html>

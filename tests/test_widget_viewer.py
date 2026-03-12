@@ -27,11 +27,25 @@ class TestWidgetViewer(unittest.TestCase):
         fake_webview.start.side_effect = [RuntimeError("edge failed"), None]
 
         with patch("client.widget_viewer._gui_candidates", return_value=["edgechromium", "qt"]):
-            widget_viewer._start_with_fallback(fake_webview, "https://example.com")
+            widget_viewer._start_with_fallback(fake_webview)
 
         self.assertEqual(fake_webview.start.call_count, 2)
         self.assertEqual(fake_webview.start.call_args_list[0].kwargs["gui"], "edgechromium")
         self.assertEqual(fake_webview.start.call_args_list[1].kwargs["gui"], "qt")
+
+    def test_backend_order_prefers_configured_backend(self):
+        with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "pywebview"}, clear=False):
+            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview"])
+
+        with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "auto"}, clear=False):
+            self.assertEqual(widget_viewer._viewer_backend_order(), ["cef", "pywebview"])
+
+    def test_build_engine_url_wraps_source_when_enabled(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url("https://example.com")
+
+        self.assertIn("widget_engine.html", result)
+        self.assertIn("config_b64=", result)
 
 
 if __name__ == "__main__":
