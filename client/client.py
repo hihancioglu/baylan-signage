@@ -20,7 +20,7 @@ from urllib import request as urllib_request
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler, WatchedFileHandler
 
 import socketio
 
@@ -182,14 +182,19 @@ instance_lock_fd: int | None = None
 
 
 def setup_debug_logging():
-    file_handler = TimedRotatingFileHandler(
-        ACTIVE_DEBUG_LOG_PATH,
-        when="midnight",
-        interval=1,
-        backupCount=CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    file_handler.suffix = "%Y-%m-%d"
+    if platform.system().lower().startswith("win"):
+        file_handler = TimedRotatingFileHandler(
+            ACTIVE_DEBUG_LOG_PATH,
+            when="midnight",
+            interval=1,
+            backupCount=CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.suffix = "%Y-%m-%d"
+    else:
+        # Linux'ta dış logrotate kullanıldığında dosya inode'u değişir.
+        # WatchedFileHandler, değişikliği algılayıp yeni dosyayı otomatik açar.
+        file_handler = WatchedFileHandler(ACTIVE_DEBUG_LOG_PATH, encoding="utf-8")
     handlers = [file_handler]
     if not platform.system().lower().startswith("win"):
         handlers.append(logging.StreamHandler(sys.stdout))
