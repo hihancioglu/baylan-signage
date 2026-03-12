@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import ctypes
+import time
 from ctypes import wintypes
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class BorderlessFullscreenPlayer:
         )
         self._process = None
         self._stop_requested = False
+        self._widget_process = None
         self._python_image_viewer_supported = self._detect_python_image_viewer_support()
         self._python_image_viewer_runtime_enabled = True
         self._last_interrupted = False
@@ -265,6 +267,71 @@ class BorderlessFullscreenPlayer:
     def _is_slideshow_manifest(media_path: str) -> bool:
         return Path(media_path).suffix.lower() in BorderlessFullscreenPlayer.SLIDESHOW_EXTENSIONS
 
+
+    def _build_widget_command(self, widget_source: str) -> list[str]:
+        command_template = os.getenv("WIDGET_PLAYER_COMMAND", "")
+        if command_template.strip():
+            parts = self._split_command_text(command_template)
+            command = [widget_source if part == "{widget}" else part for part in parts]
+            command = [self._strip_outer_quotes(part) for part in command]
+            if command:
+                return command
+
+        if os.name == "nt":
+            return ["cmd", "/c", "start", "", widget_source]
+
+        opener = shutil.which("xdg-open") or shutil.which("open")
+        if opener:
+            return [opener, widget_source]
+
+        return []
+
+    def play_widget_blocking(self, widget_source: str, duration_sec: int) -> bool:
+        source = str(widget_source or "").strip()
+        if not source:
+            self._last_interrupted = False
+            _safe_print("⚠️ widget kaynağı boş")
+            return False
+
+        self.stop()
+
+        command = self._build_widget_command(source)
+        if not command:
+            self._last_interrupted = False
+            _safe_print("⚠️ widget oynatılamıyor: browser/webview komutu bulunamadı")
+            return False
+
+        process = None
+        try:
+            self._stop_requested = False
+            process = subprocess.Popen(command)
+            self._widget_process = process
+            deadline = time.monotonic() + max(1, int(duration_sec))
+            while time.monotonic() < deadline:
+                if self._stop_requested:
+                    break
+                if process.poll() is not None:
+                    break
+                time.sleep(0.2)
+
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+            interrupted = self._stop_requested
+            self._last_interrupted = interrupted
+            return (process.returncode in (0, None)) or interrupted
+        except Exception as exc:
+            self._last_interrupted = False
+            _safe_print(f"⚠️ widget oynatma hatası: {exc}")
+            return False
+        finally:
+            if self._widget_process is process:
+                self._widget_process = None
+
     def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
@@ -466,14 +533,24 @@ class BorderlessFullscreenPlayer:
                 Path(playlist_file).unlink(missing_ok=True)
 
     def stop(self):
+        self._stop_requested = True
+
         if self._process and self._process.poll() is None:
-            self._stop_requested = True
             self._process.terminate()
             try:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._process.kill()
+
+        if self._widget_process and self._widget_process.poll() is None:
+            self._widget_process.terminate()
+            try:
+                self._widget_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._widget_process.kill()
+
         self._process = None
+        self._widget_process = None
 
 
     def last_play_was_interrupted(self) -> bool:

@@ -771,7 +771,7 @@ class PlaybackController:
         self.overlay = DownloadStatusOverlay(gui_runtime)
         cached_entries = self.media_manager.load_last_successful_playlist_entries()
         self._playlist_entries: list[dict] = cached_entries or [
-            {"local_path": p, "duration_sec": None, "media_type": None}
+            {"local_path": p, "duration_sec": None, "media_type": None, "item_type": "media", "display_name": None}
             for p in self.media_manager.load_last_successful_playlist()
         ]
         self._fallback_media = _resolve_runtime_path(
@@ -895,13 +895,39 @@ class PlaybackController:
             self._playback_state = state_snapshot
         self.media_manager.save_playback_state(state_snapshot)
 
+    @staticmethod
+    def _normalize_item(item: dict) -> dict:
+        normalized = dict(item) if isinstance(item, dict) else {}
+        normalized["item_type"] = str(normalized.get("item_type") or normalized.get("media_type") or "media").strip().lower() or "media"
+        normalized["display_name"] = str(normalized.get("title") or normalized.get("name") or normalized.get("display_name") or "").strip() or None
+        if normalized["item_type"] == "widget":
+            normalized["media_type"] = normalized.get("media_type") or "widget"
+        return normalized
+
+    @staticmethod
+    def _item_label(item: dict) -> str:
+        normalized = PlaybackController._normalize_item(item or {})
+        return str(normalized.get("display_name") or Path(str(normalized.get("local_path") or normalized.get("path") or "")).name)
+
+    @staticmethod
+    def _resolve_widget_duration_sec(item: dict) -> int:
+        default_duration = max(1, int(os.getenv("WIDGET_DEFAULT_DURATION_SEC", "30")))
+        duration = (item or {}).get("duration_sec")
+        if isinstance(duration, int) and duration > 0:
+            return duration
+        return default_duration
+
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         for entry in playlist_entries:
-            media_path = str((entry or {}).get("local_path") or "")
+            normalized = self._normalize_item(entry or {})
+            if normalized.get("item_type") == "widget":
+                return False
+
+            media_path = str(normalized.get("local_path") or "")
             if not media_path or not self.player.is_image(media_path):
                 continue
 
-            duration_sec = (entry or {}).get("duration_sec")
+            duration_sec = normalized.get("duration_sec")
             if isinstance(duration_sec, int) and duration_sec > 0 and duration_sec != self.player.image_duration_sec:
                 return False
 
@@ -921,22 +947,28 @@ class PlaybackController:
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
 
+        normalized_items = []
+        for item in videos:
+            if isinstance(item, dict):
+                normalized_items.append(self._normalize_item(item))
+            elif item:
+                normalized_items.append(self._normalize_item({"path": item, "media_type": None, "duration_sec": None}))
+
         first_items = [
-            f"{idx + 1}:{Path(str((item or {}).get('path') or '')).name}"
-            for idx, item in enumerate(videos[:5])
-            if isinstance(item, dict)
+            f"{idx + 1}:{self._item_label(item)}[{item.get('item_type')}]"
+            for idx, item in enumerate(normalized_items[:5])
         ]
         print(
             "🧩 Playback config summary | "
             f"enabled={enabled} loop_mode={loop_mode} "
-            f"playlist_version={playlist_version} items={len(videos)} "
+            f"playlist_version={playlist_version} items={len(normalized_items)} "
             f"first_items={first_items}"
         )
 
         fallback_playlist = []
         if fallback_media:
             fallback_entries = self.media_manager.sync_playlist_entries(
-                [{"path": fallback_media, "media_type": "image", "duration_sec": None}],
+                [{"path": fallback_media, "media_type": "image", "duration_sec": None, "item_type": "media"}],
                 f"fallback-{fallback_version}",
                 {},
                 progress_callback=None,
@@ -961,13 +993,6 @@ class PlaybackController:
                 self.player.stop()
             return
 
-        normalized_items = []
-        for item in videos:
-            if isinstance(item, dict):
-                normalized_items.append(item)
-            elif item:
-                normalized_items.append({"path": item, "media_type": None, "duration_sec": None})
-
         local_entries = self.media_manager.sync_playlist_entries(
             normalized_items,
             playlist_version,
@@ -976,7 +1001,7 @@ class PlaybackController:
         )
         if local_entries:
             with self._lock:
-                self._playlist_entries = local_entries
+                self._playlist_entries = [self._normalize_item(entry) for entry in local_entries]
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
@@ -988,7 +1013,7 @@ class PlaybackController:
         fallback = self.media_manager.load_last_successful_playlist_entries()
         if fallback:
             with self._lock:
-                self._playlist_entries = fallback
+                self._playlist_entries = [self._normalize_item(entry) for entry in fallback]
                 self._sync_in_progress = False
             if was_fallback_only_mode:
                 self.player.stop()
@@ -1027,7 +1052,7 @@ class PlaybackController:
         try:
             while self._running:
                 with self._lock:
-                    playlist_entries = self._effective_playlist(list(self._playlist_entries))
+                    playlist_entries = [self._normalize_item(entry) for entry in self._effective_playlist(list(self._playlist_entries))]
                     sync_in_progress = self._sync_in_progress
                     loop_mode = self._loop_mode
 
@@ -1051,10 +1076,10 @@ class PlaybackController:
                 runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
 
                 if loop_mode == "sequential":
-                    playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries]
+                    playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries if entry.get("item_type") != "widget"]
                     playlist_paths = [path for path in playlist_paths if path]
                     if self._can_use_mpv_playlist_mode(playlist_entries) and self.player.can_play_with_mpv_playlist(playlist_paths):
-                        self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist"}
+                        self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist", "item_type": "media", "display_name": "MPV Playlist"}
                         self._active_item_started_at = time.monotonic()
                         ok = self.player.play_mpv_playlist_blocking(playlist_paths)
                         self._active_item = None
@@ -1080,7 +1105,7 @@ class PlaybackController:
                     item = next((x for x in playlist_entries if x.get("local_path") == target_path), playlist_entries[0])
                     print(
                         "🎲 Random seçim | "
-                        f"pos={pos}/{len(order)} media={Path(str(target_path)).name}"
+                        f"pos={pos}/{len(order)} content={self._item_label(item)}"
                     )
                 else:
                     index = int(runtime_state.get("index") or 0) % len(playlist_entries)
@@ -1088,39 +1113,51 @@ class PlaybackController:
                     print(
                         "▶️ Sequential seçim | "
                         f"index={index}/{len(playlist_entries)} "
-                        f"media={Path(str(item.get('local_path') or '')).name}"
+                        f"content={self._item_label(item)}"
                     )
 
+                item_type = str(item.get("item_type") or "media").strip().lower()
                 media_path = str(item.get("local_path") or "")
                 if not media_path:
                     time.sleep(0.2)
                     continue
 
                 duration_sec = item.get("duration_sec")
-                image_duration_sec = None
-                if self.player.is_image(media_path):
-                    if isinstance(duration_sec, int) and duration_sec > 0:
-                        image_duration_sec = duration_sec
-                    elif len(playlist_entries) == 1:
-                        image_duration_sec = self.player.static_image_duration_sec
-
                 resume_sec = float(runtime_state.get("resume_sec") or 0)
                 self._active_item = item
                 started_at = time.monotonic()
                 self._active_item_started_at = started_at
-                ok = self.player.play_blocking(
-                    media_path,
-                    image_duration_sec=image_duration_sec,
-                    start_position_sec=resume_sec if resume_sec > 0 and self.player._is_video(media_path) else None,
-                )
-                interrupted = self.player.last_play_was_interrupted()
+
+                if item_type == "widget":
+                    widget_duration_sec = self._resolve_widget_duration_sec(item)
+                    if not (isinstance(duration_sec, int) and duration_sec > 0):
+                        print(
+                            f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
+                        )
+                    ok = self.player.play_widget_blocking(media_path, duration_sec=widget_duration_sec)
+                    interrupted = self.player.last_play_was_interrupted()
+                else:
+                    image_duration_sec = None
+                    if self.player.is_image(media_path):
+                        if isinstance(duration_sec, int) and duration_sec > 0:
+                            image_duration_sec = duration_sec
+                        elif len(playlist_entries) == 1:
+                            image_duration_sec = self.player.static_image_duration_sec
+
+                    ok = self.player.play_blocking(
+                        media_path,
+                        image_duration_sec=image_duration_sec,
+                        start_position_sec=resume_sec if resume_sec > 0 and self.player._is_video(media_path) else None,
+                    )
+                    interrupted = self.player.last_play_was_interrupted()
+
                 self._active_item = None
                 self._active_item_started_at = None
 
                 if not ok:
-                    print(f"⚠️ bozuk/oynatılamayan medya atlandı: {media_path}")
+                    print(f"⚠️ bozuk/oynatılamayan içerik atlandı: {self._item_label(item)}")
 
-                if interrupted and self.player._is_video(media_path):
+                if interrupted and item_type != "widget" and self.player._is_video(media_path):
                     elapsed = max(0.0, time.monotonic() - started_at)
                     runtime_state["resume_sec"] = resume_sec + elapsed
                 else:
@@ -1142,6 +1179,9 @@ class PlaybackController:
             item = dict(self._active_item) if isinstance(self._active_item, dict) else None
         if not item:
             return ""
+        label = self._item_label(item)
+        if label:
+            return label
         media_path = str(item.get("local_path") or "").strip()
         return Path(media_path).name if media_path else ""
 

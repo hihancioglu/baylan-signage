@@ -226,6 +226,12 @@ class MediaManager:
         safe_key = self._sha256_text(cache_key)[:20]
         return self.media_store_root / f"{safe_key}{ext}"
 
+    @staticmethod
+    def _normalize_item_type(raw_item: dict | None) -> str:
+        item = raw_item or {}
+        item_type = str(item.get("item_type") or item.get("media_type") or "").strip().lower()
+        return item_type or "media"
+
     def sync_playlist(
         self,
         playlist_items: list[str],
@@ -260,8 +266,13 @@ class MediaManager:
         for raw_item in playlist_items:
             source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
             normalized_source = self._normalize_source(source)
+            item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
+            widget_requires_download = bool((raw_item or {}).get("widget_requires_download")) if isinstance(raw_item, dict) else False
             signature = media_signatures.get(source) or media_signatures.get(normalized_source)
-            if self._is_url(normalized_source):
+            should_download = self._is_url(normalized_source) and (
+                item_type != "widget" or widget_requires_download
+            )
+            if should_download:
                 target = self._url_cache_target(normalized_source, signature)
                 if not target.exists():
                     downloadable_items.append(normalized_source)
@@ -291,11 +302,19 @@ class MediaManager:
             source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
             duration_sec = raw_item.get("duration_sec") if isinstance(raw_item, dict) else None
             media_type = raw_item.get("media_type") if isinstance(raw_item, dict) else None
+            item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
+            widget_requires_download = bool((raw_item or {}).get("widget_requires_download")) if isinstance(raw_item, dict) else False
+            display_name = (
+                raw_item.get("title") or raw_item.get("name") or raw_item.get("display_name")
+            ) if isinstance(raw_item, dict) else None
             normalized_source = self._normalize_source(source)
             signature = media_signatures.get(source) or media_signatures.get(normalized_source)
+            should_download = self._is_url(normalized_source) and (
+                item_type != "widget" or widget_requires_download
+            )
 
             try:
-                if self._is_url(normalized_source):
+                if should_download:
                     target = self._url_cache_target(normalized_source, signature)
                     if not target.exists():
                         report_progress("downloading", normalized_source)
@@ -311,6 +330,9 @@ class MediaManager:
                         "local_path": str(target),
                         "duration_sec": duration_sec,
                         "media_type": media_type,
+                        "item_type": item_type,
+                        "display_name": display_name,
+                        "widget_requires_download": widget_requires_download,
                     }
                     local_entries.append(local_entry)
                     manifest.append(
@@ -321,6 +343,33 @@ class MediaManager:
                             "signature_token": signature,
                             "duration_sec": duration_sec,
                             "media_type": media_type,
+                            "item_type": item_type,
+                            "display_name": display_name,
+                            "widget_requires_download": widget_requires_download,
+                        }
+                    )
+                elif self._is_url(normalized_source):
+                    local_entry = {
+                        "source": normalized_source,
+                        "local_path": normalized_source,
+                        "duration_sec": duration_sec,
+                        "media_type": media_type,
+                        "item_type": item_type,
+                        "display_name": display_name,
+                        "widget_requires_download": widget_requires_download,
+                    }
+                    local_entries.append(local_entry)
+                    manifest.append(
+                        {
+                            "source": normalized_source,
+                            "local_path": normalized_source,
+                            "checksum": None,
+                            "signature": signature,
+                            "duration_sec": duration_sec,
+                            "media_type": media_type,
+                            "item_type": item_type,
+                            "display_name": display_name,
+                            "widget_requires_download": widget_requires_download,
                         }
                     )
                 else:
@@ -335,6 +384,9 @@ class MediaManager:
                         "local_path": str(source_path),
                         "duration_sec": duration_sec,
                         "media_type": media_type,
+                        "item_type": item_type,
+                        "display_name": display_name,
+                        "widget_requires_download": widget_requires_download,
                     }
                     local_entries.append(local_entry)
                     manifest.append(
@@ -345,6 +397,9 @@ class MediaManager:
                             "signature": signature,
                             "duration_sec": duration_sec,
                             "media_type": media_type,
+                            "item_type": item_type,
+                            "display_name": display_name,
+                            "widget_requires_download": widget_requires_download,
                         }
                     )
             except Exception as exc:
@@ -386,6 +441,20 @@ class MediaManager:
                         "local_path": local_path,
                         "duration_sec": (entry or {}).get("duration_sec"),
                         "media_type": (entry or {}).get("media_type"),
+                        "item_type": (entry or {}).get("item_type"),
+                        "display_name": (entry or {}).get("display_name"),
+                        "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
+                    }
+                )
+            elif str((entry or {}).get("item_type") or "").strip().lower() == "widget":
+                existing_entries.append(
+                    {
+                        "local_path": local_path,
+                        "duration_sec": (entry or {}).get("duration_sec"),
+                        "media_type": (entry or {}).get("media_type"),
+                        "item_type": "widget",
+                        "display_name": (entry or {}).get("display_name"),
+                        "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
                     }
                 )
         return existing_entries
