@@ -165,6 +165,31 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             self.assertFalse(player.play_blocking("/tmp/slides.json", image_duration_sec=5))
         self.assertEqual(popen.call_count, 1)
 
+    def test_build_widget_command_prefers_python_viewer_for_url(self):
+        player = self._build_player()
+
+        with patch.object(player, "_should_use_python_widget_viewer", return_value=True), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=["python", "client/widget_viewer.py", "https://example.com"],
+        ):
+            command = player._build_widget_command("https://example.com")
+
+        self.assertEqual(command, ["python", "client/widget_viewer.py", "https://example.com"])
+
+    def test_should_use_python_widget_viewer_requires_url_and_runtime_flags(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+        player._python_widget_viewer_runtime_enabled = True
+
+        with patch.object(player, "_prefer_python_widget_viewer", return_value=True):
+            self.assertTrue(player._should_use_python_widget_viewer("https://example.com"))
+            self.assertFalse(player._should_use_python_widget_viewer("C:/tmp/file.html"))
+
+        player._python_widget_viewer_runtime_enabled = False
+        with patch.object(player, "_prefer_python_widget_viewer", return_value=True):
+            self.assertFalse(player._should_use_python_widget_viewer("https://example.com"))
+
     def test_build_widget_command_uses_windows_kiosk_browser_for_url(self):
         player = self._build_player()
 
