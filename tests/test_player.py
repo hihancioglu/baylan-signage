@@ -220,6 +220,19 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         process.terminate.assert_called_once()
 
+
+    def test_normalize_widget_source_adds_https_scheme_for_bare_hostname(self):
+        player = self._build_player()
+
+        self.assertEqual(player._normalize_widget_source("example.com/dashboard"), "https://example.com/dashboard")
+
+    def test_build_widget_layout_payload_normalizes_widget_url(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload("example.com/dashboard")
+
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
+
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
         config = {
