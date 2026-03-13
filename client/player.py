@@ -408,11 +408,21 @@ class BorderlessFullscreenPlayer:
 
         return None
 
-    def _wait_widget_until_stop(self, process: subprocess.Popen) -> bool:
+    def _wait_widget_until_stop(
+        self,
+        process: subprocess.Popen,
+        max_duration_sec: int | None = None,
+    ) -> bool:
+        deadline = None
+        if max_duration_sec is not None:
+            deadline = time.monotonic() + max(1, int(max_duration_sec))
+
         while True:
             if self._stop_requested:
                 break
             if process.poll() is not None:
+                break
+            if deadline is not None and time.monotonic() >= deadline:
                 break
             time.sleep(0.2)
 
@@ -449,28 +459,10 @@ class BorderlessFullscreenPlayer:
             process = subprocess.Popen(command)
             self._widget_process = process
 
-            if self._is_widget_url(source):
-                result = self._wait_widget_until_stop(process)
-                return result
-
-            deadline = time.monotonic() + max(1, int(duration_sec))
-            while time.monotonic() < deadline:
-                if self._stop_requested:
-                    break
-                if process.poll() is not None:
-                    break
-                time.sleep(0.2)
-
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-
-            interrupted = self._stop_requested
-            self._last_interrupted = interrupted
-            return (process.returncode in (0, None)) or interrupted
+            return self._wait_widget_until_stop(
+                process,
+                max_duration_sec=duration_sec,
+            )
         except Exception as exc:
             self._last_interrupted = False
             if using_python_widget_viewer:
