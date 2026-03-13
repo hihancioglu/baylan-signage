@@ -123,15 +123,32 @@ def _run_agent_fallback() -> int:
 
     if agent_main is None and getattr(sys, "frozen", False):
         executable_dir = Path(sys.executable).resolve().parent
-        sidecar = executable_dir / "client.py"
-        if sidecar.exists():
-            env = dict(os.environ)
-            env.setdefault("BAYLAN_IMAGE_VIEWER_FALLBACK", "1")
+        viewer_executable = Path(sys.executable).resolve()
+        env = dict(os.environ)
+        env.setdefault("BAYLAN_IMAGE_VIEWER_FALLBACK", "1")
+
+        fallback_commands: list[list[str]] = []
+        sidecar_client_py = executable_dir / "client.py"
+        if sidecar_client_py.exists():
+            fallback_commands.append([sys.executable, str(sidecar_client_py)])
+
+        for candidate_name in (
+            "BaylanSignageAgent.exe",
+            "agent.exe",
+            "BaylanSignageAgent",
+            "agent",
+        ):
+            candidate = executable_dir / candidate_name
+            if not candidate.exists() or candidate.resolve() == viewer_executable:
+                continue
+            fallback_commands.append([str(candidate)])
+
+        for command in fallback_commands:
             try:
-                _debug_log(f"sidecar client.py çalıştırılıyor: {sidecar}")
-                return subprocess.call([sys.executable, str(sidecar)], env=env)
+                _debug_log(f"sidecar fallback çalıştırılıyor: {command}")
+                return subprocess.call(command, env=env)
             except Exception:
-                _debug_log(f"sidecar çağrısı başarısız: {traceback.format_exc().strip()}")
+                _debug_log(f"sidecar çağrısı başarısız ({command}): {traceback.format_exc().strip()}")
 
     try:
         run_agent = agent_main
