@@ -1939,6 +1939,10 @@ def run_state_cycle():
         return_to_erp_window()
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
+    if current_state == ClientState.ACTIVE:
+        playback.player.stop_widget_engine()
+        playback._active_widget_signature = None
+
     return idle_sec
 
 
