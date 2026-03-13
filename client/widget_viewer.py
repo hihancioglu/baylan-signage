@@ -41,7 +41,7 @@ def _viewer_backend_order() -> list[str]:
 def _gui_candidates() -> list[str | None]:
     configured = os.getenv(
         "PYWEBVIEW_GUI_PRIORITY",
-        "edgechromium,cef,qt,gtk,winforms,mshtml",
+        "cef,edgechromium,qt,gtk,winforms,mshtml",
     )
     candidates: list[str | None] = []
 
