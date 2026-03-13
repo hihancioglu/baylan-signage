@@ -13,6 +13,15 @@ docker compose up -d --build
 - [Client Dağıtım Pipeline'ı (Windows)](docs_client_deployment_pipeline.md)
 
 
+## Client State Transition Log Varsayılanı
+
+`client/client.py` içinde `STATE_LOG_PATH` verilmezse varsayılan yol:
+
+- Windows: `C:\ProgramData\BaylanSignage\state_transitions.jsonl`
+- Diğer ortamlar: runtime tabanında `state_transitions.jsonl`
+
+İsterseniz `STATE_LOG_PATH` ile özel bir dosya yolu verebilirsiniz.
+
 ## Panel Active Directory Girişi
 Panel erişimi için AD tabanlı oturum açma eklendi. Aşağıdaki ortam değişkenlerini ayarlayın:
 

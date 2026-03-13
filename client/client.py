@@ -59,6 +59,17 @@ def _resolve_runtime_path(path_value: str) -> Path:
         return candidate
     return RUNTIME_BASE_DIR / candidate
 
+
+def _resolve_windows_writable_path(path_value: str | None, default_relative_path: str) -> Path:
+    if path_value and path_value.strip():
+        return _resolve_runtime_path(path_value.strip())
+
+    if platform.system().lower().startswith("win"):
+        program_data_root = Path(os.getenv("ProgramData") or r"C:\ProgramData")
+        return program_data_root / "BaylanSignage" / default_relative_path
+
+    return _resolve_runtime_path(default_relative_path)
+
 SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
@@ -68,7 +79,7 @@ STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
-STATE_LOG_PATH = str(_resolve_runtime_path(os.getenv("STATE_LOG_PATH", "client/state_transitions.jsonl")))
+STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
 DEBUG_LOG_PATH = _resolve_runtime_path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
@@ -1719,7 +1730,6 @@ def _handle_command(command):
 
 
 def log_state_transition(from_state: ClientState, to_state: ClientState, reason: str):
-    os.makedirs(os.path.dirname(STATE_LOG_PATH), exist_ok=True)
     line = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "hostname": hostname,
@@ -1727,8 +1737,17 @@ def log_state_transition(from_state: ClientState, to_state: ClientState, reason:
         "to": to_state.value,
         "reason": reason,
     }
-    with open(STATE_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+    try:
+        STATE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with STATE_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logging.debug(
+            "Unable to append state transition log path=%s error=%s",
+            STATE_LOG_PATH,
+            exc,
+            exc_info=True,
+        )
 
 
 def set_state(next_state: ClientState, reason: str):

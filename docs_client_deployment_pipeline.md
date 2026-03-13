@@ -147,6 +147,7 @@ Sertifika yönetimi:
 ### 3.1 Loglama standardı
 
 - Uygulama logları: `C:\ProgramData\Baylan\SignageAgent\logs\agent.log`
+- State transition log (client varsayılan): `C:\ProgramData\BaylanSignage\state_transitions.jsonl` (`STATE_LOG_PATH` ile override edilebilir)
 - Wrapper logları: NSSM stdout/stderr veya WinSW rolling log
 - Event Log: kritik hatalar için `Application` kanalına yazım
 
