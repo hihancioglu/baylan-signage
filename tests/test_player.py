@@ -1,6 +1,7 @@
 import threading
 import unittest
 import tempfile
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -193,6 +194,26 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertFalse(result)
         self.assertTrue(player._python_widget_viewer_runtime_enabled)
+
+    def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        process.pid = 4242
+        process.wait.side_effect = [subprocess.TimeoutExpired(cmd="widget", timeout=2), None]
+        player._widget_process = process
+
+        with patch("client.player.os.name", "nt"), patch("subprocess.run") as run_mock:
+            player.stop()
+
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+        run_mock.assert_called_once_with(
+            ["taskkill", "/PID", "4242", "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
 
 
 
