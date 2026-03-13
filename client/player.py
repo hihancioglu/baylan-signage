@@ -22,6 +22,11 @@ def _safe_print(message: str) -> None:
         pass
 
 
+def _runtime_resource_path(*relative_parts: str) -> Path:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_dir.joinpath(*relative_parts)
+
+
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
@@ -163,7 +168,7 @@ class BorderlessFullscreenPlayer:
         return True
 
     def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
-        viewer_path = Path(__file__).with_name("widget_viewer.py")
+        viewer_path = _runtime_resource_path("widget_viewer.py")
         frozen_viewer = self._find_frozen_widget_viewer_executable()
         if frozen_viewer:
             return [frozen_viewer, widget_source]
@@ -183,7 +188,7 @@ class BorderlessFullscreenPlayer:
     def _is_python_widget_command(self, command: list[str]) -> bool:
         if not command:
             return False
-        script_path = str(Path(__file__).with_name("widget_viewer.py"))
+        script_path = str(_runtime_resource_path("widget_viewer.py"))
         if len(command) >= 2 and command[1] == script_path:
             return True
         frozen_viewer = self._find_frozen_widget_viewer_executable()
@@ -500,7 +505,7 @@ class BorderlessFullscreenPlayer:
         if payload is None:
             return source
 
-        engine_path = Path(__file__).with_name("widget_engine.html")
+        engine_path = _runtime_resource_path("widget_engine.html")
         engine_uri = engine_path.resolve().as_uri()
         encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
         return f"{engine_uri}?config_b64={encoded}"
@@ -510,7 +515,7 @@ class BorderlessFullscreenPlayer:
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
 
     def _widget_runtime_engine_source(self) -> str:
-        return Path(__file__).with_name("widget_engine.html").resolve().as_uri()
+        return _runtime_resource_path("widget_engine.html").resolve().as_uri()
 
     def start_widget_engine_if_needed(self) -> bool:
         if not self._widget_runtime_controller_enabled():

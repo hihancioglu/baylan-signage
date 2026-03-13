@@ -40,6 +40,7 @@ $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
     --onefile `
     --noconsole `
     --name $Name `
+    --add-data "client/widget_engine.html;client" `
     --paths $projectRoot `
     --paths $clientScriptDir `
     # Keep both package-qualified (client.*) and bare module names for compatibility:
@@ -75,6 +76,7 @@ if (-not $SkipViewerBuild) {
         --onefile `
         --noconsole `
         --name "widget_viewer" `
+        --add-data "client/widget_engine.html;." `
         --distpath $OutputDir `
         "client/widget_viewer.py"
 

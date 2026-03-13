@@ -81,4 +81,9 @@ Aktivasyon için:
 - `dist` klasöründen en az şu iki dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `widget_viewer.exe`.
 - Widget viewer için ayrıca `cefpython3` veya `pywebview` bağımlılıklarından en az biri kurulu olmalıdır.
 
+`WIDGET_SINGLE_ENGINE=1` paketleme notu:
+- Agent build artık `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.
+- Sidecar `widget_viewer.exe` build'i aynı dosyayı executable yanında erişilebilir olacak şekilde paketler; tek-engine akışı viewer tarafında da çalışır.
+- Bu nedenle dağıtımda `widget_engine.html` dosyasını ayrıca kopyalamanız gerekmez (build script kullanıldığı sürece).
+
 Viewer build'ini kapatmak isterseniz `-SkipViewerBuild` parametresini geçebilirsiniz; bu durumda frozen modda Python widget viewer devre dışı kalır.
