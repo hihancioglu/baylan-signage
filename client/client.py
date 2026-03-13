@@ -809,6 +809,7 @@ class PlaybackController:
         self._playback_state_lock = threading.Lock()
         self._playback_state = self._sanitize_playback_state(self.media_manager.load_playback_state())
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
+        self._active_widget_signature: str | None = None
 
     @staticmethod
     def _sanitize_playback_state(raw_state: dict) -> dict:
@@ -1175,13 +1176,26 @@ class PlaybackController:
                     if widget_config.get("widgets") is None:
                         widget_config = None
 
-                    ok = self.player.play_widget_blocking(
-                        widget_url,
-                        duration_sec=widget_duration_sec,
-                        widget_config=widget_config,
-                    )
+                    widget_signature = hashlib.sha256(
+                        json.dumps(
+                            {"widget_url": widget_url, "widget_config": widget_config},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ).encode("utf-8")
+                    ).hexdigest()
+
+                    if widget_signature != self._active_widget_signature:
+                        ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
+                        self._active_widget_signature = widget_signature if ok else None
+                    else:
+                        ok = True
+
+                    if ok:
+                        ok = self.player.wait_widget_duration(widget_duration_sec)
                     interrupted = self.player.last_play_was_interrupted()
                 else:
+                    self._active_widget_signature = None
+                    self.player.stop_widget_engine()
                     image_duration_sec = None
                     if self.player.is_image(media_path):
                         if isinstance(duration_sec, int) and duration_sec > 0:

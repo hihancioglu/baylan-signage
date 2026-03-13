@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from urllib.parse import parse_qs, unquote, urlparse
 import threading
 import unittest
@@ -173,7 +174,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.poll.side_effect = [None, None, None]
         process.returncode = 0
 
-        with patch.object(player, "_build_widget_command", return_value=["msedge", "--kiosk", "https://example.com"]), patch(
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(player, "_build_widget_command", return_value=["msedge", "--kiosk", "https://example.com"]), patch(
             "subprocess.Popen", return_value=process
         ), patch("time.sleep", side_effect=lambda *_args, **_kwargs: setattr(player, "_stop_requested", True)):
             result = player.play_widget_blocking("https://example.com", duration_sec=1)
@@ -206,7 +207,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         monotonic_values = iter([100.0, 100.2, 100.6, 101.1])
 
-        with patch.object(
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
             player,
             "_build_widget_command",
             return_value=["msedge", "--kiosk", "https://example.com"],
