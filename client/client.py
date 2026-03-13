@@ -44,10 +44,16 @@ builtins.print(
 )
 
 if __package__ in {None, ""}:
-    from idle import get_idle_seconds
-    from media_manager import MediaManager
-    from player import BorderlessFullscreenPlayer
-    from state_machine import ClientState
+    if getattr(sys, "frozen", False):
+        from client.idle import get_idle_seconds
+        from client.media_manager import MediaManager
+        from client.player import BorderlessFullscreenPlayer
+        from client.state_machine import ClientState
+    else:
+        from idle import get_idle_seconds
+        from media_manager import MediaManager
+        from player import BorderlessFullscreenPlayer
+        from state_machine import ClientState
 else:
     from .idle import get_idle_seconds
     from .media_manager import MediaManager
