@@ -24,25 +24,35 @@ from logging.handlers import TimedRotatingFileHandler, WatchedFileHandler
 
 import socketio
 
-CURRENT_DIR = Path(__file__).resolve().parent
-if getattr(sys, "frozen", False):
-    CURRENT_DIR = Path(sys.executable).parent
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.insert(0, str(CURRENT_DIR))
+def _module_base() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
 
-CLIENT_PACKAGE_PARENT = CURRENT_DIR.parent
+
+BASE_DIR = _module_base()
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+CLIENT_PACKAGE_PARENT = BASE_DIR.parent
 if str(CLIENT_PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(CLIENT_PACKAGE_PARENT))
 
 builtins.print(
     f"[startup] import-resolution mode={'frozen' if getattr(sys, 'frozen', False) else 'source'} "
-    f"added_path={CURRENT_DIR}"
+    f"added_path={BASE_DIR}"
 )
 
-from idle import get_idle_seconds
-from media_manager import MediaManager
-from player import BorderlessFullscreenPlayer
-from state_machine import ClientState
+if __package__ in {None, ""}:
+    from idle import get_idle_seconds
+    from media_manager import MediaManager
+    from player import BorderlessFullscreenPlayer
+    from state_machine import ClientState
+else:
+    from .idle import get_idle_seconds
+    from .media_manager import MediaManager
+    from .player import BorderlessFullscreenPlayer
+    from .state_machine import ClientState
 
 
 def _runtime_base_dir() -> Path:
