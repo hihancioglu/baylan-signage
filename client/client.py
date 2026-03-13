@@ -153,6 +153,16 @@ def get_runtime_updater_version() -> str:
 def print(*args, **kwargs):
     try:
         builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        stream = kwargs.get("file", sys.stdout)
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+
+        def _safe_text(value):
+            text = str(value)
+            return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+        safe_args = tuple(_safe_text(arg) for arg in args)
+        builtins.print(*safe_args, **kwargs)
     except OSError as exc:
         if getattr(exc, "winerror", None) == 6 or getattr(exc, "errno", None) == 6:
             return
