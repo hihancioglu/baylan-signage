@@ -72,3 +72,13 @@ Ortam değişkenleri:
 Notlar:
 - CEF backend, kiosk için Chrome uyumlu switch'lerle (`--kiosk`, `--disable-translate`, `--disable-infobars`, `--disable-session-crashed-bubble`, `--disable-features=TranslateUI`) başlatılır.
 - Backend başlatılamazsa diğer backend denenir; Python gösterici tamamen kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
+
+### Frozen build'de image/widget viewer uyarılarını aktif etme
+`client/player.py` içindeki şu uyarılar, uygulama frozen (`agent.exe`) modda çalışırken aynı klasörde `image_viewer(.exe)` ve `widget_viewer(.exe)` bulunamadığında görünür.
+
+Aktivasyon için:
+- `client/build_agent.ps1` script'ini **varsayılan ayarlarla** çalıştırın (yeni davranışla sidecar viewer exe'leri de üretir).
+- `dist` klasöründen en az şu üç dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `image_viewer.exe`, `widget_viewer.exe`.
+- Widget viewer için ayrıca `cefpython3` veya `pywebview` bağımlılıklarından en az biri kurulu olmalıdır.
+
+Viewer build'lerini kapatmak isterseniz `-SkipViewerBuild` parametresini geçebilirsiniz; bu durumda frozen modda viewer özellikleri bilerek pasif kalır.
