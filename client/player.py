@@ -20,7 +20,6 @@ def _safe_print(message: str) -> None:
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
-    SLIDESHOW_EXTENSIONS = {".json"}
     VLC_VIDEO_TEMPLATE = (
         "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
         "--no-video-title-show --no-osd --no-mouse-events --no-keyboard-events "
@@ -41,7 +40,6 @@ class BorderlessFullscreenPlayer:
         "{player} " + MPV_COMMON_FLAGS + " "
         "--image-display-duration={duration} {media}"
     )
-    PYTHON_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".json"}
     _WINDOWS_BROWSER_KIOSK_FLAGS = [
         "--kiosk",
         "--edge-kiosk-type=fullscreen",
@@ -86,8 +84,6 @@ class BorderlessFullscreenPlayer:
         self._process = None
         self._stop_requested = False
         self._widget_process = None
-        self._python_image_viewer_supported = self._detect_python_image_viewer_support()
-        self._python_image_viewer_runtime_enabled = True
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
         self._last_interrupted = False
@@ -98,7 +94,7 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
-        return os.getenv("WIDGET_USE_PYTHON_VIEWER", "0").strip().lower() in {"1", "true", "yes"}
+        return os.getenv("WIDGET_USE_PYTHON_VIEWER", "1").strip().lower() in {"1", "true", "yes"}
 
     @staticmethod
     def _find_frozen_widget_viewer_executable() -> str | None:
@@ -179,54 +175,11 @@ class BorderlessFullscreenPlayer:
 
 
     @staticmethod
-    def _find_frozen_image_viewer_executable() -> str | None:
-        if not getattr(sys, "frozen", False):
-            return None
-
-        executable_dir = Path(sys.executable).resolve().parent
-        for candidate in ("image_viewer.exe", "image_viewer"):
-            viewer_path = executable_dir / candidate
-            if viewer_path.exists() and viewer_path.is_file():
-                return str(viewer_path)
-        return None
-
-    def _detect_python_image_viewer_support(self) -> bool:
-        if os.getenv("PYTHON_IMAGE_VIEWER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
-            return False
-
-        if getattr(sys, "frozen", False) and self._find_frozen_image_viewer_executable() is None:
-            _safe_print(
-                "⚠️ Python image viewer pasif: frozen build içinde bağımsız image_viewer executable bulunamadı"
-            )
-            return False
-
-        if os.name != "nt" and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
-            _safe_print("⚠️ Python image viewer pasif: DISPLAY/WAYLAND_DISPLAY bulunamadı")
-            return False
-
-        try:
-            import pygame
-
-            pygame.display.init()
-            pygame.display.quit()
-            return True
-        except Exception as exc:
-            _safe_print(f"⚠️ Python image viewer pasif: pygame kullanılamıyor ({exc})")
-            return False
-
-    @staticmethod
     def _is_vlc_command(command: list[str]) -> bool:
         if not command:
             return False
         executable_name = Path(BorderlessFullscreenPlayer._strip_outer_quotes(command[0])).name.lower()
         return "vlc" in executable_name
-
-    def _should_use_python_image_viewer(self, media_path: str) -> bool:
-        if not self._python_image_viewer_supported:
-            return False
-        if not self._python_image_viewer_runtime_enabled:
-            return False
-        return Path(media_path).suffix.lower() in self.PYTHON_IMAGE_EXTENSIONS
 
     def _build_mpv_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
@@ -269,14 +222,6 @@ class BorderlessFullscreenPlayer:
         except Exception as exc:
             _safe_print(f"⚠️ komut ayrıştırılamadı, basit ayrıştırma kullanılacak ({exc})")
             return command_text.split()
-
-    def _build_python_image_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
-        duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
-        viewer_path = Path(__file__).with_name("image_viewer.py")
-        frozen_viewer = self._find_frozen_image_viewer_executable()
-        if frozen_viewer:
-            return [frozen_viewer, media_path, str(duration)]
-        return [sys.executable, str(viewer_path), media_path, str(duration)]
 
     @staticmethod
     def _is_mpv_command(command: list[str]) -> bool:
@@ -376,11 +321,7 @@ class BorderlessFullscreenPlayer:
 
     def supports_media(self, media_path: str) -> bool:
         ext = Path(media_path).suffix.lower()
-        return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS or ext in self.SLIDESHOW_EXTENSIONS
-
-    @staticmethod
-    def _is_slideshow_manifest(media_path: str) -> bool:
-        return Path(media_path).suffix.lower() in BorderlessFullscreenPlayer.SLIDESHOW_EXTENSIONS
+        return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS
 
 
     def _build_widget_command(self, widget_source: str) -> list[str]:
@@ -584,14 +525,6 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
             return False
 
-        if self._is_slideshow_manifest(media_path) and not self._should_use_python_image_viewer(media_path):
-            self._last_interrupted = False
-            _safe_print(
-                "⚠️ slayt manifesti için Python image viewer kullanılamıyor, medya atlandı: "
-                f"{media_path}"
-            )
-            return False
-
         self.stop()
 
         process = None
@@ -604,21 +537,13 @@ class BorderlessFullscreenPlayer:
                     command.insert(1, f"--start-time={max(0, float(start_position_sec)):.3f}")
                 elif "mpv" in exe_name:
                     command.insert(1, f"--start={max(0, float(start_position_sec)):.3f}")
-            used_python_image_viewer = False
-            if self._should_use_python_image_viewer(media_path):
-                command = self._build_python_image_command(
-                    media_path,
-                    image_duration_sec=image_duration_sec,
-                )
-                used_python_image_viewer = True
-            else:
-                command = self._prefer_non_vlc_image_command(
-                    media_path,
-                    command,
-                    image_duration_sec=image_duration_sec,
-                )
-                if not command:
-                    return False
+            command = self._prefer_non_vlc_image_command(
+                media_path,
+                command,
+                image_duration_sec=image_duration_sec,
+            )
+            if not command:
+                return False
 
             if not self._resolve_executable(command):
                 _safe_print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
@@ -628,30 +553,6 @@ class BorderlessFullscreenPlayer:
             process = subprocess.Popen(command)
             self._process = process
             process.wait()
-
-            if process.returncode != 0 and used_python_image_viewer:
-                _safe_print(
-                    "⚠️ Python image viewer başarısız oldu "
-                    f"(exit={process.returncode}, media={media_path}), medya player fallback deneniyor"
-                )
-                self._python_image_viewer_runtime_enabled = False
-                if self._is_slideshow_manifest(media_path):
-                    _safe_print(
-                        "⚠️ slayt manifesti medya player ile oynatılamaz, fallback atlandı"
-                    )
-                    interrupted = self._stop_requested
-                    self._last_interrupted = interrupted
-                    return interrupted
-                fallback_command = self._build_command(media_path, image_duration_sec=image_duration_sec)
-                fallback_command = self._prefer_non_vlc_image_command(
-                    media_path,
-                    fallback_command,
-                    image_duration_sec=image_duration_sec,
-                )
-                if fallback_command and self._resolve_executable(fallback_command):
-                    process = subprocess.Popen(fallback_command)
-                    self._process = process
-                    process.wait()
 
             interrupted = self._stop_requested
             self._last_interrupted = interrupted
@@ -666,9 +567,6 @@ class BorderlessFullscreenPlayer:
 
     def can_play_with_mpv_playlist(self, media_paths: list[str]) -> bool:
         if len(media_paths) < 2:
-            return False
-
-        if any(self._is_slideshow_manifest(path) for path in media_paths):
             return False
 
         for media_path in media_paths:

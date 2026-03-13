@@ -39,20 +39,7 @@ if (!(Test-Path $artifact)) {
 }
 
 if (-not $SkipViewerBuild) {
-    Write-Host "[3/5] Building viewer sidecar executables (image_viewer/widget_viewer)..."
-
-    & $Python -m PyInstaller `
-        --noconfirm `
-        --clean `
-        --onefile `
-        --noconsole `
-        --name "image_viewer" `
-        --distpath $OutputDir `
-        "client/image_viewer.py"
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Image viewer build failed with exit code $LASTEXITCODE"
-    }
+    Write-Host "[3/5] Building widget viewer sidecar executable..."
 
     & $Python -m PyInstaller `
         --noconfirm `
@@ -99,6 +86,6 @@ if (-not $markerEmbedded) {
 
 Write-Host "[5/5] Client build completed: $artifact"
 if (-not $SkipViewerBuild) {
-    Write-Host "Viewer artifacts: $(Join-Path $OutputDir 'image_viewer.exe'), $(Join-Path $OutputDir 'widget_viewer.exe')"
+    Write-Host "Viewer artifact: $(Join-Path $OutputDir 'widget_viewer.exe')"
 }
 Write-Host "Embedded build marker: $buildVersion"
