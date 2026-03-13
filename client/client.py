@@ -39,10 +39,10 @@ builtins.print(
     f"added_path={CURRENT_DIR}"
 )
 
-from client.idle import get_idle_seconds
-from client.media_manager import MediaManager
-from client.player import BorderlessFullscreenPlayer
-from client.state_machine import ClientState
+from idle import get_idle_seconds
+from media_manager import MediaManager
+from player import BorderlessFullscreenPlayer
+from state_machine import ClientState
 
 
 def _runtime_base_dir() -> Path:
