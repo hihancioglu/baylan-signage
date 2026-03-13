@@ -33,17 +33,19 @@ if (-not $SkipInstallPyInstaller) {
 
 Write-Host "[2/5] Building client executable..."
 $clientScriptDir = Split-Path -Parent $ClientScript
+$projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 & $Python -m PyInstaller `
     --noconfirm `
     --clean `
     --onefile `
     --noconsole `
     --name $Name `
+    --paths $projectRoot `
     --paths $clientScriptDir `
-    --hidden-import idle `
-    --hidden-import media_manager `
-    --hidden-import player `
-    --hidden-import state_machine `
+    --hidden-import client.idle `
+    --hidden-import client.media_manager `
+    --hidden-import client.player `
+    --hidden-import client.state_machine `
     --distpath $OutputDir `
     $ClientScript
 
