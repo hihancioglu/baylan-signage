@@ -11,47 +11,12 @@ from client.player import BorderlessFullscreenPlayer
 
 class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def _build_player(self):
-        with patch.object(
-            BorderlessFullscreenPlayer,
-            "_detect_python_image_viewer_support",
-            return_value=True,
-        ):
-            return BorderlessFullscreenPlayer()
-
-    def test_uses_python_image_viewer_for_png(self):
-        player = self._build_player()
-        with patch.dict("os.environ", {"PYTHON_IMAGE_VIEWER_ENABLED": "1"}, clear=False):
-            self.assertTrue(player._should_use_python_image_viewer("/tmp/a.png"))
-            self.assertTrue(player._should_use_python_image_viewer("/tmp/a.webp"))
-            self.assertTrue(player._should_use_python_image_viewer("/tmp/slides.json"))
-
-    def test_build_python_image_command(self):
-        player = self._build_player()
-        cmd = player._build_python_image_command("/tmp/example.jpg", image_duration_sec=5)
-        self.assertEqual(cmd[-2:], ["/tmp/example.jpg", "5"])
-        self.assertTrue(cmd[0])
-        self.assertTrue(cmd[1].endswith("client/image_viewer.py"))
-
-    def test_disable_python_viewer_after_runtime_failure(self):
-        player = self._build_player()
-        self.assertTrue(player._should_use_python_image_viewer("/tmp/a.jpg"))
-        player._python_image_viewer_runtime_enabled = False
-        self.assertFalse(player._should_use_python_image_viewer("/tmp/a.jpg"))
-
+        return BorderlessFullscreenPlayer()
 
     def test_play_blocking_ignores_stdout_oserror(self):
         player = self._build_player()
         with patch("builtins.print", side_effect=OSError(6, "invalid handle")):
             self.assertFalse(player.play_blocking("/tmp/missing.jpg"))
-
-    def test_supports_slideshow_manifest(self):
-        player = self._build_player()
-        self.assertTrue(player.supports_media("/tmp/slides.json"))
-
-    def test_detects_slideshow_manifest(self):
-        player = self._build_player()
-        self.assertTrue(player._is_slideshow_manifest("/tmp/slides.json"))
-        self.assertFalse(player._is_slideshow_manifest("/tmp/image.jpg"))
 
     def test_build_mpv_video_command_hides_controls_and_sets_black_background(self):
         with patch.dict(
@@ -119,53 +84,6 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             cmd = player._prefer_non_vlc_image_command("/tmp/example.jpg", ["vlc", "/tmp/example.jpg"])
         self.assertEqual(cmd, ["vlc", "/tmp/example.jpg"])
 
-    def test_python_viewer_disabled_without_display(self):
-        with patch.dict("os.environ", {"DISPLAY": "", "WAYLAND_DISPLAY": ""}, clear=False):
-            player = BorderlessFullscreenPlayer()
-        self.assertFalse(player._python_image_viewer_supported)
-
-    def test_build_python_image_command_prefers_frozen_viewer_executable(self):
-        player = self._build_player()
-        with patch("client.player.getattr", return_value=True), patch.object(
-            player,
-            "_find_frozen_image_viewer_executable",
-            return_value="C:/app/image_viewer.exe",
-        ):
-            cmd = player._build_python_image_command("/tmp/example.jpg", image_duration_sec=7)
-        self.assertEqual(cmd, ["C:/app/image_viewer.exe", "/tmp/example.jpg", "7"])
-
-    def test_detect_python_viewer_support_disabled_when_frozen_viewer_missing(self):
-        with patch("client.player.getattr", return_value=True), patch.object(
-            BorderlessFullscreenPlayer,
-            "_find_frozen_image_viewer_executable",
-            return_value=None,
-        ):
-            player = BorderlessFullscreenPlayer()
-        self.assertFalse(player._python_image_viewer_supported)
-
-    def test_skips_slideshow_manifest_when_python_viewer_unavailable(self):
-        player = self._build_player()
-        with patch.object(player, "_should_use_python_image_viewer", return_value=False):
-            self.assertFalse(player.play_blocking("/tmp/slides.json"))
-
-    def test_does_not_fallback_to_media_player_for_slideshow_manifest(self):
-        player = self._build_player()
-        process = unittest.mock.Mock()
-        process.returncode = 1
-        process.wait.return_value = None
-
-        with patch("pathlib.Path.exists", return_value=True), patch.object(
-            player,
-            "_should_use_python_image_viewer",
-            return_value=True,
-        ), patch.object(player, "_build_python_image_command", return_value=["python", "viewer", "x", "5"]), patch.object(
-            player,
-            "_resolve_executable",
-            return_value=True,
-        ), patch("subprocess.Popen", return_value=process) as popen:
-            self.assertFalse(player.play_blocking("/tmp/slides.json", image_duration_sec=5))
-        self.assertEqual(popen.call_count, 1)
-
     def test_build_widget_command_prefers_python_viewer_for_url(self):
         player = self._build_player()
 
@@ -178,12 +96,12 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(command, ["python", "client/widget_viewer.py", "https://example.com"])
 
-    def test_python_widget_viewer_disabled_by_default(self):
+    def test_python_widget_viewer_enabled_by_default(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
-
-        with patch.dict("os.environ", {"WIDGET_USE_PYTHON_VIEWER": "1"}, clear=True):
             self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
+
+        with patch.dict("os.environ", {"WIDGET_USE_PYTHON_VIEWER": "0"}, clear=True):
+            self.assertFalse(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
 
     def test_detect_widget_viewer_support_accepts_cef_backend(self):
         fake_cef_module = ModuleType("cefpython3")

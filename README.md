@@ -63,7 +63,7 @@ Uyarıyı kaldırmak için `active` alanını `false` gönderin.
 Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici vardır (`client/widget_viewer.py`). Gösterici artık hem `cefpython3` (tercihli) hem de `pywebview` backend'lerini destekler.
 
 Ortam değişkenleri:
-- `WIDGET_USE_PYTHON_VIEWER` (`0` varsayılan): `1/true/yes` ise URL widget'larda önce Python gösterici denenir.
+- `WIDGET_USE_PYTHON_VIEWER` (`1` varsayılan): `0/false/no` verilmezse URL widget'larda Python gösterici tercih edilir.
 - `PYTHON_WIDGET_VIEWER_ENABLED` (`1` varsayılan): Python widget göstericiyi global olarak aç/kapatır.
 - `WIDGET_VIEWER_BACKEND` (`auto` varsayılan): `auto`, `cef`, `pywebview`.
 - `WIDGET_SINGLE_ENGINE` (`0` varsayılan): `1/true/yes` ise URL widget doğrudan açılmak yerine `client/widget_engine.html` içine tek Chromium instance mantığıyla `iframe` olarak yüklenir.
@@ -73,12 +73,12 @@ Notlar:
 - CEF backend, kiosk için Chrome uyumlu switch'lerle (`--kiosk`, `--disable-translate`, `--disable-infobars`, `--disable-session-crashed-bubble`, `--disable-features=TranslateUI`) başlatılır.
 - Backend başlatılamazsa diğer backend denenir; Python gösterici tamamen kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
 
-### Frozen build'de image/widget viewer uyarılarını aktif etme
-`client/player.py` içindeki şu uyarılar, uygulama frozen (`agent.exe`) modda çalışırken aynı klasörde `image_viewer(.exe)` ve `widget_viewer(.exe)` bulunamadığında görünür.
+### Frozen build'de widget viewer'ı aktif etme
+`client/player.py` içinde frozen (`agent.exe`) modda Python widget gösterici için aynı klasörde `widget_viewer(.exe)` aranır.
 
 Aktivasyon için:
-- `client/build_agent.ps1` script'ini **varsayılan ayarlarla** çalıştırın (yeni davranışla sidecar viewer exe'leri de üretir).
-- `dist` klasöründen en az şu üç dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `image_viewer.exe`, `widget_viewer.exe`.
+- `client/build_agent.ps1` script'ini **varsayılan ayarlarla** çalıştırın (widget viewer sidecar exe'si üretir).
+- `dist` klasöründen en az şu iki dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `widget_viewer.exe`.
 - Widget viewer için ayrıca `cefpython3` veya `pywebview` bağımlılıklarından en az biri kurulu olmalıdır.
 
-Viewer build'lerini kapatmak isterseniz `-SkipViewerBuild` parametresini geçebilirsiniz; bu durumda frozen modda viewer özellikleri bilerek pasif kalır.
+Viewer build'ini kapatmak isterseniz `-SkipViewerBuild` parametresini geçebilirsiniz; bu durumda frozen modda Python widget viewer devre dışı kalır.
