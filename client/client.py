@@ -177,6 +177,7 @@ def _resolve_debug_log_path() -> Path:
 
 
 ACTIVE_DEBUG_LOG_PATH = _resolve_debug_log_path()
+FAULT_LOG_PATH = ACTIVE_DEBUG_LOG_PATH.with_name(f"{ACTIVE_DEBUG_LOG_PATH.stem}_fault{ACTIVE_DEBUG_LOG_PATH.suffix}")
 INSTANCE_LOCK_PATH = Path(tempfile.gettempdir()) / "baylan-client.lock"
 instance_lock_fd: int | None = None
 
@@ -205,7 +206,7 @@ def setup_debug_logging():
         handlers=handlers,
     )
 
-    fault_log = open(ACTIVE_DEBUG_LOG_PATH, "a", encoding="utf-8")
+    fault_log = open(FAULT_LOG_PATH, "a", encoding="utf-8")
     faulthandler.enable(file=fault_log, all_threads=True)
 
     def _close_fault_log():
