@@ -1,5 +1,6 @@
 import json
 import hashlib
+import importlib
 import logging
 import os
 import platform
@@ -43,22 +44,33 @@ builtins.print(
     f"added_path={BASE_DIR}"
 )
 
-if __package__ in {None, ""}:
-    if getattr(sys, "frozen", False):
-        from client.idle import get_idle_seconds
-        from client.media_manager import MediaManager
-        from client.player import BorderlessFullscreenPlayer
-        from client.state_machine import ClientState
+def _import_client_modules():
+    if __package__ in {None, ""}:
+        module_candidates = (
+            ("idle", "media_manager", "player", "state_machine"),
+            ("client.idle", "client.media_manager", "client.player", "client.state_machine"),
+        )
     else:
-        from idle import get_idle_seconds
-        from media_manager import MediaManager
-        from player import BorderlessFullscreenPlayer
-        from state_machine import ClientState
-else:
-    from .idle import get_idle_seconds
-    from .media_manager import MediaManager
-    from .player import BorderlessFullscreenPlayer
-    from .state_machine import ClientState
+        module_candidates = ((".idle", ".media_manager", ".player", ".state_machine"),)
+
+    last_error: ModuleNotFoundError | None = None
+    for names in module_candidates:
+        try:
+            imported = [importlib.import_module(name, __package__) for name in names]
+            return imported
+        except ModuleNotFoundError as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise ModuleNotFoundError("Unable to import client modules")
+
+
+_idle_module, _media_manager_module, _player_module, _state_machine_module = _import_client_modules()
+get_idle_seconds = _idle_module.get_idle_seconds
+MediaManager = _media_manager_module.MediaManager
+BorderlessFullscreenPlayer = _player_module.BorderlessFullscreenPlayer
+ClientState = _state_machine_module.ClientState
 
 
 def _runtime_base_dir() -> Path:
