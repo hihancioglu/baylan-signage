@@ -1,6 +1,5 @@
 import json
 import hashlib
-import importlib
 import logging
 import os
 import platform
@@ -46,24 +45,27 @@ builtins.print(
 
 def _import_client_modules():
     if __package__ in {None, ""}:
-        module_candidates = (
-            ("idle", "media_manager", "player", "state_machine"),
-            ("client.idle", "client.media_manager", "client.player", "client.state_machine"),
-        )
-    else:
-        module_candidates = ((".idle", ".media_manager", ".player", ".state_machine"),)
-
-    last_error: ModuleNotFoundError | None = None
-    for names in module_candidates:
         try:
-            imported = [importlib.import_module(name, __package__) for name in names]
-            return imported
-        except ModuleNotFoundError as exc:
-            last_error = exc
+            import idle as idle_module
+            import media_manager as media_manager_module
+            import player as player_module
+            import state_machine as state_machine_module
 
-    if last_error:
-        raise last_error
-    raise ModuleNotFoundError("Unable to import client modules")
+            return idle_module, media_manager_module, player_module, state_machine_module
+        except ModuleNotFoundError:
+            from client import idle as idle_module
+            from client import media_manager as media_manager_module
+            from client import player as player_module
+            from client import state_machine as state_machine_module
+
+            return idle_module, media_manager_module, player_module, state_machine_module
+
+    from . import idle as idle_module
+    from . import media_manager as media_manager_module
+    from . import player as player_module
+    from . import state_machine as state_machine_module
+
+    return idle_module, media_manager_module, player_module, state_machine_module
 
 
 _idle_module, _media_manager_module, _player_module, _state_machine_module = _import_client_modules()
