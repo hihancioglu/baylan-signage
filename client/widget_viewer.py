@@ -55,6 +55,11 @@ def _normalize_url(source: str) -> str:
     return f"https://{url}"
 
 
+def _runtime_resource_path(*relative_parts: str) -> Path:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_dir.joinpath(*relative_parts)
+
+
 def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = None) -> dict:
     payload = dict(widget_config) if isinstance(widget_config, dict) else {}
     widgets = payload.get("widgets")
@@ -136,8 +141,7 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
 
     payload = _normalize_widget_payload(widget_config if isinstance(widget_config, dict) else {}, fallback_url=source)
 
-    engine_path = Path(__file__).with_name("widget_engine.html")
-    engine_uri = engine_path.resolve().as_uri()
+    engine_uri = _runtime_resource_path("widget_engine.html").resolve().as_uri()
     encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
     return f"{engine_uri}?config_b64={encoded}"
 
