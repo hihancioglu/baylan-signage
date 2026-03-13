@@ -77,14 +77,25 @@ def _start_with_fallback(webview_module) -> None:
     raise RuntimeError("; ".join(errors))
 
 
-def _build_engine_url(widget_url: str) -> str:
+def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
     single_engine_enabled = os.getenv("WIDGET_SINGLE_ENGINE", "0").strip().lower() in {"1", "true", "yes"}
+    source = str(widget_url or "").strip()
     if not single_engine_enabled:
-        return widget_url
+        return source
+
+    payload = dict(widget_config) if isinstance(widget_config, dict) else {}
+    widgets = payload.get("widgets")
+    if not (isinstance(widgets, list) and widgets):
+        if source:
+            payload["widgets"] = [{"type": "iframe", "url": source}]
+        else:
+            raise ValueError("Widget yapılandırması boş")
+
+    if not isinstance(payload.get("columns"), list):
+        payload.pop("columns", None)
 
     engine_path = Path(__file__).with_name("widget_engine.html")
     engine_uri = engine_path.resolve().as_uri()
-    payload = {"widgets": [{"type": "iframe", "url": widget_url}]}
     encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
     return f"{engine_uri}?config_b64={encoded}"
 

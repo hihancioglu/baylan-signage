@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 import shlex
 import shutil
@@ -8,6 +10,7 @@ import ctypes
 import time
 from ctypes import wintypes
 from pathlib import Path
+from urllib.parse import quote
 
 
 def _safe_print(message: str) -> None:
@@ -365,7 +368,11 @@ class BorderlessFullscreenPlayer:
     @staticmethod
     def _is_widget_url(widget_source: str) -> bool:
         normalized = str(widget_source or "").strip().lower()
-        return normalized.startswith("http://") or normalized.startswith("https://")
+        return (
+            normalized.startswith("http://")
+            or normalized.startswith("https://")
+            or normalized.startswith("file://")
+        )
 
     @staticmethod
     def _resolve_windows_kiosk_browser() -> tuple[str, list[str]] | None:
@@ -408,6 +415,31 @@ class BorderlessFullscreenPlayer:
 
         return None
 
+    def _build_widget_source(self, widget_source: str, widget_config: dict | None = None) -> str:
+        source = str(widget_source or "").strip()
+        if not isinstance(widget_config, dict):
+            return source
+
+        widgets = widget_config.get("widgets")
+        columns = widget_config.get("columns")
+        payload: dict[str, object] = {}
+
+        if isinstance(widgets, list) and widgets:
+            payload["widgets"] = widgets
+        elif source:
+            payload["widgets"] = [{"type": "iframe", "url": source}]
+
+        if isinstance(columns, list) and columns:
+            payload["columns"] = columns
+
+        if not payload.get("widgets"):
+            return source
+
+        engine_path = Path(__file__).with_name("widget_engine.html")
+        engine_uri = engine_path.resolve().as_uri()
+        encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
+        return f"{engine_uri}?config_b64={encoded}"
+
     def _wait_widget_until_stop(
         self,
         process: subprocess.Popen,
@@ -437,8 +469,13 @@ class BorderlessFullscreenPlayer:
         self._last_interrupted = interrupted
         return (process.returncode in (0, None)) or interrupted
 
-    def play_widget_blocking(self, widget_source: str, duration_sec: int) -> bool:
-        source = str(widget_source or "").strip()
+    def play_widget_blocking(
+        self,
+        widget_source: str,
+        duration_sec: int,
+        widget_config: dict | None = None,
+    ) -> bool:
+        source = self._build_widget_source(widget_source, widget_config=widget_config)
         if not source:
             self._last_interrupted = False
             _safe_print("⚠️ widget kaynağı boş")

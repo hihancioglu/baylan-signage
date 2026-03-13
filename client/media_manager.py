@@ -304,6 +304,9 @@ class MediaManager:
             media_type = raw_item.get("media_type") if isinstance(raw_item, dict) else None
             item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
             widget_requires_download = bool((raw_item or {}).get("widget_requires_download")) if isinstance(raw_item, dict) else False
+            widget_payload = (raw_item or {}).get("widget_payload") if isinstance(raw_item, dict) else None
+            widget_url = (raw_item or {}).get("widget_url") if isinstance(raw_item, dict) else None
+            columns = (raw_item or {}).get("columns") if isinstance(raw_item, dict) else None
             display_name = (
                 raw_item.get("title") or raw_item.get("name") or raw_item.get("display_name")
             ) if isinstance(raw_item, dict) else None
@@ -333,6 +336,9 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
+                        "widget_payload": widget_payload,
+                        "widget_url": widget_url,
+                        "columns": columns,
                     }
                     local_entries.append(local_entry)
                     manifest.append(
@@ -346,6 +352,9 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
+                            "widget_payload": widget_payload,
+                            "widget_url": widget_url,
+                            "columns": columns,
                         }
                     )
                 elif self._is_url(normalized_source):
@@ -357,6 +366,9 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
+                        "widget_payload": widget_payload,
+                        "widget_url": widget_url,
+                        "columns": columns,
                     }
                     local_entries.append(local_entry)
                     manifest.append(
@@ -370,6 +382,9 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
+                            "widget_payload": widget_payload,
+                            "widget_url": widget_url,
+                            "columns": columns,
                         }
                     )
                 else:
@@ -387,6 +402,9 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
+                        "widget_payload": widget_payload,
+                        "widget_url": widget_url,
+                        "columns": columns,
                     }
                     local_entries.append(local_entry)
                     manifest.append(
@@ -400,6 +418,9 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
+                            "widget_payload": widget_payload,
+                            "widget_url": widget_url,
+                            "columns": columns,
                         }
                     )
             except Exception as exc:
@@ -444,6 +465,9 @@ class MediaManager:
                         "item_type": (entry or {}).get("item_type"),
                         "display_name": (entry or {}).get("display_name"),
                         "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
+                        "widget_payload": (entry or {}).get("widget_payload"),
+                        "widget_url": (entry or {}).get("widget_url"),
+                        "columns": (entry or {}).get("columns"),
                     }
                 )
             elif str((entry or {}).get("item_type") or "").strip().lower() == "widget":
@@ -455,6 +479,9 @@ class MediaManager:
                         "item_type": "widget",
                         "display_name": (entry or {}).get("display_name"),
                         "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
+                        "widget_payload": (entry or {}).get("widget_payload"),
+                        "widget_url": (entry or {}).get("widget_url"),
+                        "columns": (entry or {}).get("columns"),
                     }
                 )
         return existing_entries

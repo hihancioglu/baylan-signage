@@ -117,6 +117,47 @@ class TestMediaManagerDownloadJitter(unittest.TestCase):
             sleep_mock.assert_not_called()
 
 
+    def test_load_last_successful_playlist_entries_restores_widget_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            local_media = Path(tmpdir) / "media_store" / "local.jpg"
+            local_media.parent.mkdir(parents=True, exist_ok=True)
+            local_media.write_bytes(b"x")
+
+            manager._save_state(
+                {
+                    "last_successful_playlist_entries": [
+                        {
+                            "local_path": str(local_media),
+                            "duration_sec": 10,
+                            "media_type": "image",
+                            "item_type": "media",
+                            "display_name": "Local",
+                            "widget_payload": [{"type": "iframe", "url": "https://example.com"}],
+                            "widget_url": "https://example.com",
+                            "columns": [{"width": 12}],
+                        },
+                        {
+                            "local_path": "https://widget.example.com",
+                            "duration_sec": 20,
+                            "media_type": "widget",
+                            "item_type": "widget",
+                            "display_name": "Widget",
+                            "widget_payload": [{"type": "iframe", "url": "https://widget.example.com"}],
+                            "widget_url": "https://widget.example.com",
+                            "columns": [{"width": 12}],
+                        },
+                    ]
+                }
+            )
+
+            entries = manager.load_last_successful_playlist_entries()
+
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(entries[0]["widget_url"], "https://example.com")
+            self.assertEqual(entries[1]["item_type"], "widget")
+            self.assertEqual(entries[1]["columns"], [{"width": 12}])
+
 class TestMediaManagerManifestWrite(unittest.TestCase):
     def test_sync_playlist_entries_handles_manifest_write_permission_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -918,6 +918,19 @@ class PlaybackController:
         normalized["display_name"] = str(normalized.get("title") or normalized.get("name") or normalized.get("display_name") or "").strip() or None
         if normalized["item_type"] == "widget":
             normalized["media_type"] = normalized.get("media_type") or "widget"
+            widget_payload = normalized.get("widget_payload")
+            if isinstance(widget_payload, dict):
+                normalized["widget_payload"] = deepcopy(widget_payload)
+            elif isinstance(widget_payload, list):
+                normalized["widget_payload"] = list(widget_payload)
+            else:
+                normalized["widget_payload"] = None
+
+            widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or normalized.get("path") or "").strip()
+            normalized["widget_url"] = widget_url or None
+
+            columns = normalized.get("columns")
+            normalized["columns"] = columns if isinstance(columns, list) else None
         return normalized
 
     @staticmethod
@@ -1150,7 +1163,23 @@ class PlaybackController:
                         print(
                             f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
                         )
-                    ok = self.player.play_widget_blocking(media_path, duration_sec=widget_duration_sec)
+                    widget_config = {
+                        "widgets": item.get("widget_payload") if isinstance(item.get("widget_payload"), list) else None,
+                        "columns": item.get("columns") if isinstance(item.get("columns"), list) else None,
+                    }
+                    widget_url = str(item.get("widget_url") or media_path or "").strip() or media_path
+                    if widget_config["widgets"] is None and widget_url:
+                        widget_config["widgets"] = [{"type": "iframe", "url": widget_url}]
+                    if widget_config["columns"] is None:
+                        widget_config.pop("columns", None)
+                    if widget_config.get("widgets") is None:
+                        widget_config = None
+
+                    ok = self.player.play_widget_blocking(
+                        widget_url,
+                        duration_sec=widget_duration_sec,
+                        widget_config=widget_config,
+                    )
                     interrupted = self.player.last_play_was_interrupted()
                 else:
                     image_duration_sec = None

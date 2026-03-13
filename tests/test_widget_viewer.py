@@ -1,3 +1,6 @@
+import base64
+import json
+from urllib.parse import urlparse, parse_qs, unquote
 import unittest
 from unittest.mock import patch
 
@@ -46,6 +49,24 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertIn("widget_engine.html", result)
         self.assertIn("config_b64=", result)
+
+    def test_build_engine_url_encodes_widgets_and_columns(self):
+        config = {
+            "widgets": [
+                {"type": "iframe", "url": "https://widget-a.example.com"},
+                {"type": "iframe", "url": "https://widget-b.example.com"},
+            ],
+            "columns": [{"width": 6}, {"width": 6}],
+        }
+
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(widget_url=None, widget_config=config)
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], config["widgets"])
+        self.assertEqual(payload["columns"], config["columns"])
 
 
 if __name__ == "__main__":
