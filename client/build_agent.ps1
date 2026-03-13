@@ -4,7 +4,8 @@ param(
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
     [switch]$SkipViewerBuild,
-    [switch]$SkipInstallPyInstaller
+    [switch]$SkipInstallPyInstaller,
+    [switch]$ForceUpgradePyInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,8 +13,19 @@ $ErrorActionPreference = "Stop"
 if (-not $SkipInstallPyInstaller) {
     Write-Host "[1/5] Installing/upgrading pyinstaller..."
     & $Python -m pip install --upgrade pyinstaller
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller install failed with exit code $LASTEXITCODE"
+    $pipExitCode = $LASTEXITCODE
+
+    if ($pipExitCode -ne 0) {
+        # Some networks use SSL interception/proxies that break pip certificate checks.
+        # If pyinstaller is already installed, continue with the local version.
+        & $Python -m PyInstaller --version *> $null
+        $hasLocalPyInstaller = ($LASTEXITCODE -eq 0)
+
+        if ($hasLocalPyInstaller -and -not $ForceUpgradePyInstaller) {
+            Write-Warning "PyInstaller upgrade failed (exit code $pipExitCode). Continuing with the installed local PyInstaller. Use -ForceUpgradePyInstaller to fail fast instead."
+        } else {
+            throw "PyInstaller install failed with exit code $pipExitCode"
+        }
     }
 } else {
     Write-Host "[1/5] Skipping pyinstaller installation step..."
