@@ -41,7 +41,8 @@ def _normalize_url(source: str) -> str:
         try:
             return Path(url).expanduser().resolve().as_uri()
         except OSError:
-            return f"file:///{url.replace('\\', '/')}"
+            normalized_windows_path = url.replace("\\", "/")
+            return f"file:///{normalized_windows_path}"
 
     if url.startswith(("/", "\\")):
         try:
