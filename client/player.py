@@ -160,11 +160,14 @@ class BorderlessFullscreenPlayer:
             return False
         return True
 
-    def _build_python_widget_command(self, widget_source: str) -> list[str]:
+    def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
         viewer_path = Path(__file__).with_name("widget_viewer.py")
         frozen_viewer = self._find_frozen_widget_viewer_executable()
         if frozen_viewer:
             return [frozen_viewer, widget_source]
+        if not viewer_path.is_file():
+            _safe_print(f"⚠️ widget viewer script bulunamadı: {viewer_path}")
+            return None
         return [sys.executable, str(viewer_path), widget_source]
 
     @staticmethod
@@ -347,7 +350,10 @@ class BorderlessFullscreenPlayer:
                 return command
 
         if self._should_use_python_widget_viewer(widget_source):
-            return self._build_python_widget_command(widget_source)
+            python_widget_command = self._build_python_widget_command(widget_source)
+            if python_widget_command:
+                return python_widget_command
+            self._python_widget_viewer_runtime_enabled = False
 
         if self._is_widget_url(widget_source):
             windows_browser = self._resolve_windows_kiosk_browser()
@@ -491,6 +497,9 @@ class BorderlessFullscreenPlayer:
 
         source = self._widget_runtime_engine_source()
         command = self._build_python_widget_command(source)
+        if not command:
+            self._python_widget_viewer_runtime_enabled = False
+            return False
         command.append("--runtime-ipc")
 
         try:
@@ -579,11 +588,7 @@ class BorderlessFullscreenPlayer:
             time.sleep(0.2)
 
         if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
+            self._terminate_process(process, timeout_sec=2, force_tree=True)
 
         interrupted = self._stop_requested
         self._last_interrupted = interrupted

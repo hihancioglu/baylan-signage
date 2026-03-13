@@ -101,6 +101,23 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(command, ["python", "client/widget_viewer.py", "https://example.com"])
 
+    def test_build_widget_command_falls_back_when_python_viewer_script_missing(self):
+        player = self._build_player()
+
+        with patch.object(player, "_should_use_python_widget_viewer", return_value=True), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=None,
+        ), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_resolve_windows_kiosk_browser",
+            return_value=("msedge", ["--kiosk", "--app={widget}"]),
+        ):
+            command = player._build_widget_command("https://example.com")
+
+        self.assertEqual(command, ["msedge", "--kiosk", "--app=https://example.com"])
+        self.assertFalse(player._python_widget_viewer_runtime_enabled)
+
     def test_python_widget_viewer_enabled_by_default(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
@@ -171,7 +188,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_play_widget_url_waits_until_stop_request(self):
         player = self._build_player()
         process = unittest.mock.Mock()
-        process.poll.side_effect = [None, None, None]
+        process.poll.side_effect = [None, None]
         process.returncode = 0
 
         with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(player, "_build_widget_command", return_value=["msedge", "--kiosk", "https://example.com"]), patch(
@@ -289,6 +306,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.kill.assert_called_once()
         run_mock.assert_called_once_with(
             ["taskkill", "/PID", "4242", "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+    def test_wait_widget_until_stop_uses_taskkill_tree_on_windows_timeout(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.side_effect = [None, None, None]
+        process.pid = 31337
+        process.returncode = None
+        process.wait.side_effect = [subprocess.TimeoutExpired(cmd="widget", timeout=2), None]
+
+        with patch("client.player.os.name", "nt"), patch("subprocess.run") as run_mock, patch(
+            "time.monotonic", side_effect=[100.0, 101.1]
+        ), patch("time.sleep", return_value=None):
+            result = player._wait_widget_until_stop(process, max_duration_sec=1)
+
+        self.assertTrue(result)
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+        run_mock.assert_called_once_with(
+            ["taskkill", "/PID", "31337", "/T", "/F"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
