@@ -3,22 +3,23 @@ param(
     [string]$ClientScript = "client/client.py",
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
+    [switch]$SkipViewerBuild,
     [switch]$SkipInstallPyInstaller
 )
 
 $ErrorActionPreference = "Stop"
 
 if (-not $SkipInstallPyInstaller) {
-    Write-Host "[1/4] Installing/upgrading pyinstaller..."
+    Write-Host "[1/5] Installing/upgrading pyinstaller..."
     & $Python -m pip install --upgrade pyinstaller
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller install failed with exit code $LASTEXITCODE"
     }
 } else {
-    Write-Host "[1/4] Skipping pyinstaller installation step..."
+    Write-Host "[1/5] Skipping pyinstaller installation step..."
 }
 
-Write-Host "[2/4] Building client executable..."
+Write-Host "[2/5] Building client executable..."
 & $Python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -37,10 +38,42 @@ if (!(Test-Path $artifact)) {
     throw "Client artifact not found: $artifact"
 }
 
+if (-not $SkipViewerBuild) {
+    Write-Host "[3/5] Building viewer sidecar executables (image_viewer/widget_viewer)..."
+
+    & $Python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --onefile `
+        --noconsole `
+        --name "image_viewer" `
+        --distpath $OutputDir `
+        "client/image_viewer.py"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Image viewer build failed with exit code $LASTEXITCODE"
+    }
+
+    & $Python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --onefile `
+        --noconsole `
+        --name "widget_viewer" `
+        --distpath $OutputDir `
+        "client/widget_viewer.py"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Widget viewer build failed with exit code $LASTEXITCODE"
+    }
+} else {
+    Write-Host "[3/5] Skipping viewer sidecar executable builds..."
+}
+
 $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
 
-Write-Host "[3/4] Embedding build marker..."
+Write-Host "[4/5] Embedding build marker..."
 $maxAttempts = 10
 $delaySeconds = 1
 $markerEmbedded = $false
@@ -64,5 +97,8 @@ if (-not $markerEmbedded) {
     throw "Unable to embed build marker into '$artifact'."
 }
 
-Write-Host "[4/4] Client build completed: $artifact"
+Write-Host "[5/5] Client build completed: $artifact"
+if (-not $SkipViewerBuild) {
+    Write-Host "Viewer artifacts: $(Join-Path $OutputDir 'image_viewer.exe'), $(Join-Path $OutputDir 'widget_viewer.exe')"
+}
 Write-Host "Embedded build marker: $buildVersion"
