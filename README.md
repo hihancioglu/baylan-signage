@@ -80,6 +80,9 @@ Aktivasyon için:
 - `client/build_agent.ps1` script'ini **varsayılan ayarlarla** çalıştırın (widget viewer sidecar exe'si üretir).
 - `dist` klasöründen en az şu iki dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `widget_viewer.exe`.
 - Widget viewer için ayrıca `cefpython3` veya `pywebview` bağımlılıklarından en az biri kurulu olmalıdır.
+- CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa viewer PyInstaller çağrısına `--collect-all cefpython3` ekler.
+- `-EnableCefCollect` verilse bile build hard-fail olmaz: `cefpython3` bulunamazsa CEF collect adımı uyarı ile atlanır.
+- `pywebview` kuruluysa build script'i viewer tarafında gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım da hataya düşmeden atlanır.
 
 `WIDGET_SINGLE_ENGINE=1` paketleme notu:
 - Agent build artık `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.

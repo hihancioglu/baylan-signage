@@ -4,6 +4,7 @@ param(
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
     [switch]$SkipViewerBuild,
+    [switch]$EnableCefCollect,
     [switch]$SkipInstallPyInstaller,
     [switch]$ForceUpgradePyInstaller
 )
@@ -70,15 +71,44 @@ if (!(Test-Path $artifact)) {
 if (-not $SkipViewerBuild) {
     Write-Host "[3/5] Building widget viewer sidecar executable..."
 
-    & $Python -m PyInstaller `
-        --noconfirm `
-        --clean `
-        --onefile `
-        --noconsole `
-        --name "widget_viewer" `
-        --add-data "client/widget_engine.html;." `
-        --distpath $OutputDir `
-        "client/widget_viewer.py"
+    $viewerPyInstallerArgs = @(
+        "--noconfirm"
+        "--clean"
+        "--onefile"
+        "--noconsole"
+        "--name"
+        "widget_viewer"
+        "--add-data"
+        "client/widget_engine.html;."
+        "--distpath"
+        $OutputDir
+    )
+
+    if ($EnableCefCollect) {
+        & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[viewer] CEF bulundu, --collect-all cefpython3 eklenecek."
+            $viewerPyInstallerArgs += @("--collect-all", "cefpython3")
+        } else {
+            Write-Warning "-EnableCefCollect verildi ancak cefpython3 bulunamadı; CEF collect adımı atlanıyor."
+        }
+    }
+
+    & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[viewer] pywebview bulundu, backend fallback için collect/hidden-import parametreleri ekleniyor."
+        $viewerPyInstallerArgs += @(
+            "--collect-all", "webview",
+            "--hidden-import", "webview.platforms.winforms",
+            "--hidden-import", "webview.platforms.edgechromium"
+        )
+    } else {
+        Write-Host "[viewer] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
+    }
+
+    $viewerPyInstallerArgs += "client/widget_viewer.py"
+
+    & $Python -m PyInstaller @viewerPyInstallerArgs
 
     if ($LASTEXITCODE -ne 0) {
         throw "Widget viewer build failed with exit code $LASTEXITCODE"
