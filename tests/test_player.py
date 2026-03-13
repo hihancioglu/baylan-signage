@@ -195,6 +195,27 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertFalse(result)
         self.assertTrue(player._python_widget_viewer_runtime_enabled)
 
+    def test_play_widget_url_advances_when_duration_expires(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        process.returncode = 0
+
+        monotonic_values = iter([100.0, 100.2, 100.6, 101.1])
+
+        with patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["msedge", "--kiosk", "https://example.com"],
+        ), patch("subprocess.Popen", return_value=process), patch(
+            "time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ), patch("time.sleep", return_value=None):
+            result = player.play_widget_blocking("https://example.com", duration_sec=1)
+
+        self.assertTrue(result)
+        process.terminate.assert_called_once()
+
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
         player = self._build_player()
         process = unittest.mock.Mock()
