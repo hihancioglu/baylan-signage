@@ -385,6 +385,17 @@ class BorderlessFullscreenPlayer:
         )
 
     @staticmethod
+    def _normalize_widget_source(widget_source: str) -> str:
+        source = str(widget_source or "").strip()
+        if not source:
+            return ""
+        if BorderlessFullscreenPlayer._is_widget_url(source):
+            return source
+        if "://" not in source and not source.startswith(("/", "\\")):
+            return f"https://{source}"
+        return source
+
+    @staticmethod
     def _resolve_windows_kiosk_browser() -> tuple[str, list[str]] | None:
         if os.name != "nt":
             return None
@@ -426,7 +437,7 @@ class BorderlessFullscreenPlayer:
         return None
 
     def _build_widget_source(self, widget_source: str, widget_config: dict | None = None) -> str:
-        source = str(widget_source or "").strip()
+        source = self._normalize_widget_source(widget_source)
         if not isinstance(widget_config, dict):
             return source
 
@@ -451,7 +462,7 @@ class BorderlessFullscreenPlayer:
         return f"{engine_uri}?config_b64={encoded}"
 
     def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
-        source = str(widget_source or "").strip()
+        source = self._normalize_widget_source(widget_source)
         payload: dict[str, object] = {}
         if isinstance(widget_config, dict):
             widgets = widget_config.get("widgets")
