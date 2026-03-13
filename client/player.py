@@ -642,21 +642,47 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = True
 
         if self._process and self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
+            self._terminate_process(self._process, timeout_sec=5)
 
         if self._widget_process and self._widget_process.poll() is None:
-            self._widget_process.terminate()
-            try:
-                self._widget_process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self._widget_process.kill()
+            self._terminate_process(self._widget_process, timeout_sec=2, force_tree=True)
 
         self._process = None
         self._widget_process = None
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen, timeout_sec: float, force_tree: bool = False) -> None:
+        try:
+            process.terminate()
+            process.wait(timeout=timeout_sec)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            pass
+
+        try:
+            process.kill()
+            process.wait(timeout=1)
+        except Exception:
+            pass
+
+        if not force_tree or os.name != "nt":
+            return
+
+        pid = getattr(process, "pid", None)
+        if not isinstance(pid, int) or pid <= 0:
+            return
+
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except Exception:
+            pass
 
 
     def last_play_was_interrupted(self) -> bool:
