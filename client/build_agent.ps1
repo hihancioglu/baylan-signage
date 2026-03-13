@@ -42,10 +42,18 @@ $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
     --name $Name `
     --paths $projectRoot `
     --paths $clientScriptDir `
+    # Keep both package-qualified (client.*) and bare module names for compatibility:
+    # runtime imports can resolve either style depending on launch context/PYTHONPATH.
     --hidden-import client.idle `
     --hidden-import client.media_manager `
     --hidden-import client.player `
     --hidden-import client.state_machine `
+    --hidden-import client.widget_viewer `
+    --hidden-import idle `
+    --hidden-import media_manager `
+    --hidden-import player `
+    --hidden-import state_machine `
+    --hidden-import widget_viewer `
     --distpath $OutputDir `
     $ClientScript
 
