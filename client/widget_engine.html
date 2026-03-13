@@ -32,9 +32,24 @@
       return { widgets: [] };
     }
 
+    function normalizeConfig(input) {
+      const fallback = { widgets: [] };
+      if (!input || typeof input !== "object") {
+        return fallback;
+      }
+
+      const widgets = Array.isArray(input.widgets) ? input.widgets.filter((w) => w && typeof w === "object") : [];
+      const normalized = { widgets };
+      if (Array.isArray(input.columns)) {
+        normalized.columns = input.columns;
+      }
+      return normalized;
+    }
+
     function applyLayout(config) {
       const container = document.getElementById("widgets");
-      container.style.setProperty("--cols", String(Math.max(1, Number(config.columns || 1))));
+      const columns = Array.isArray(config.columns) ? config.columns.length : Number(config.columns || 1);
+      container.style.setProperty("--cols", String(Math.max(1, Number(columns) || 1)));
     }
 
     function loadWidgets(config) {
@@ -59,9 +74,22 @@
       });
     }
 
-    const config = parseConfig();
-    applyLayout(config);
-    loadWidgets(config);
+    function renderConfig(input) {
+      const config = normalizeConfig(input);
+      applyLayout(config);
+      loadWidgets(config);
+    }
+
+    window.addEventListener("message", (event) => {
+      try {
+        const payload = normalizeConfig(event.data);
+        renderConfig(payload);
+      } catch (_err) {
+        renderConfig({ widgets: [] });
+      }
+    });
+
+    renderConfig(parseConfig());
   </script>
 </body>
 </html>

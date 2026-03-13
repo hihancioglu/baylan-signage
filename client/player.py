@@ -8,6 +8,7 @@ import sys
 import tempfile
 import ctypes
 import time
+import threading
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
@@ -87,6 +88,7 @@ class BorderlessFullscreenPlayer:
         self._process = None
         self._stop_requested = False
         self._widget_process = None
+        self._widget_process_stdin_lock = threading.Lock()
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
         self._last_interrupted = False
@@ -164,6 +166,14 @@ class BorderlessFullscreenPlayer:
         if frozen_viewer:
             return [frozen_viewer, widget_source]
         return [sys.executable, str(viewer_path), widget_source]
+
+    @staticmethod
+    def _widget_runtime_controller_enabled() -> bool:
+        return os.getenv("WIDGET_RUNTIME_CONTROLLER_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+
+    @staticmethod
+    def _widget_legacy_process_fallback_enabled() -> bool:
+        return os.getenv("WIDGET_LEGACY_PROCESS_FALLBACK", "1").strip().lower() in {"1", "true", "yes"}
 
     def _is_python_widget_command(self, command: list[str]) -> bool:
         if not command:
@@ -440,6 +450,105 @@ class BorderlessFullscreenPlayer:
         encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
         return f"{engine_uri}?config_b64={encoded}"
 
+    def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
+        source = str(widget_source or "").strip()
+        payload: dict[str, object] = {}
+        if isinstance(widget_config, dict):
+            widgets = widget_config.get("widgets")
+            columns = widget_config.get("columns")
+            if isinstance(widgets, list) and widgets:
+                payload["widgets"] = widgets
+            if isinstance(columns, list) and columns:
+                payload["columns"] = columns
+
+        if "widgets" not in payload and source:
+            payload["widgets"] = [{"type": "iframe", "url": source}]
+
+        widgets = payload.get("widgets")
+        if not isinstance(widgets, list) or not widgets:
+            return None
+        return payload
+
+    def _widget_runtime_engine_source(self) -> str:
+        return Path(__file__).with_name("widget_engine.html").resolve().as_uri()
+
+    def start_widget_engine_if_needed(self) -> bool:
+        if not self._widget_runtime_controller_enabled():
+            return False
+        if self._widget_process and self._widget_process.poll() is None:
+            return True
+
+        source = self._widget_runtime_engine_source()
+        command = self._build_python_widget_command(source)
+        command.append("--runtime-ipc")
+
+        try:
+            self._stop_requested = False
+            self._widget_process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                text=True,
+            )
+            return True
+        except Exception as exc:
+            _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
+            self._widget_process = None
+            return False
+
+    def update_widget_layout(self, widget_source: str, widget_config: dict | None = None) -> bool:
+        payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
+        if payload is None:
+            _safe_print("⚠️ widget layout payload geçersiz")
+            return False
+
+        if not self.start_widget_engine_if_needed():
+            return False
+
+        process = self._widget_process
+        if not process or process.poll() is not None or not process.stdin:
+            return False
+
+        message = {"type": "layout_update", "payload": payload}
+        try:
+            with self._widget_process_stdin_lock:
+                process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+                process.stdin.flush()
+            return True
+        except Exception as exc:
+            _safe_print(f"⚠️ widget layout gönderilemedi: {exc}")
+            return False
+
+    def stop_widget_engine(self) -> None:
+        process = self._widget_process
+        if not process or process.poll() is not None:
+            self._widget_process = None
+            return
+
+        try:
+            if process.stdin:
+                with self._widget_process_stdin_lock:
+                    process.stdin.write('{"type":"stop"}\n')
+                    process.stdin.flush()
+        except Exception:
+            pass
+
+        self._terminate_process(process, timeout_sec=2, force_tree=True)
+        self._widget_process = None
+
+    def wait_widget_duration(self, duration_sec: int) -> bool:
+        deadline = time.monotonic() + max(1, int(duration_sec))
+        while True:
+            if self._stop_requested:
+                self._last_interrupted = True
+                return True
+            if not self._widget_process or self._widget_process.poll() is not None:
+                self._last_interrupted = False
+                return False
+            if time.monotonic() >= deadline:
+                self._last_interrupted = False
+                return True
+            time.sleep(0.2)
+
     def _wait_widget_until_stop(
         self,
         process: subprocess.Popen,
@@ -480,6 +589,17 @@ class BorderlessFullscreenPlayer:
             self._last_interrupted = False
             _safe_print("⚠️ widget kaynağı boş")
             return False
+
+        if self._widget_runtime_controller_enabled():
+            if self._process and self._process.poll() is None:
+                self._terminate_process(self._process, timeout_sec=5)
+                self._process = None
+            self._stop_requested = False
+            if self.update_widget_layout(widget_source, widget_config=widget_config):
+                return self.wait_widget_duration(duration_sec)
+            if not self._widget_legacy_process_fallback_enabled():
+                self._last_interrupted = False
+                return False
 
         self.stop()
 
@@ -674,7 +794,7 @@ class BorderlessFullscreenPlayer:
             self._terminate_process(self._process, timeout_sec=5)
 
         if self._widget_process and self._widget_process.poll() is None:
-            self._terminate_process(self._widget_process, timeout_sec=2, force_tree=True)
+            self.stop_widget_engine()
 
         self._process = None
         self._widget_process = None

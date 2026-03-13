@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
@@ -100,10 +101,28 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
     return f"{engine_uri}?config_b64={encoded}"
 
 
-def _start_with_pywebview(widget_url: str) -> None:
+def _runtime_message_reader(dispatch):
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        try:
+            message = json.loads(line.strip())
+        except Exception:
+            continue
+
+        message_type = str(message.get("type") or "").strip().lower()
+        if message_type == "stop":
+            dispatch({"type": "stop"})
+            break
+        if message_type == "layout_update":
+            dispatch({"type": "layout_update", "payload": message.get("payload")})
+
+
+def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
     import webview
 
-    webview.create_window(
+    window = webview.create_window(
         title="Baylan Widget",
         url=widget_url,
         fullscreen=True,
@@ -112,10 +131,29 @@ def _start_with_pywebview(widget_url: str) -> None:
         background_color="#000000",
         text_select=False,
     )
+
+    if runtime_ipc:
+        def dispatch(message: dict) -> None:
+            if message.get("type") == "stop":
+                try:
+                    webview.destroy_window()
+                except Exception:
+                    pass
+                return
+            payload = message.get("payload")
+            encoded_payload = json.dumps(payload, ensure_ascii=False)
+            js = f"window.postMessage({encoded_payload}, '*');"
+            try:
+                window.evaluate_js(js)
+            except Exception as exc:
+                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
+
+        threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
+
     _start_with_fallback(webview)
 
 
-def _start_with_cef(widget_url: str) -> None:
+def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
     from cefpython3 import cefpython as cef
 
     switches = dict(CHROME_KIOSK_SWITCHES)
@@ -134,7 +172,24 @@ def _start_with_cef(widget_url: str) -> None:
     cef.Initialize(settings={"context_menu": {"enabled": False}}, switches=switches)
     window_info = cef.WindowInfo()
     window_info.SetAsPopup(0, "Baylan Widget")
-    cef.CreateBrowserSync(window_info=window_info, url=widget_url, window_title="Baylan Widget")
+    browser = cef.CreateBrowserSync(window_info=window_info, url=widget_url, window_title="Baylan Widget")
+
+    if runtime_ipc:
+        def dispatch(message: dict) -> None:
+            if message.get("type") == "stop":
+                cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
+                return
+
+            payload = message.get("payload")
+
+            def _post_js():
+                encoded_payload = json.dumps(payload, ensure_ascii=False)
+                browser.GetMainFrame().ExecuteJavascript(f"window.postMessage({encoded_payload}, '*');")
+
+            cef.PostTask(cef.TID_UI, _post_js)
+
+        threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
+
     cef.MessageLoop()
     cef.Shutdown()
 
@@ -143,6 +198,8 @@ def main() -> int:
     if len(sys.argv) < 2:
         _safe_print("Kullanım: widget_viewer.py <widget_url>")
         return 2
+
+    runtime_ipc = "--runtime-ipc" in sys.argv[2:]
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
@@ -155,9 +212,9 @@ def main() -> int:
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
             if backend == "cef":
-                _start_with_cef(widget_url)
+                _start_with_cef(widget_url, runtime_ipc=runtime_ipc)
             else:
-                _start_with_pywebview(widget_url)
+                _start_with_pywebview(widget_url, runtime_ipc=runtime_ipc)
             return 0
         except Exception as exc:
             errors.append(f"{backend}: {exc}")
