@@ -1,8 +1,10 @@
 import base64
 import json
+import tempfile
 from urllib.parse import urlparse, parse_qs, unquote
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from client import widget_viewer
 
@@ -67,6 +69,28 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], config["widgets"])
         self.assertEqual(payload["columns"], config["columns"])
+
+    def test_normalize_url_uses_file_uri_for_existing_local_file(self):
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as handle:
+            handle.write(b"<html></html>")
+            local_path = handle.name
+
+        try:
+            self.assertEqual(widget_viewer._normalize_url(local_path), Path(local_path).resolve().as_uri())
+        finally:
+            Path(local_path).unlink(missing_ok=True)
+
+    def test_build_engine_url_normalizes_iframe_widget_urls(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "iframe", "url": "example.com/dashboard"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://example.com/dashboard"}])
 
 
 if __name__ == "__main__":

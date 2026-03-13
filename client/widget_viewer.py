@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 from urllib.parse import quote
+import re
 
 
 CHROME_KIOSK_SWITCHES = {
@@ -14,6 +15,7 @@ CHROME_KIOSK_SWITCHES = {
     "disable-session-crashed-bubble": "",
     "disable-features": "TranslateUI",
 }
+WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 
 
 def _safe_print(message: str) -> None:
@@ -27,9 +29,56 @@ def _normalize_url(source: str) -> str:
     url = str(source or "").strip()
     if not url:
         raise ValueError("Widget URL boş")
+
+    local_path = Path(url).expanduser()
+    if local_path.exists():
+        try:
+            return local_path.resolve().as_uri()
+        except OSError:
+            pass
+
+    if WINDOWS_DRIVE_PATH_PATTERN.match(url):
+        try:
+            return Path(url).expanduser().resolve().as_uri()
+        except OSError:
+            return f"file:///{url.replace('\\', '/')}"
+
+    if url.startswith(("/", "\\")):
+        try:
+            return Path(url).expanduser().resolve().as_uri()
+        except OSError:
+            pass
+
     if url.lower().startswith(("http://", "https://", "file://")):
         return url
     return f"https://{url}"
+
+
+def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = None) -> dict:
+    payload = dict(widget_config) if isinstance(widget_config, dict) else {}
+    widgets = payload.get("widgets")
+
+    normalized_widgets: list[dict] = []
+    if isinstance(widgets, list):
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+            normalized_widget = dict(widget)
+            if str(normalized_widget.get("type") or "").strip().lower() == "iframe":
+                normalized_widget["url"] = _normalize_url(str(normalized_widget.get("url") or ""))
+            normalized_widgets.append(normalized_widget)
+
+    if normalized_widgets:
+        payload["widgets"] = normalized_widgets
+    elif fallback_url:
+        payload["widgets"] = [{"type": "iframe", "url": fallback_url}]
+    else:
+        raise ValueError("Widget yapılandırması boş")
+
+    if not isinstance(payload.get("columns"), list):
+        payload.pop("columns", None)
+
+    return payload
 
 
 def _viewer_backend_order() -> list[str]:
@@ -80,20 +129,11 @@ def _start_with_fallback(webview_module) -> None:
 
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
     single_engine_enabled = os.getenv("WIDGET_SINGLE_ENGINE", "0").strip().lower() in {"1", "true", "yes"}
-    source = str(widget_url or "").strip()
+    source = _normalize_url(widget_url) if str(widget_url or "").strip() else ""
     if not single_engine_enabled:
         return source
 
-    payload = dict(widget_config) if isinstance(widget_config, dict) else {}
-    widgets = payload.get("widgets")
-    if not (isinstance(widgets, list) and widgets):
-        if source:
-            payload["widgets"] = [{"type": "iframe", "url": source}]
-        else:
-            raise ValueError("Widget yapılandırması boş")
-
-    if not isinstance(payload.get("columns"), list):
-        payload.pop("columns", None)
+    payload = _normalize_widget_payload(widget_config if isinstance(widget_config, dict) else {}, fallback_url=source)
 
     engine_path = Path(__file__).with_name("widget_engine.html")
     engine_uri = engine_path.resolve().as_uri()

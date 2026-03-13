@@ -250,6 +250,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
 
+    def test_build_widget_layout_payload_converts_existing_local_file_to_file_uri(self):
+        player = self._build_player()
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as handle:
+            handle.write(b"<html></html>")
+            local_path = handle.name
+
+        try:
+            payload = player._build_widget_layout_payload(local_path)
+            self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": Path(local_path).resolve().as_uri()}]})
+        finally:
+            Path(local_path).unlink(missing_ok=True)
+
+    def test_build_widget_layout_payload_normalizes_widget_config_iframe_urls(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "iframe", "url": "example.com/panel"}]},
+        )
+
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/panel"}]})
+
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
         config = {

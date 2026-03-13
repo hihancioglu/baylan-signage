@@ -9,6 +9,7 @@ import tempfile
 import ctypes
 import time
 import threading
+import re
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
@@ -71,6 +72,7 @@ class BorderlessFullscreenPlayer:
         "--no-first-run",
         "--no-default-browser-check",
     ]
+    _WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
@@ -395,11 +397,61 @@ class BorderlessFullscreenPlayer:
         source = str(widget_source or "").strip()
         if not source:
             return ""
+
+        source_path = Path(source).expanduser()
+        if source_path.exists():
+            try:
+                return source_path.resolve().as_uri()
+            except OSError:
+                pass
+
+        if BorderlessFullscreenPlayer._WINDOWS_DRIVE_PATH_PATTERN.match(source):
+            try:
+                return Path(source).expanduser().resolve().as_uri()
+            except OSError:
+                return f"file:///{source.replace('\\', '/')}"
+
+        if source.startswith(("/", "\\")):
+            try:
+                return Path(source).expanduser().resolve().as_uri()
+            except OSError:
+                pass
+
         if BorderlessFullscreenPlayer._is_widget_url(source):
             return source
         if "://" not in source and not source.startswith(("/", "\\")):
             return f"https://{source}"
         return source
+
+    def _normalize_widget_payload(self, widget_config: dict | None, fallback_source: str = "") -> dict | None:
+        payload: dict[str, object] = {}
+
+        if isinstance(widget_config, dict):
+            widgets = widget_config.get("widgets")
+            if isinstance(widgets, list) and widgets:
+                normalized_widgets: list[dict] = []
+                for widget in widgets:
+                    if not isinstance(widget, dict):
+                        continue
+                    normalized_widget = dict(widget)
+                    if str(normalized_widget.get("type") or "").strip().lower() == "iframe":
+                        normalized_widget["url"] = self._normalize_widget_source(str(normalized_widget.get("url") or ""))
+                    normalized_widgets.append(normalized_widget)
+                if normalized_widgets:
+                    payload["widgets"] = normalized_widgets
+
+            columns = widget_config.get("columns")
+            if isinstance(columns, list) and columns:
+                payload["columns"] = columns
+
+        normalized_fallback = self._normalize_widget_source(fallback_source)
+        if "widgets" not in payload and normalized_fallback:
+            payload["widgets"] = [{"type": "iframe", "url": normalized_fallback}]
+
+        widgets = payload.get("widgets")
+        if not isinstance(widgets, list) or not widgets:
+            return None
+        return payload
 
     @staticmethod
     def _resolve_windows_kiosk_browser() -> tuple[str, list[str]] | None:
@@ -444,22 +496,8 @@ class BorderlessFullscreenPlayer:
 
     def _build_widget_source(self, widget_source: str, widget_config: dict | None = None) -> str:
         source = self._normalize_widget_source(widget_source)
-        if not isinstance(widget_config, dict):
-            return source
-
-        widgets = widget_config.get("widgets")
-        columns = widget_config.get("columns")
-        payload: dict[str, object] = {}
-
-        if isinstance(widgets, list) and widgets:
-            payload["widgets"] = widgets
-        elif source:
-            payload["widgets"] = [{"type": "iframe", "url": source}]
-
-        if isinstance(columns, list) and columns:
-            payload["columns"] = columns
-
-        if not payload.get("widgets"):
+        payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
+        if payload is None:
             return source
 
         engine_path = Path(__file__).with_name("widget_engine.html")
@@ -469,22 +507,7 @@ class BorderlessFullscreenPlayer:
 
     def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
         source = self._normalize_widget_source(widget_source)
-        payload: dict[str, object] = {}
-        if isinstance(widget_config, dict):
-            widgets = widget_config.get("widgets")
-            columns = widget_config.get("columns")
-            if isinstance(widgets, list) and widgets:
-                payload["widgets"] = widgets
-            if isinstance(columns, list) and columns:
-                payload["columns"] = columns
-
-        if "widgets" not in payload and source:
-            payload["widgets"] = [{"type": "iframe", "url": source}]
-
-        widgets = payload.get("widgets")
-        if not isinstance(widgets, list) or not widgets:
-            return None
-        return payload
+        return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
 
     def _widget_runtime_engine_source(self) -> str:
         return Path(__file__).with_name("widget_engine.html").resolve().as_uri()
