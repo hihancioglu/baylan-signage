@@ -35,29 +35,48 @@ if (-not $SkipInstallPyInstaller) {
 Write-Host "[2/5] Building client executable..."
 $clientScriptDir = Split-Path -Parent $ClientScript
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-& $Python -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onefile `
-    --noconsole `
-    --name $Name `
-    --add-data "client/widget_engine.html;client" `
-    --paths $projectRoot `
-    --paths $clientScriptDir `
-    # Keep both package-qualified (client.*) and bare module names for compatibility:
-    # runtime imports can resolve either style depending on launch context/PYTHONPATH.
-    --hidden-import client.idle `
-    --hidden-import client.media_manager `
-    --hidden-import client.player `
-    --hidden-import client.state_machine `
-    --hidden-import client.widget_viewer `
-    --hidden-import idle `
-    --hidden-import media_manager `
-    --hidden-import player `
-    --hidden-import state_machine `
-    --hidden-import widget_viewer `
-    --distpath $OutputDir `
+
+# Keep both package-qualified (client.*) and bare module names for compatibility:
+# runtime imports can resolve either style depending on launch context/PYTHONPATH.
+$clientPyInstallerArgs = @(
+    "--noconfirm"
+    "--clean"
+    "--onefile"
+    "--noconsole"
+    "--name"
+    $Name
+    "--add-data"
+    "client/widget_engine.html;client"
+    "--paths"
+    $projectRoot
+    "--paths"
+    $clientScriptDir
+    "--hidden-import"
+    "client.idle"
+    "--hidden-import"
+    "client.media_manager"
+    "--hidden-import"
+    "client.player"
+    "--hidden-import"
+    "client.state_machine"
+    "--hidden-import"
+    "client.widget_viewer"
+    "--hidden-import"
+    "idle"
+    "--hidden-import"
+    "media_manager"
+    "--hidden-import"
+    "player"
+    "--hidden-import"
+    "state_machine"
+    "--hidden-import"
+    "widget_viewer"
+    "--distpath"
+    $OutputDir
     $ClientScript
+)
+
+& $Python -m PyInstaller @clientPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
