@@ -1,5 +1,7 @@
 import json
 import hashlib
+import importlib
+import importlib.util
 import logging
 import os
 import platform
@@ -44,21 +46,54 @@ builtins.print(
 )
 
 def _import_client_modules():
+    def _load_by_name(module_name: str):
+        return importlib.import_module(module_name)
+
+    def _load_from_file(module_name: str):
+        module_filename = f"{module_name}.py"
+        candidates = [
+            BASE_DIR / module_filename,
+            BASE_DIR / "client" / module_filename,
+        ]
+
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+
+            module_spec = importlib.util.spec_from_file_location(module_name, candidate)
+            if module_spec is None or module_spec.loader is None:
+                continue
+
+            module = importlib.util.module_from_spec(module_spec)
+            sys.modules[module_name] = module
+            module_spec.loader.exec_module(module)
+            return module
+
+        raise ModuleNotFoundError(module_name)
+
     if __package__ in {None, ""}:
         try:
-            import idle as idle_module
-            import media_manager as media_manager_module
-            import player as player_module
-            import state_machine as state_machine_module
+            idle_module = _load_by_name("idle")
+            media_manager_module = _load_by_name("media_manager")
+            player_module = _load_by_name("player")
+            state_machine_module = _load_by_name("state_machine")
 
             return idle_module, media_manager_module, player_module, state_machine_module
         except ModuleNotFoundError:
-            from client import idle as idle_module
-            from client import media_manager as media_manager_module
-            from client import player as player_module
-            from client import state_machine as state_machine_module
+            try:
+                idle_module = _load_by_name("client.idle")
+                media_manager_module = _load_by_name("client.media_manager")
+                player_module = _load_by_name("client.player")
+                state_machine_module = _load_by_name("client.state_machine")
 
-            return idle_module, media_manager_module, player_module, state_machine_module
+                return idle_module, media_manager_module, player_module, state_machine_module
+            except ModuleNotFoundError:
+                idle_module = _load_from_file("idle")
+                media_manager_module = _load_from_file("media_manager")
+                player_module = _load_from_file("player")
+                state_machine_module = _load_from_file("state_machine")
+
+                return idle_module, media_manager_module, player_module, state_machine_module
 
     from . import idle as idle_module
     from . import media_manager as media_manager_module
