@@ -91,8 +91,14 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
             normalized_widget = dict(widget)
             widget_type = str(normalized_widget.get("type") or "").strip().lower()
             if widget_type in {"iframe", "url"}:
+                raw_url = (
+                    normalized_widget.get("url")
+                    or normalized_widget.get("content")
+                    or normalized_widget.get("source")
+                    or ""
+                )
                 normalized_widget["type"] = "iframe"
-                normalized_widget["url"] = _normalize_url(str(normalized_widget.get("url") or ""))
+                normalized_widget["url"] = _normalize_url(str(raw_url))
             elif widget_type == "html":
                 normalized_widget["type"] = "card"
                 normalized_widget["html"] = str(
