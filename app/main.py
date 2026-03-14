@@ -327,6 +327,52 @@ def _decode_widget_payload(raw_payload):
     return {"type": "html", "content": text}
 
 
+def _dashboard_widget_payload(content: str) -> dict | None:
+    raw_content = str(content or "").strip()
+    if not raw_content:
+        return None
+
+    try:
+        parsed = json.loads(raw_content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    widgets = parsed.get("widgets")
+    if not isinstance(widgets, list):
+        return None
+
+    normalized_widgets: list[dict] = []
+    for widget in widgets:
+        if not isinstance(widget, dict):
+            continue
+
+        widget_type = str(widget.get("type") or "").strip().lower()
+        if widget_type in {"iframe", "url"}:
+            url = str(widget.get("url") or widget.get("content") or "").strip()
+            if not url:
+                continue
+            normalized_widgets.append({"type": "iframe", "url": url})
+            continue
+
+        if widget_type == "card":
+            html = str(widget.get("html") or widget.get("content") or "")
+            normalized_widgets.append({"type": "card", "html": html})
+
+    if not normalized_widgets:
+        return None
+
+    payload = {"widgets": normalized_widgets}
+    columns = parsed.get("columns")
+    if isinstance(columns, list):
+        payload["columns"] = columns
+    elif isinstance(columns, int) and columns > 0:
+        payload["columns"] = columns
+    return payload
+
+
 def _parse_bool(value, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -757,13 +803,20 @@ def build_config(hostname):
                 widget_url = i.widget_url or i.source_url
 
                 if widget_def:
+                    widget_type = str(widget_def.get("type") or "html").strip().lower()
                     widget_payload = {
                         "name": widget_def.get("name") or "",
-                        "type": widget_def.get("type") or "html",
+                        "type": widget_type,
                         "content": widget_def.get("content") or "",
                     }
-                    if str(widget_def.get("type") or "").strip().lower() == "url":
+                    if widget_type == "url":
                         widget_url = str(widget_def.get("content") or "").strip() or None
+                    elif widget_type == "dashboard":
+                        parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
+                        if parsed_dashboard_payload:
+                            widget_payload = parsed_dashboard_payload
+                            widget_payload["name"] = widget_def.get("name") or ""
+                        widget_url = None
                     else:
                         widget_url = None
 
@@ -1456,8 +1509,8 @@ def create_widget():
         return jsonify({"error": "name required"}), 400
     if not content:
         return jsonify({"error": "content required"}), 400
-    if widget_type not in {"html", "url"}:
-        return jsonify({"error": "type must be one of: html, url"}), 400
+    if widget_type not in {"html", "url", "dashboard"}:
+        return jsonify({"error": "type must be one of: html, url, dashboard"}), 400
 
     db = db_session()
     try:
@@ -1485,8 +1538,8 @@ def update_widget(widget_id):
         return jsonify({"error": "name required"}), 400
     if not content:
         return jsonify({"error": "content required"}), 400
-    if widget_type not in {"html", "url"}:
-        return jsonify({"error": "type must be one of: html, url"}), 400
+    if widget_type not in {"html", "url", "dashboard"}:
+        return jsonify({"error": "type must be one of: html, url, dashboard"}), 400
 
     db = db_session()
     try:
@@ -1771,13 +1824,20 @@ def list_playlist_items(playlist_id):
             widget_payload = _decode_widget_payload(i.widget_payload)
             widget_url = i.widget_url or i.source_url
             if widget_def:
+                widget_type = str(widget_def.get("type") or "html").strip().lower()
                 widget_payload = {
                     "name": widget_def.get("name") or "",
-                    "type": widget_def.get("type") or "html",
+                    "type": widget_type,
                     "content": widget_def.get("content") or "",
                 }
-                if str(widget_def.get("type") or "").strip().lower() == "url":
+                if widget_type == "url":
                     widget_url = str(widget_def.get("content") or "").strip() or None
+                elif widget_type == "dashboard":
+                    parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
+                    if parsed_dashboard_payload:
+                        widget_payload = parsed_dashboard_payload
+                        widget_payload["name"] = widget_def.get("name") or ""
+                    widget_url = None
                 else:
                     widget_url = None
 
