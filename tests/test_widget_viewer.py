@@ -114,6 +114,18 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], [{"type": "card", "content": "<i>Selam</i>", "html": "<i>Selam</i>"}])
 
+    def test_build_engine_url_uses_content_when_url_type_missing_url_field(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "url", "content": "example.com/content-source"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "content": "example.com/content-source", "url": "https://example.com/content-source"}])
+
     def test_build_engine_url_converts_url_widget_to_iframe(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url(

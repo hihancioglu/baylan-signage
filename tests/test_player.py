@@ -321,6 +321,27 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
 
+    def test_build_widget_layout_payload_treats_url_content_as_iframe_source(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "url", "content": "example.com/dashboard-from-content"}]},
+        )
+
+        self.assertEqual(
+            payload,
+            {
+                "widgets": [
+                    {
+                        "type": "iframe",
+                        "content": "example.com/dashboard-from-content",
+                        "url": "https://example.com/dashboard-from-content",
+                    }
+                ]
+            },
+        )
+
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
         config = {
