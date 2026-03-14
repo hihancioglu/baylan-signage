@@ -414,7 +414,8 @@ class BorderlessFullscreenPlayer:
             try:
                 return Path(source).expanduser().resolve().as_uri()
             except OSError:
-                return f"file:///{source.replace('\\', '/')}"
+                normalized_source = source.replace("\\", "/")
+                return f"file:///{normalized_source}"
 
         if source.startswith(("/", "\\")):
             try:
