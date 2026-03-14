@@ -118,6 +118,14 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(command, ["msedge", "--kiosk", "--app=https://example.com"])
         self.assertFalse(player._python_widget_viewer_runtime_enabled)
 
+    def test_build_widget_command_returns_empty_for_blank_source(self):
+        player = self._build_player()
+
+        with patch.object(player, "_should_use_python_widget_viewer", return_value=False), patch("client.player.os.name", "nt"):
+            command = player._build_widget_command("")
+
+        self.assertEqual(command, [])
+
     def test_python_widget_viewer_enabled_by_default(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
@@ -272,6 +280,26 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         )
 
         self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/panel"}]})
+
+    def test_build_widget_layout_payload_converts_html_widget_to_card(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "html", "content": "<b>Merhaba</b>"}]},
+        )
+
+        self.assertEqual(payload, {"widgets": [{"type": "card", "content": "<b>Merhaba</b>", "html": "<b>Merhaba</b>"}]})
+
+    def test_build_widget_layout_payload_treats_url_type_as_iframe(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "url", "url": "example.com/dashboard"}]},
+        )
+
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
 
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
