@@ -78,6 +78,36 @@
       return fallback;
     }
 
+    function isLikelyBlockedIframe(frame) {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return true;
+
+        const locationHref = String(doc.location && doc.location.href || "").toLowerCase();
+        if (!locationHref || locationHref === "about:blank") {
+          return true;
+        }
+
+        const title = String(doc.title || "").toLowerCase();
+        const bodyText = String(doc.body && doc.body.innerText || "").toLowerCase();
+        const combinedText = `${title} ${bodyText}`;
+        const blockedKeywords = [
+          "refused to connect",
+          "connection refused",
+          "x-frame-options",
+          "frame-ancestors",
+          "can't be displayed",
+          "cannot be displayed",
+          "içinde görüntülenemiyor",
+          "bağlantıyı reddetti",
+        ];
+        return blockedKeywords.some((keyword) => combinedText.includes(keyword));
+      } catch (_err) {
+        // Cross-origin içeriklere erişim normalde kısıtlıdır; bu durumda yükleme başarılı kabul edilir.
+        return false;
+      }
+    }
+
     function attachIframeBlockDetection(wrapper, frame) {
       let settled = false;
       const block = () => {
@@ -91,7 +121,13 @@
       };
 
       frame.addEventListener("error", block);
-      frame.addEventListener("load", success, { once: true });
+      frame.addEventListener("load", () => {
+        if (isLikelyBlockedIframe(frame)) {
+          block();
+          return;
+        }
+        success();
+      }, { once: true });
       window.setTimeout(() => {
         if (!settled) block();
       }, 10000);
