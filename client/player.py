@@ -379,6 +379,9 @@ class BorderlessFullscreenPlayer:
                     command.append(widget_source)
                 return command
 
+        if not str(widget_source or "").strip():
+            return []
+
         if os.name == "nt":
             return ["cmd", "/c", "start", "", widget_source]
 
@@ -440,8 +443,19 @@ class BorderlessFullscreenPlayer:
                     if not isinstance(widget, dict):
                         continue
                     normalized_widget = dict(widget)
-                    if str(normalized_widget.get("type") or "").strip().lower() == "iframe":
+                    widget_type = str(normalized_widget.get("type") or "").strip().lower()
+                    if widget_type in {"iframe", "url"}:
+                        normalized_widget["type"] = "iframe"
                         normalized_widget["url"] = self._normalize_widget_source(str(normalized_widget.get("url") or ""))
+                    elif widget_type == "html":
+                        normalized_widget["type"] = "card"
+                        normalized_widget["html"] = str(
+                            normalized_widget.get("html")
+                            or normalized_widget.get("content")
+                            or ""
+                        )
+                    elif widget_type == "card" and "html" not in normalized_widget:
+                        normalized_widget["html"] = str(normalized_widget.get("content") or "")
                     normalized_widgets.append(normalized_widget)
                 if normalized_widgets:
                     payload["widgets"] = normalized_widgets

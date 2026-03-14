@@ -70,8 +70,19 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
             if not isinstance(widget, dict):
                 continue
             normalized_widget = dict(widget)
-            if str(normalized_widget.get("type") or "").strip().lower() == "iframe":
+            widget_type = str(normalized_widget.get("type") or "").strip().lower()
+            if widget_type in {"iframe", "url"}:
+                normalized_widget["type"] = "iframe"
                 normalized_widget["url"] = _normalize_url(str(normalized_widget.get("url") or ""))
+            elif widget_type == "html":
+                normalized_widget["type"] = "card"
+                normalized_widget["html"] = str(
+                    normalized_widget.get("html")
+                    or normalized_widget.get("content")
+                    or ""
+                )
+            elif widget_type == "card" and "html" not in normalized_widget:
+                normalized_widget["html"] = str(normalized_widget.get("content") or "")
             normalized_widgets.append(normalized_widget)
 
     if normalized_widgets:

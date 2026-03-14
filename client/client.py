@@ -1260,8 +1260,18 @@ class PlaybackController:
                         print(
                             f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
                         )
+                    raw_widget_payload = item.get("widget_payload")
+                    widget_entries = None
+                    if isinstance(raw_widget_payload, list):
+                        widget_entries = raw_widget_payload
+                    elif isinstance(raw_widget_payload, dict):
+                        if isinstance(raw_widget_payload.get("widgets"), list):
+                            widget_entries = raw_widget_payload.get("widgets")
+                        elif raw_widget_payload:
+                            widget_entries = [raw_widget_payload]
+
                     widget_config = {
-                        "widgets": item.get("widget_payload") if isinstance(item.get("widget_payload"), list) else None,
+                        "widgets": widget_entries,
                         "columns": item.get("columns") if isinstance(item.get("columns"), list) else None,
                     }
                     widget_url = str(item.get("widget_url") or media_path or "").strip() or media_path
@@ -2030,9 +2040,12 @@ def run_state_cycle():
         idle_background.hide()
 
     played_for_sec = time.monotonic() - playing_started_at
+    active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
+    active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
+    minimum_playing_before_return = 0.0 if active_item_type == "widget" else MIN_PLAYING_SECONDS
     if (
         current_state == ClientState.PLAYING
-        and played_for_sec >= MIN_PLAYING_SECONDS
+        and played_for_sec >= minimum_playing_before_return
         and idle_sec <= ACTIVITY_RESUME_SEC
     ):
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
