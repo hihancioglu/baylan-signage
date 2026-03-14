@@ -1518,8 +1518,23 @@ def delete_widget(widget_id):
         if len(widgets) == original_count:
             return jsonify({"error": "widget not found"}), 404
 
+        affected_playlist_ids = [
+            row[0]
+            for row in db.query(PlaylistItem.playlist_id)
+            .filter(PlaylistItem.widget_id == widget_id)
+            .distinct()
+            .all()
+        ]
+        db.query(PlaylistItem).filter(PlaylistItem.widget_id == widget_id).delete(synchronize_session=False)
+
         _save_widgets(db, widgets)
         db.commit()
+
+        affected_hostnames = set()
+        for playlist_id in affected_playlist_ids:
+            affected_hostnames.update(_hostnames_for_playlist(db, playlist_id))
+        _emit_config_update(list(affected_hostnames))
+
         return jsonify({"ok": True})
     finally:
         db.close()
@@ -1728,9 +1743,19 @@ def list_playlist_items(playlist_id):
         }
         widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
-        def _resolve_playlist_label(item) -> str:
+        def _resolve_playlist_label(item, widget_def=None, widget_payload=None) -> str:
             item_type = str(item.item_type or "media").strip().lower()
             if item_type == "widget":
+                if widget_def:
+                    name = str(widget_def.get("name") or "").strip()
+                    if name:
+                        return name
+
+                if isinstance(widget_payload, dict):
+                    name = str(widget_payload.get("name") or "").strip()
+                    if name:
+                        return name
+
                 return f"Widget #{item.widget_id}" if item.widget_id else "Widget"
 
             item_path = item.path
@@ -1767,7 +1792,7 @@ def list_playlist_items(playlist_id):
                     "widget_id": i.widget_id,
                     "widget_payload": widget_payload,
                     "widget_url": widget_url,
-                    "label": _resolve_playlist_label(i),
+                    "label": _resolve_playlist_label(i, widget_def=widget_def, widget_payload=widget_payload),
                 }
             )
 
