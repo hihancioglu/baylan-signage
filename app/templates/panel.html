@@ -186,7 +186,7 @@
                     <div class="card-body">
                       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                         <h3 class="h6 mb-0">Dashboard Oluşturucu (Çoklu Iframe)</h3>
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addDashboardIframe()">Iframe Ekle</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addDashboardIframeRow()">Iframe Ekle</button>
                       </div>
                       <p class="text-secondary small mb-2">Dashboard widget için birden fazla iframe URL ekleyin. Kaydetmeden önce içerik alanına JSON olarak yazılır.</p>
                       <div class="row g-2 align-items-end mb-3">
@@ -667,7 +667,7 @@ function resetWidgetForm(){
   document.getElementById('widget-content').value = '';
   document.getElementById('dashboard-columns').value = '2';
   document.getElementById('dashboard-iframe-list').innerHTML = '';
-  addDashboardIframe('https://example.com');
+  addDashboardIframeRow();
   updateWidgetPreview();
 }
 
@@ -688,6 +688,11 @@ function addDashboardIframe(initialUrl = ''){
   row.className = 'input-group input-group-sm';
   row.innerHTML = `<span class="input-group-text">Iframe</span><input class="form-control dashboard-iframe-url" placeholder="https://..." value="${escapeHtml(initialUrl)}" oninput="syncDashboardToContent()" /><button class="btn btn-outline-danger" type="button" onclick="this.parentElement.remove(); syncDashboardToContent();">Sil</button>`;
   list.appendChild(row);
+}
+
+function addDashboardIframeRow(){
+  const cols = Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
+  for(let i = 0; i < cols; i += 1) addDashboardIframe('');
   syncDashboardToContent();
 }
 
@@ -704,6 +709,7 @@ function syncDashboardBuilderFromContent(content){
   (urls.length ? urls : ['']).forEach(url => addDashboardIframe(url));
   const cols = Number(config?.columns || 2);
   document.getElementById('dashboard-columns').value = String(cols > 0 ? cols : 2);
+  syncDashboardToContent();
 }
 
 function syncDashboardToContent(){
@@ -745,7 +751,7 @@ function updateWidgetPreview(){
   const preview = document.getElementById('widget-preview');
   const dashboardBuilder = document.getElementById('widget-dashboard-builder');
   dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
-  if(type === 'dashboard' && !document.querySelector('.dashboard-iframe-url')) addDashboardIframe('');
+  if(type === 'dashboard' && !document.querySelector('.dashboard-iframe-url')) addDashboardIframeRow();
 
   if(!content){
     preview.textContent = 'Önizleme için içerik girin.';
