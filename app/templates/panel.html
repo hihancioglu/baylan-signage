@@ -19,6 +19,16 @@
     .playlist-item.active { outline: 2px solid #0ea5e9; }
     .mini-card { border: 1px solid #e2e8f0; border-radius: 12px; }
     .mini-card .card-body { padding: 1rem; }
+    .dashboard-iframe-row {
+      display: grid;
+      gap: .5rem;
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    @media (min-width: 992px) {
+      .dashboard-iframe-row {
+        grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(0, 1fr));
+      }
+    }
   </style>
 </head>
 <body>
@@ -192,7 +202,7 @@
                       <div class="row g-2 align-items-end mb-3">
                         <div class="col-12 col-md-3">
                           <label class="form-label small">Kolon Sayısı</label>
-                          <input id="dashboard-columns" type="number" min="1" value="2" class="form-control" onchange="syncDashboardToContent()" />
+                          <input id="dashboard-columns" type="number" min="1" value="2" class="form-control" onchange="reflowDashboardIframeRows()" />
                         </div>
                       </div>
                       <div id="dashboard-iframe-list" class="d-flex flex-column gap-2"></div>
@@ -681,18 +691,80 @@ function extractDashboardConfig(content){
   }
 }
 
-function addDashboardIframe(initialUrl = ''){
-  const list = document.getElementById('dashboard-iframe-list');
-  if(!list) return;
-  const row = document.createElement('div');
-  row.className = 'input-group input-group-sm';
-  row.innerHTML = `<span class="input-group-text">Iframe</span><input class="form-control dashboard-iframe-url" placeholder="https://..." value="${escapeHtml(initialUrl)}" oninput="syncDashboardToContent()" /><button class="btn btn-outline-danger" type="button" onclick="this.parentElement.remove(); syncDashboardToContent();">Sil</button>`;
-  list.appendChild(row);
+function dashboardColumnLabel(colIndex, cols){
+  if(cols === 2) return colIndex === 0 ? 'Sol' : 'Sağ';
+  if(cols === 3) return ['Sol', 'Orta', 'Sağ'][colIndex] || `Kolon ${colIndex + 1}`;
+  return `Kolon ${colIndex + 1}`;
 }
 
-function addDashboardIframeRow(){
-  const cols = Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
-  for(let i = 0; i < cols; i += 1) addDashboardIframe('');
+function dashboardColumns(){
+  return Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
+}
+
+function collectDashboardIframeUrls(){
+  return Array.from(document.querySelectorAll('.dashboard-iframe-url'))
+    .map(el => String(el.value || '').trim())
+    .filter(Boolean);
+}
+
+function buildDashboardIframeCell(url = ''){
+  const wrapper = document.createElement('div');
+  wrapper.className = 'dashboard-iframe-item input-group input-group-sm';
+  wrapper.innerHTML = `<span class="input-group-text dashboard-iframe-label">Iframe</span><input class="form-control dashboard-iframe-url" placeholder="https://..." value="${escapeHtml(url)}" oninput="syncDashboardToContent()" /><button class="btn btn-outline-danger" type="button" onclick="removeDashboardIframe(this)">Sil</button>`;
+  return wrapper;
+}
+
+function addDashboardIframeRow(initialUrls = []){
+  const cols = dashboardColumns();
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return;
+
+  const row = document.createElement('div');
+  row.className = 'dashboard-iframe-row';
+  row.style.setProperty('--dashboard-columns', String(cols));
+
+  for(let i = 0; i < cols; i += 1){
+    row.appendChild(buildDashboardIframeCell(initialUrls[i] || ''));
+  }
+
+  list.appendChild(row);
+  refreshDashboardIframeLabels();
+  syncDashboardToContent();
+}
+
+function removeDashboardIframe(button){
+  const cell = button?.closest('.dashboard-iframe-item');
+  if(cell) cell.remove();
+
+  const row = button?.closest('.dashboard-iframe-row');
+  if(row && !row.querySelector('.dashboard-iframe-item')) row.remove();
+
+  refreshDashboardIframeLabels();
+  syncDashboardToContent();
+}
+
+function refreshDashboardIframeLabels(){
+  const cols = dashboardColumns();
+  const labels = Array.from(document.querySelectorAll('.dashboard-iframe-label'));
+  labels.forEach((label, index) => {
+    const rowIndex = Math.floor(index / cols);
+    const colIndex = index % cols;
+    label.textContent = `${rowIndex + 1}. Satır ${dashboardColumnLabel(colIndex, cols)}`;
+  });
+}
+
+function reflowDashboardIframeRows(){
+  const urls = collectDashboardIframeUrls();
+  const cols = dashboardColumns();
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return;
+
+  list.innerHTML = '';
+  const items = urls.length ? urls : [''];
+  for(let i = 0; i < items.length; i += cols){
+    addDashboardIframeRow(items.slice(i, i + cols));
+  }
+  refreshDashboardIframeLabels();
   syncDashboardToContent();
 }
 
@@ -700,15 +772,19 @@ function syncDashboardBuilderFromContent(content){
   const config = extractDashboardConfig(content);
   const list = document.getElementById('dashboard-iframe-list');
   if(!list) return;
-  list.innerHTML = '';
 
   const urls = (config?.widgets || [])
     .map(w => (w?.type === 'iframe' || w?.type === 'url') ? String(w.url || w.content || '').trim() : '')
     .filter(Boolean);
 
-  (urls.length ? urls : ['']).forEach(url => addDashboardIframe(url));
   const cols = Number(config?.columns || 2);
   document.getElementById('dashboard-columns').value = String(cols > 0 ? cols : 2);
+  list.innerHTML = '';
+  const rowItems = urls.length ? urls : [''];
+  for(let i = 0; i < rowItems.length; i += dashboardColumns()){
+    addDashboardIframeRow(rowItems.slice(i, i + dashboardColumns()));
+  }
+  refreshDashboardIframeLabels();
   syncDashboardToContent();
 }
 
@@ -716,10 +792,8 @@ function syncDashboardToContent(){
   const type = document.getElementById('widget-type').value;
   if(type !== 'dashboard') return;
 
-  const cols = Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
-  const urls = Array.from(document.querySelectorAll('.dashboard-iframe-url'))
-    .map(el => String(el.value || '').trim())
-    .filter(Boolean);
+  const cols = dashboardColumns();
+  const urls = collectDashboardIframeUrls();
 
   const payload = {
     columns: cols,
