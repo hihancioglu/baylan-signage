@@ -57,6 +57,11 @@
       const normalized = { widgets };
       if (Array.isArray(input.columns)) {
         normalized.columns = input.columns;
+      } else {
+        const parsedColumns = Number(input.columns);
+        if (Number.isFinite(parsedColumns) && parsedColumns > 0) {
+          normalized.columns = parsedColumns;
+        }
       }
       return normalized;
     }
