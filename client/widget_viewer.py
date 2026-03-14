@@ -17,6 +17,10 @@ CHROME_KIOSK_SWITCHES = {
     "disable-features": "TranslateUI",
 }
 WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
+WEATHER_WIDGET_HREF_PATTERN = re.compile(
+    r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>',
+    re.IGNORECASE,
+)
 
 
 def _safe_print(message: str) -> None:
@@ -106,9 +110,22 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
     widgets = payload.get("widgets")
 
     normalized_widgets: list[dict] = []
+
     def _looks_like_embed_html(value: object) -> bool:
         text = str(value or "").strip().lower()
         return bool(text) and text.startswith("<") and ">" in text
+
+    def _extract_weather_widget_url(value: object) -> str | None:
+        html = str(value or "")
+        if "weatherwidget.io/js/widget.min.js" not in html.lower() and "weatherwidget-io" not in html.lower():
+            return None
+        match = WEATHER_WIDGET_HREF_PATTERN.search(html)
+        if not match:
+            return None
+        href = match.group(1).strip()
+        if "forecast7.com" not in href.lower():
+            return None
+        return href
 
     if isinstance(widgets, list):
         for widget in widgets:
@@ -124,9 +141,14 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                     or ""
                 )
                 if _looks_like_embed_html(raw_url):
-                    normalized_widget["type"] = "embed"
-                    normalized_widget["html"] = str(raw_url)
-                    normalized_widget.pop("url", None)
+                    weather_url = _extract_weather_widget_url(raw_url)
+                    if weather_url:
+                        normalized_widget["type"] = "iframe"
+                        normalized_widget["url"] = _normalize_url(weather_url)
+                    else:
+                        normalized_widget["type"] = "embed"
+                        normalized_widget["html"] = str(raw_url)
+                        normalized_widget.pop("url", None)
                 else:
                     normalized_widget["type"] = "iframe"
                     normalized_widget["url"] = _normalize_url(str(raw_url))
