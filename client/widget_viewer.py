@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import json
 import os
 import sys
@@ -52,7 +53,28 @@ def _normalize_url(source: str) -> str:
 
     if url.lower().startswith(("http://", "https://", "file://")):
         return url
-    return f"http://{url}"
+
+    scheme = _default_widget_scheme(url)
+    return f"{scheme}://{url}"
+
+
+def _default_widget_scheme(raw_source: str) -> str:
+    host_candidate = str(raw_source or "").split("/", 1)[0].strip().strip("[]")
+    if not host_candidate:
+        return "https"
+
+    hostname = host_candidate.rsplit("@", 1)[-1].split(":", 1)[0].lower()
+    if hostname == "localhost" or hostname.endswith(".local"):
+        return "http"
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return "https"
+
+    if ip.is_loopback or ip.is_private or ip.is_link_local:
+        return "http"
+    return "https"
 
 
 def _runtime_resource_path(*relative_parts: str) -> Path:

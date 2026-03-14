@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import json
 import os
 import shlex
@@ -448,8 +449,28 @@ class BorderlessFullscreenPlayer:
         if BorderlessFullscreenPlayer._is_widget_url(source):
             return source
         if "://" not in source and not source.startswith(("/", "\\")):
-            return f"http://{source}"
+            scheme = BorderlessFullscreenPlayer._default_widget_scheme(source)
+            return f"{scheme}://{source}"
         return source
+
+    @staticmethod
+    def _default_widget_scheme(raw_source: str) -> str:
+        host_candidate = str(raw_source or "").split("/", 1)[0].strip().strip("[]")
+        if not host_candidate:
+            return "https"
+
+        hostname = host_candidate.rsplit("@", 1)[-1].split(":", 1)[0].lower()
+        if hostname == "localhost" or hostname.endswith(".local"):
+            return "http"
+
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            return "https"
+
+        if ip.is_loopback or ip.is_private or ip.is_link_local:
+            return "http"
+        return "https"
 
     def _normalize_widget_payload(self, widget_config: dict | None, fallback_source: str = "") -> dict | None:
         payload: dict[str, object] = {}
