@@ -1046,6 +1046,58 @@ class PlaybackController:
             return duration
         return default_duration
 
+    def _build_widget_playback_spec(self, item: dict) -> tuple[str, dict | None, str] | None:
+        normalized = self._normalize_item(item or {})
+        if normalized.get("item_type") != "widget":
+            return None
+
+        raw_widget_payload = normalized.get("widget_payload")
+        widget_entries = None
+        if isinstance(raw_widget_payload, list):
+            widget_entries = raw_widget_payload
+        elif isinstance(raw_widget_payload, dict):
+            if isinstance(raw_widget_payload.get("widgets"), list):
+                widget_entries = raw_widget_payload.get("widgets")
+            elif raw_widget_payload:
+                widget_entries = [raw_widget_payload]
+
+        widget_config = {
+            "widgets": widget_entries,
+            "columns": normalized.get("columns") if isinstance(normalized.get("columns"), list) else None,
+        }
+        widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or "").strip()
+        if widget_config["widgets"] is None and widget_url:
+            widget_config["widgets"] = [{"type": "iframe", "url": widget_url}]
+        if widget_config["columns"] is None:
+            widget_config.pop("columns", None)
+        if widget_config.get("widgets") is None:
+            widget_config = None
+
+        widget_signature = hashlib.sha256(
+            json.dumps(
+                {"widget_url": widget_url, "widget_config": widget_config},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return widget_url, widget_config, widget_signature
+
+    def _prewarm_next_widget(self, playlist_entries: list[dict], loop_mode: str, runtime_state: dict) -> None:
+        if loop_mode != "sequential" or not playlist_entries:
+            return
+
+        current_index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+        next_item = playlist_entries[(current_index + 1) % len(playlist_entries)]
+        next_spec = self._build_widget_playback_spec(next_item)
+        if not next_spec:
+            return
+
+        widget_url, widget_config, widget_signature = next_spec
+        if widget_signature == self._active_widget_signature:
+            return
+
+        self.player.update_widget_layout(widget_url, widget_config=widget_config)
+
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         for entry in playlist_entries:
             normalized = self._normalize_item(entry or {})
@@ -1260,41 +1312,17 @@ class PlaybackController:
                         print(
                             f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
                         )
-                    raw_widget_payload = item.get("widget_payload")
-                    widget_entries = None
-                    if isinstance(raw_widget_payload, list):
-                        widget_entries = raw_widget_payload
-                    elif isinstance(raw_widget_payload, dict):
-                        if isinstance(raw_widget_payload.get("widgets"), list):
-                            widget_entries = raw_widget_payload.get("widgets")
-                        elif raw_widget_payload:
-                            widget_entries = [raw_widget_payload]
 
-                    widget_config = {
-                        "widgets": widget_entries,
-                        "columns": item.get("columns") if isinstance(item.get("columns"), list) else None,
-                    }
-                    widget_url = str(item.get("widget_url") or media_path or "").strip() or media_path
-                    if widget_config["widgets"] is None and widget_url:
-                        widget_config["widgets"] = [{"type": "iframe", "url": widget_url}]
-                    if widget_config["columns"] is None:
-                        widget_config.pop("columns", None)
-                    if widget_config.get("widgets") is None:
-                        widget_config = None
-
-                    widget_signature = hashlib.sha256(
-                        json.dumps(
-                            {"widget_url": widget_url, "widget_config": widget_config},
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ).encode("utf-8")
-                    ).hexdigest()
-
-                    if widget_signature != self._active_widget_signature:
-                        ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
-                        self._active_widget_signature = widget_signature if ok else None
+                    widget_spec = self._build_widget_playback_spec(item)
+                    if widget_spec is None:
+                        ok = False
                     else:
-                        ok = True
+                        widget_url, widget_config, widget_signature = widget_spec
+                        if widget_signature != self._active_widget_signature:
+                            ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
+                            self._active_widget_signature = widget_signature if ok else None
+                        else:
+                            ok = True
 
                     if ok:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
@@ -1335,6 +1363,7 @@ class PlaybackController:
                     else:
                         runtime_state["index"] = (int(runtime_state.get("index") or 0) + 1) % len(playlist_entries)
 
+                self._prewarm_next_widget(playlist_entries, loop_mode, runtime_state)
                 self._persist_playback_state()
         except Exception as exc:
             logging.exception("Playback worker crashed")
