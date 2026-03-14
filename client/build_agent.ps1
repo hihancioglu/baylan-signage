@@ -47,6 +47,16 @@ $clientPyInstallerArgs = @(
     $Name
     "--add-data"
     "client/widget_engine.html;client"
+    "--add-data"
+    "client/idle.py;client"
+    "--add-data"
+    "client/media_manager.py;client"
+    "--add-data"
+    "client/player.py;client"
+    "--add-data"
+    "client/state_machine.py;client"
+    "--add-data"
+    "client/widget_viewer.py;client"
     "--paths"
     $projectRoot
     "--paths"
