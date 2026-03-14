@@ -100,7 +100,7 @@ class TestWidgetViewer(unittest.TestCase):
         parsed = urlparse(result)
         encoded = parse_qs(parsed.query)["config_b64"][0]
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
-        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://example.com/dashboard"}])
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "http://example.com/dashboard"}])
 
     def test_build_engine_url_converts_html_widget_to_card(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
@@ -124,7 +124,7 @@ class TestWidgetViewer(unittest.TestCase):
         parsed = urlparse(result)
         encoded = parse_qs(parsed.query)["config_b64"][0]
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
-        self.assertEqual(payload["widgets"], [{"type": "iframe", "content": "example.com/content-source", "url": "https://example.com/content-source"}])
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "content": "example.com/content-source", "url": "http://example.com/content-source"}])
 
     def test_build_engine_url_converts_url_widget_to_iframe(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
@@ -136,7 +136,7 @@ class TestWidgetViewer(unittest.TestCase):
         parsed = urlparse(result)
         encoded = parse_qs(parsed.query)["config_b64"][0]
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
-        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://example.com/page"}])
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "http://example.com/page"}])
 
 
 if __name__ == "__main__":
