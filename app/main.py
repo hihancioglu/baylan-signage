@@ -345,6 +345,11 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         return None
 
     normalized_widgets: list[dict] = []
+
+    def _looks_like_embed_html(value: str) -> bool:
+        text = str(value or "").strip().lower()
+        return bool(text) and text.startswith("<") and ">" in text
+
     for widget in widgets:
         if not isinstance(widget, dict):
             continue
@@ -353,6 +358,9 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         if widget_type in {"iframe", "url"}:
             url = str(widget.get("url") or widget.get("content") or "").strip()
             if not url:
+                continue
+            if _looks_like_embed_html(url):
+                normalized_widgets.append({"type": "embed", "html": url})
                 continue
             normalized_widgets.append({"type": "iframe", "url": url})
             continue

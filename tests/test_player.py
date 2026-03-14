@@ -348,6 +348,18 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             },
         )
 
+    def test_build_widget_layout_payload_treats_html_embed_as_embed_widget(self):
+        player = self._build_player()
+
+        embed_html = '<a href="https://example.com">Widget</a><script>window.__x=1;</script>'
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "iframe", "url": embed_html}]},
+        )
+
+        self.assertEqual(payload, {"widgets": [{"type": "embed", "html": embed_html}]})
+
+
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
         config = {

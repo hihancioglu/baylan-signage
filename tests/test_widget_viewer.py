@@ -141,6 +141,20 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://example.com/page"}])
 
+    def test_build_engine_url_treats_embed_html_as_embed_widget(self):
+        embed_html = '<a href="https://example.com">Widget</a><script>window.__x=1;</script>'
+
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "iframe", "url": embed_html}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "embed", "html": embed_html}])
+
 
 if __name__ == "__main__":
     unittest.main()

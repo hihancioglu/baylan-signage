@@ -158,6 +158,23 @@
           card.className = "widget card";
           card.innerHTML = w.html || "";
           container.appendChild(card);
+          return;
+        }
+        if (w.type === "embed") {
+          const embed = document.createElement("div");
+          embed.className = "widget card";
+          embed.innerHTML = w.html || "";
+          Array.from(embed.querySelectorAll("script")).forEach((scriptNode) => {
+            const runnable = document.createElement("script");
+            Array.from(scriptNode.attributes).forEach((attr) => {
+              runnable.setAttribute(attr.name, attr.value);
+            });
+            if (scriptNode.textContent) {
+              runnable.textContent = scriptNode.textContent;
+            }
+            scriptNode.replaceWith(runnable);
+          });
+          container.appendChild(embed);
         }
       });
     }

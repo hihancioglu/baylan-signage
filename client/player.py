@@ -479,6 +479,10 @@ class BorderlessFullscreenPlayer:
             widgets = widget_config.get("widgets")
             if isinstance(widgets, list) and widgets:
                 normalized_widgets: list[dict] = []
+                def _looks_like_embed_html(value: object) -> bool:
+                    text = str(value or "").strip().lower()
+                    return bool(text) and text.startswith("<") and ">" in text
+
                 for widget in widgets:
                     if not isinstance(widget, dict):
                         continue
@@ -491,8 +495,13 @@ class BorderlessFullscreenPlayer:
                             or normalized_widget.get("source")
                             or ""
                         )
-                        normalized_widget["type"] = "iframe"
-                        normalized_widget["url"] = self._normalize_widget_source(str(raw_url))
+                        if _looks_like_embed_html(raw_url):
+                            normalized_widget["type"] = "embed"
+                            normalized_widget["html"] = str(raw_url)
+                            normalized_widget.pop("url", None)
+                        else:
+                            normalized_widget["type"] = "iframe"
+                            normalized_widget["url"] = self._normalize_widget_source(str(raw_url))
                     elif widget_type == "html":
                         normalized_widget["type"] = "card"
                         normalized_widget["html"] = str(
