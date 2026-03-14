@@ -180,6 +180,76 @@ class TestConfigPush(unittest.TestCase):
 
         self.assertNotEqual(first_version, second_version)
 
+    def test_build_config_widget_item_reflects_updated_widget_definition(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Widget Group")
+            playlist = self.main.Playlist(name="Widget Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-widget")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    media_type="widget",
+                    widget_id=7,
+                    widget_payload='{"name":"Eski","type":"html","content":"<div>eski</div>"}',
+                    order_no=0,
+                )
+            )
+            db.commit()
+
+            self.main._save_widgets(
+                db,
+                [
+                    {
+                        "id": 7,
+                        "name": "Yeni Widget",
+                        "type": "html",
+                        "content": "<div>yeni</div>",
+                    }
+                ],
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-widget")
+        self.assertEqual(cfg["videos"][0]["widget_payload"]["name"], "Yeni Widget")
+        self.assertEqual(cfg["videos"][0]["widget_payload"]["content"], "<div>yeni</div>")
+        self.assertIsNone(cfg["videos"][0]["widget_url"])
+
+    def test_build_config_widget_payload_string_is_decoded_for_html_widget(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Widget Group Decode")
+            playlist = self.main.Playlist(name="Widget Playlist Decode", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-widget-decode")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    media_type="widget",
+                    widget_payload='{"type":"html","content":"<b>merhaba</b>"}',
+                    order_no=0,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-widget-decode")
+        self.assertEqual(cfg["videos"][0]["widget_payload"], {"type": "html", "content": "<b>merhaba</b>"})
+
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:

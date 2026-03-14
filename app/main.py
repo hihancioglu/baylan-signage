@@ -307,6 +307,26 @@ def _save_widgets(db, widgets: list[dict]):
     _set_setting(db, "panel_widgets", json.dumps(widgets, ensure_ascii=False))
 
 
+def _decode_widget_payload(raw_payload):
+    if isinstance(raw_payload, (dict, list)):
+        return raw_payload
+    if raw_payload is None:
+        return None
+
+    text = str(raw_payload).strip()
+    if not text:
+        return None
+
+    try:
+        decoded = json.loads(text)
+        if isinstance(decoded, (dict, list)):
+            return decoded
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+
+    return {"type": "html", "content": text}
+
+
 def _parse_bool(value, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -726,21 +746,37 @@ def build_config(hostname):
             .order_by(PlaylistItem.order_no)
             .all()
         )
+        widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
         videos = []
         for i in items:
             item_type = str(i.item_type or "media").strip().lower()
             if item_type == "widget":
+                widget_def = widgets_by_id.get(i.widget_id) if i.widget_id else None
+                widget_payload = _decode_widget_payload(i.widget_payload)
+                widget_url = i.widget_url or i.source_url
+
+                if widget_def:
+                    widget_payload = {
+                        "name": widget_def.get("name") or "",
+                        "type": widget_def.get("type") or "html",
+                        "content": widget_def.get("content") or "",
+                    }
+                    if str(widget_def.get("type") or "").strip().lower() == "url":
+                        widget_url = str(widget_def.get("content") or "").strip() or None
+                    else:
+                        widget_url = None
+
                 videos.append(
                     {
-                        "path": i.path or i.widget_url or i.source_url,
+                        "path": widget_url or i.path or i.widget_url or i.source_url,
                         "item_type": "widget",
                         "media_type": "widget",
                         "duration_sec": i.duration_sec,
                         "order_no": i.order_no,
                         "widget_id": i.widget_id,
-                        "widget_payload": i.widget_payload,
-                        "widget_url": i.widget_url or i.source_url,
+                        "widget_payload": widget_payload,
+                        "widget_url": widget_url,
                     }
                 )
                 continue
@@ -1690,6 +1726,7 @@ def list_playlist_items(playlist_id):
             media.relative_path: media.original_name
             for media in db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
         }
+        widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
         def _resolve_playlist_label(item) -> str:
             item_type = str(item.item_type or "media").strip().lower()
@@ -1702,25 +1739,39 @@ def list_playlist_items(playlist_id):
                 return media_assets_by_relative_path[relative_path]
             return Path((item_path or "").split("?")[0]).name or item_path
 
-        return jsonify([
-            {
-                "id": i.id,
-                "path": i.path,
-                "order_no": i.order_no,
-                "item_type": str(i.item_type or "media").strip().lower(),
-                "media_type": (
-                    "widget"
-                    if str(i.item_type or "media").strip().lower() == "widget"
-                    else (i.media_type or _media_kind_from_path(i.path))
-                ),
-                "duration_sec": i.duration_sec,
-                "widget_id": i.widget_id,
-                "widget_payload": i.widget_payload,
-                "widget_url": i.widget_url or i.source_url,
-                "label": _resolve_playlist_label(i),
-            }
-            for i in items
-        ])
+        serialized_items = []
+        for i in items:
+            item_type = str(i.item_type or "media").strip().lower()
+            widget_def = widgets_by_id.get(i.widget_id) if item_type == "widget" and i.widget_id else None
+            widget_payload = _decode_widget_payload(i.widget_payload)
+            widget_url = i.widget_url or i.source_url
+            if widget_def:
+                widget_payload = {
+                    "name": widget_def.get("name") or "",
+                    "type": widget_def.get("type") or "html",
+                    "content": widget_def.get("content") or "",
+                }
+                if str(widget_def.get("type") or "").strip().lower() == "url":
+                    widget_url = str(widget_def.get("content") or "").strip() or None
+                else:
+                    widget_url = None
+
+            serialized_items.append(
+                {
+                    "id": i.id,
+                    "path": widget_url or i.path,
+                    "order_no": i.order_no,
+                    "item_type": item_type,
+                    "media_type": "widget" if item_type == "widget" else (i.media_type or _media_kind_from_path(i.path)),
+                    "duration_sec": i.duration_sec,
+                    "widget_id": i.widget_id,
+                    "widget_payload": widget_payload,
+                    "widget_url": widget_url,
+                    "label": _resolve_playlist_label(i),
+                }
+            )
+
+        return jsonify(serialized_items)
     finally:
         db.close()
 
