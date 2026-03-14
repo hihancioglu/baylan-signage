@@ -1244,9 +1244,6 @@ class PlaybackController:
 
                 item_type = str(item.get("item_type") or "media").strip().lower()
                 media_path = str(item.get("local_path") or "")
-                if not media_path:
-                    time.sleep(0.2)
-                    continue
 
                 duration_sec = item.get("duration_sec")
                 resume_sec = float(runtime_state.get("resume_sec") or 0)
@@ -1300,6 +1297,10 @@ class PlaybackController:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
                     interrupted = self.player.last_play_was_interrupted()
                 else:
+                    if not media_path:
+                        time.sleep(0.2)
+                        continue
+
                     self._active_widget_signature = None
                     self.player.stop_widget_engine()
                     image_duration_sec = None
