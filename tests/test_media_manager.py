@@ -117,6 +117,31 @@ class TestMediaManagerDownloadJitter(unittest.TestCase):
             sleep_mock.assert_not_called()
 
 
+
+    def test_sync_playlist_entries_keeps_html_widget_without_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            widget_payload = {"name": "Duyuru", "type": "html", "content": "<h1>Merhaba</h1>"}
+
+            entries = manager.sync_playlist_entries(
+                [
+                    {
+                        "path": None,
+                        "item_type": "widget",
+                        "media_type": "widget",
+                        "duration_sec": 10,
+                        "widget_payload": widget_payload,
+                        "widget_url": None,
+                    }
+                ],
+                "v-html-widget",
+                {},
+            )
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["item_type"], "widget")
+            self.assertEqual(entries[0]["local_path"], "")
+            self.assertEqual(entries[0]["widget_payload"], widget_payload)
     def test_load_last_successful_playlist_entries_restores_widget_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MediaManager(cache_root=tmpdir)

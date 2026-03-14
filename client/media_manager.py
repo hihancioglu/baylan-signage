@@ -317,7 +317,37 @@ class MediaManager:
             )
 
             try:
-                if should_download:
+                if item_type == "widget" and not normalized_source:
+                    local_entry = {
+                        "source": normalized_source,
+                        "local_path": "",
+                        "duration_sec": duration_sec,
+                        "media_type": media_type,
+                        "item_type": item_type,
+                        "display_name": display_name,
+                        "widget_requires_download": widget_requires_download,
+                        "widget_payload": widget_payload,
+                        "widget_url": widget_url,
+                        "columns": columns,
+                    }
+                    local_entries.append(local_entry)
+                    manifest.append(
+                        {
+                            "source": normalized_source,
+                            "local_path": "",
+                            "checksum": None,
+                            "signature": signature,
+                            "duration_sec": duration_sec,
+                            "media_type": media_type,
+                            "item_type": item_type,
+                            "display_name": display_name,
+                            "widget_requires_download": widget_requires_download,
+                            "widget_payload": widget_payload,
+                            "widget_url": widget_url,
+                            "columns": columns,
+                        }
+                    )
+                elif should_download:
                     target = self._url_cache_target(normalized_source, signature)
                     if not target.exists():
                         report_progress("downloading", normalized_source)
