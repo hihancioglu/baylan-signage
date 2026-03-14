@@ -52,6 +52,16 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn("widget_engine.html", result)
         self.assertIn("config_b64=", result)
 
+
+    def test_build_engine_url_falls_back_when_meipass_resource_missing(self):
+        with patch.dict('os.environ', {'WIDGET_SINGLE_ENGINE': '1'}, clear=False), patch(
+            'client.widget_viewer.sys._MEIPASS', '/tmp/nonexistent-meipass', create=True
+        ):
+            result = widget_viewer._build_engine_url('https://example.com')
+
+        self.assertIn('widget_engine.html', result)
+        self.assertNotIn('/tmp/nonexistent-meipass', result)
+
     def test_build_engine_url_encodes_widgets_and_columns(self):
         config = {
             "widgets": [
