@@ -60,6 +60,25 @@ def _runtime_resource_path(*relative_parts: str) -> Path:
     return base_dir.joinpath(*relative_parts)
 
 
+def _resolve_runtime_resource(*relative_parts: str) -> Path:
+    candidates: list[Path] = []
+
+    primary = _runtime_resource_path(*relative_parts)
+    candidates.append(primary)
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates.append(executable_dir.joinpath(*relative_parts))
+
+    module_dir = Path(__file__).resolve().parent
+    candidates.append(module_dir.joinpath(*relative_parts))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    return primary
+
+
 def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = None) -> dict:
     payload = dict(widget_config) if isinstance(widget_config, dict) else {}
     widgets = payload.get("widgets")
@@ -152,7 +171,7 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
 
     payload = _normalize_widget_payload(widget_config if isinstance(widget_config, dict) else {}, fallback_url=source)
 
-    engine_uri = _runtime_resource_path("widget_engine.html").resolve().as_uri()
+    engine_uri = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
     encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
     return f"{engine_uri}?config_b64={encoded}"
 

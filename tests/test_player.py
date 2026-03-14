@@ -207,6 +207,26 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         process.terminate.assert_called_once()
 
+
+    def test_build_widget_source_uses_existing_module_resource_when_meipass_missing(self):
+        player = self._build_player()
+
+        with patch('client.player.sys._MEIPASS', '/tmp/nonexistent-meipass', create=True):
+            source = player._build_widget_source('https://example.com', widget_config={'widgets': [{'type': 'iframe', 'url': 'https://example.com'}]})
+
+        self.assertIn('widget_engine.html', source)
+        self.assertNotIn('/tmp/nonexistent-meipass', source)
+
+    def test_terminate_process_prefers_taskkill_for_windows_tree(self):
+        process = unittest.mock.Mock()
+        process.pid = 1234
+
+        with patch('client.player.os.name', 'nt'), patch('client.player.subprocess.run') as run_mock:
+            BorderlessFullscreenPlayer._terminate_process(process, timeout_sec=1, force_tree=True)
+
+        run_mock.assert_called_once()
+        process.wait.assert_called_once_with(timeout=1)
+        process.terminate.assert_not_called()
     def test_play_widget_url_nonzero_exit_does_not_disable_python_viewer(self):
         player = self._build_player()
         process = unittest.mock.Mock()
@@ -347,14 +367,14 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process = unittest.mock.Mock()
         process.poll.return_value = None
         process.pid = 4242
-        process.wait.side_effect = [subprocess.TimeoutExpired(cmd="widget", timeout=2), None]
         player._widget_process = process
 
         with patch("client.player.os.name", "nt"), patch("subprocess.run") as run_mock:
             player.stop()
 
-        process.terminate.assert_called_once()
-        process.kill.assert_called_once()
+        process.wait.assert_called_once_with(timeout=1)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
         run_mock.assert_called_once_with(
             ["taskkill", "/PID", "4242", "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -368,7 +388,6 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.poll.side_effect = [None, None, None]
         process.pid = 31337
         process.returncode = None
-        process.wait.side_effect = [subprocess.TimeoutExpired(cmd="widget", timeout=2), None]
 
         with patch("client.player.os.name", "nt"), patch("subprocess.run") as run_mock, patch(
             "time.monotonic", side_effect=[100.0, 101.1]
@@ -376,8 +395,9 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             result = player._wait_widget_until_stop(process, max_duration_sec=1)
 
         self.assertTrue(result)
-        process.terminate.assert_called_once()
-        process.kill.assert_called_once()
+        process.wait.assert_called_once_with(timeout=1)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
         run_mock.assert_called_once_with(
             ["taskkill", "/PID", "31337", "/T", "/F"],
             stdout=subprocess.DEVNULL,

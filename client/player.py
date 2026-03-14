@@ -27,6 +27,25 @@ def _runtime_resource_path(*relative_parts: str) -> Path:
     return base_dir.joinpath(*relative_parts)
 
 
+def _resolve_runtime_resource(*relative_parts: str) -> Path:
+    candidates: list[Path] = []
+
+    primary = _runtime_resource_path(*relative_parts)
+    candidates.append(primary)
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates.append(executable_dir.joinpath(*relative_parts))
+
+    module_dir = Path(__file__).resolve().parent
+    candidates.append(module_dir.joinpath(*relative_parts))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    return primary
+
+
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
@@ -168,7 +187,7 @@ class BorderlessFullscreenPlayer:
         return True
 
     def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
-        viewer_path = _runtime_resource_path("widget_viewer.py")
+        viewer_path = _resolve_runtime_resource("widget_viewer.py")
         frozen_viewer = self._find_frozen_widget_viewer_executable()
         if frozen_viewer:
             return [frozen_viewer, widget_source]
@@ -520,7 +539,7 @@ class BorderlessFullscreenPlayer:
         if payload is None:
             return source
 
-        engine_path = _runtime_resource_path("widget_engine.html")
+        engine_path = _resolve_runtime_resource("widget_engine.html")
         engine_uri = engine_path.resolve().as_uri()
         encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
         return f"{engine_uri}?config_b64={encoded}"
@@ -530,7 +549,7 @@ class BorderlessFullscreenPlayer:
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
 
     def _widget_runtime_engine_source(self) -> str:
-        return _runtime_resource_path("widget_engine.html").resolve().as_uri()
+        return _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
 
     def start_widget_engine_if_needed(self) -> bool:
         if not self._widget_runtime_controller_enabled():
@@ -860,6 +879,21 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen, timeout_sec: float, force_tree: bool = False) -> None:
+        if force_tree and os.name == "nt":
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                    process.wait(timeout=1)
+                    return
+                except Exception:
+                    pass
+
         try:
             process.terminate()
             process.wait(timeout=timeout_sec)
@@ -875,22 +909,18 @@ class BorderlessFullscreenPlayer:
         except Exception:
             pass
 
-        if not force_tree or os.name != "nt":
-            return
-
-        pid = getattr(process, "pid", None)
-        if not isinstance(pid, int) or pid <= 0:
-            return
-
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except Exception:
-            pass
+        if force_tree and os.name == "nt":
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                except Exception:
+                    pass
 
 
     def last_play_was_interrupted(self) -> bool:
