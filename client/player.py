@@ -554,6 +554,26 @@ class BorderlessFullscreenPlayer:
         source = self._normalize_widget_source(widget_source)
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
 
+    @staticmethod
+    def _single_iframe_widget_url(widget_payload: dict | None) -> str | None:
+        if not isinstance(widget_payload, dict):
+            return None
+        if widget_payload.get("columns"):
+            return None
+
+        widgets = widget_payload.get("widgets")
+        if not isinstance(widgets, list) or len(widgets) != 1:
+            return None
+
+        widget = widgets[0]
+        if not isinstance(widget, dict):
+            return None
+        if str(widget.get("type") or "").strip().lower() != "iframe":
+            return None
+
+        widget_url = str(widget.get("url") or "").strip()
+        return widget_url or None
+
     def _widget_runtime_engine_source(self) -> str:
         return _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
 
@@ -668,13 +688,16 @@ class BorderlessFullscreenPlayer:
         duration_sec: int,
         widget_config: dict | None = None,
     ) -> bool:
-        source = self._build_widget_source(widget_source, widget_config=widget_config)
+        widget_payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
+        direct_widget_url = self._single_iframe_widget_url(widget_payload)
+
+        source = direct_widget_url or self._build_widget_source(widget_source, widget_config=widget_config)
         if not source:
             self._last_interrupted = False
             _safe_print("⚠️ widget kaynağı boş")
             return False
 
-        if self._widget_runtime_controller_enabled():
+        if self._widget_runtime_controller_enabled() and direct_widget_url is None:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None

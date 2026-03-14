@@ -375,12 +375,41 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             result = player.play_widget_blocking(
                 "https://ignored.example.com",
                 duration_sec=1,
-                widget_config={"widgets": [{"type": "iframe", "url": "https://config.example.com"}]},
+                widget_config={
+                    "widgets": [
+                        {"type": "iframe", "url": "https://config.example.com"},
+                        {"type": "iframe", "url": "https://second.example.com"},
+                    ]
+                },
             )
 
         self.assertTrue(result)
         self.assertEqual(len(captured_sources), 1)
         self.assertIn("config_b64=", captured_sources[0])
+
+    def test_play_widget_blocking_uses_direct_url_for_single_iframe_widget(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = 0
+        process.returncode = 0
+        captured_sources = []
+
+        def _fake_build_widget_command(source):
+            captured_sources.append(source)
+            return ["msedge", source]
+
+        with patch.object(player, "_build_widget_command", side_effect=_fake_build_widget_command), patch(
+            "subprocess.Popen",
+            return_value=process,
+        ), patch("time.sleep", return_value=None):
+            result = player.play_widget_blocking(
+                "https://ignored.example.com",
+                duration_sec=1,
+                widget_config={"widgets": [{"type": "iframe", "url": "https://www.google.com"}]},
+            )
+
+        self.assertTrue(result)
+        self.assertEqual(captured_sources, ["https://www.google.com"])
 
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
