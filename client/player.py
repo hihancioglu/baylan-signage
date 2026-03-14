@@ -118,6 +118,9 @@ class BorderlessFullscreenPlayer:
         self._widget_process_stdin_lock = threading.Lock()
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
+        self._keep_widget_runtime_warm = (
+            os.getenv("WIDGET_KEEP_RUNTIME_WARM", "1").strip().lower() in {"1", "true", "yes"}
+        )
         self._last_interrupted = False
 
     @staticmethod
@@ -838,7 +841,13 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ desteklenmeyen medya formatı atlandı: {media_path}")
             return False
 
-        self.stop()
+        self._stop_requested = True
+        if self._process and self._process.poll() is None:
+            self._terminate_process(self._process, timeout_sec=5)
+        self._process = None
+
+        if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
+            self.stop_widget_engine()
 
         process = None
 
@@ -898,7 +907,13 @@ class BorderlessFullscreenPlayer:
             self._last_interrupted = False
             return False
 
-        self.stop()
+        self._stop_requested = True
+        if self._process and self._process.poll() is None:
+            self._terminate_process(self._process, timeout_sec=5)
+        self._process = None
+
+        if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
+            self.stop_widget_engine()
 
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         playlist_file = None
