@@ -216,6 +216,14 @@ class BorderlessFullscreenPlayer:
             return True
         return Path(command[0]).name.lower() in {"widget_viewer.exe", "widget_viewer"}
 
+    def _widget_popen_kwargs(self, command: list[str]) -> dict:
+        kwargs: dict = {}
+        if os.name == "nt" and self._is_python_widget_command(command):
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if creation_flags:
+                kwargs["creationflags"] = creation_flags
+        return kwargs
+
 
     @staticmethod
     def _is_vlc_command(command: list[str]) -> bool:
@@ -622,10 +630,12 @@ class BorderlessFullscreenPlayer:
 
         try:
             self._stop_requested = False
+            popen_kwargs = self._widget_popen_kwargs(command)
             self._widget_process = subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
                 text=True,
+                **popen_kwargs,
             )
             return True
         except Exception as exc:
@@ -747,7 +757,7 @@ class BorderlessFullscreenPlayer:
         using_python_widget_viewer = self._is_python_widget_command(command)
         try:
             self._stop_requested = False
-            process = subprocess.Popen(command)
+            process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
             self._widget_process = process
 
             return self._wait_widget_until_stop(

@@ -193,6 +193,21 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             ["msedge", "--kiosk", "--edge-kiosk-type=fullscreen", "--app=https://example.com"],
         )
 
+
+    def test_widget_popen_kwargs_uses_create_no_window_for_python_viewer_on_windows(self):
+        player = self._build_player()
+        with patch("client.player.os.name", "nt"), patch.object(player, "_is_python_widget_command", return_value=True), patch("client.player.subprocess.CREATE_NO_WINDOW", 134217728, create=True):
+            kwargs = player._widget_popen_kwargs(["widget_viewer.exe", "https://example.com"])
+
+        self.assertEqual(kwargs, {"creationflags": 134217728})
+
+    def test_widget_popen_kwargs_empty_for_non_python_widget_command(self):
+        player = self._build_player()
+        with patch("client.player.os.name", "nt"), patch.object(player, "_is_python_widget_command", return_value=False), patch("client.player.subprocess.CREATE_NO_WINDOW", 134217728, create=True):
+            kwargs = player._widget_popen_kwargs(["msedge", "--kiosk", "https://example.com"])
+
+        self.assertEqual(kwargs, {})
+
     def test_play_widget_url_waits_until_stop_request(self):
         player = self._build_player()
         process = unittest.mock.Mock()
