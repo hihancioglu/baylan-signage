@@ -52,7 +52,7 @@ def _normalize_url(source: str) -> str:
 
     if url.lower().startswith(("http://", "https://", "file://")):
         return url
-    return f"https://{url}"
+    return f"http://{url}"
 
 
 def _runtime_resource_path(*relative_parts: str) -> Path:

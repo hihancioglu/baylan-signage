@@ -266,17 +266,17 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.terminate.assert_called_once()
 
 
-    def test_normalize_widget_source_adds_https_scheme_for_bare_hostname(self):
+    def test_normalize_widget_source_adds_http_scheme_for_bare_hostname(self):
         player = self._build_player()
 
-        self.assertEqual(player._normalize_widget_source("example.com/dashboard"), "https://example.com/dashboard")
+        self.assertEqual(player._normalize_widget_source("example.com/dashboard"), "http://example.com/dashboard")
 
     def test_build_widget_layout_payload_normalizes_widget_url(self):
         player = self._build_player()
 
         payload = player._build_widget_layout_payload("example.com/dashboard")
 
-        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "http://example.com/dashboard"}]})
 
     def test_build_widget_layout_payload_converts_existing_local_file_to_file_uri(self):
         player = self._build_player()
@@ -299,7 +299,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             widget_config={"widgets": [{"type": "iframe", "url": "example.com/panel"}]},
         )
 
-        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/panel"}]})
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "http://example.com/panel"}]})
 
     def test_build_widget_layout_payload_converts_html_widget_to_card(self):
         player = self._build_player()
@@ -319,7 +319,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             widget_config={"widgets": [{"type": "url", "url": "example.com/dashboard"}]},
         )
 
-        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]})
+        self.assertEqual(payload, {"widgets": [{"type": "iframe", "url": "http://example.com/dashboard"}]})
 
     def test_build_widget_layout_payload_treats_url_content_as_iframe_source(self):
         player = self._build_player()
@@ -336,7 +336,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
                     {
                         "type": "iframe",
                         "content": "example.com/dashboard-from-content",
-                        "url": "https://example.com/dashboard-from-content",
+                        "url": "http://example.com/dashboard-from-content",
                     }
                 ]
             },

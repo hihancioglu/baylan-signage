@@ -448,7 +448,7 @@ class BorderlessFullscreenPlayer:
         if BorderlessFullscreenPlayer._is_widget_url(source):
             return source
         if "://" not in source and not source.startswith(("/", "\\")):
-            return f"https://{source}"
+            return f"http://{source}"
         return source
 
     def _normalize_widget_payload(self, widget_config: dict | None, fallback_source: str = "") -> dict | None:
