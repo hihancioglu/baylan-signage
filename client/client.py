@@ -907,6 +907,9 @@ class PlaybackController:
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
         self._active_widget_signature: str | None = None
 
+        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}:
+            self.player.start_widget_engine_if_needed()
+
     @staticmethod
     def _sanitize_playback_state(raw_state: dict) -> dict:
         """
@@ -1302,7 +1305,6 @@ class PlaybackController:
                         continue
 
                     self._active_widget_signature = None
-                    self.player.stop_widget_engine()
                     image_duration_sec = None
                     if self.player.is_image(media_path):
                         if isinstance(duration_sec, int) and duration_sec > 0:
