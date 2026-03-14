@@ -718,16 +718,13 @@ class BorderlessFullscreenPlayer:
         duration_sec: int,
         widget_config: dict | None = None,
     ) -> bool:
-        widget_payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
-        direct_widget_url = self._single_iframe_widget_url(widget_payload)
-
-        source = direct_widget_url or self._build_widget_source(widget_source, widget_config=widget_config)
+        source = self._build_widget_source(widget_source, widget_config=widget_config)
         if not source:
             self._last_interrupted = False
             _safe_print("⚠️ widget kaynağı boş")
             return False
 
-        if self._widget_runtime_controller_enabled() and direct_widget_url is None:
+        if self._widget_runtime_controller_enabled():
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None
