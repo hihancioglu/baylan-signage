@@ -121,6 +121,26 @@ class BorderlessFullscreenPlayer:
         self._last_interrupted = False
 
     @staticmethod
+    def _windows_hidden_process_kwargs() -> dict:
+        if os.name != "nt":
+            return {}
+
+        kwargs: dict = {}
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if creation_flags:
+            kwargs["creationflags"] = creation_flags
+
+        startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
+        startupinfo = startupinfo_cls() if startupinfo_cls else None
+        startf_use_show_window = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        if startupinfo and startf_use_show_window:
+            startupinfo.dwFlags |= startf_use_show_window
+            startupinfo.wShowWindow = 0
+            kwargs["startupinfo"] = startupinfo
+
+        return kwargs
+
+    @staticmethod
     def _python_widget_viewer_enabled() -> bool:
         return os.getenv("PYTHON_WIDGET_VIEWER_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 
@@ -949,11 +969,13 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
+                    taskkill_kwargs = BorderlessFullscreenPlayer._windows_hidden_process_kwargs()
                     subprocess.run(
                         ["taskkill", "/PID", str(pid), "/T", "/F"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         check=False,
+                        **taskkill_kwargs,
                     )
                     process.wait(timeout=1)
                     return
@@ -979,11 +1001,13 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
+                    taskkill_kwargs = BorderlessFullscreenPlayer._windows_hidden_process_kwargs()
                     subprocess.run(
                         ["taskkill", "/PID", str(pid), "/T", "/F"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         check=False,
+                        **taskkill_kwargs,
                     )
                 except Exception:
                     pass
