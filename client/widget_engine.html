@@ -80,6 +80,16 @@
       loadWidgets(config);
     }
 
+    window.__baylanApplyRuntimeConfig = function(payload) {
+      renderConfig(payload);
+    };
+
+    if (window.__baylanPendingConfig) {
+      const pendingConfig = window.__baylanPendingConfig;
+      window.__baylanPendingConfig = null;
+      renderConfig(pendingConfig);
+    }
+
     window.addEventListener("message", (event) => {
       try {
         const payload = normalizeConfig(event.data);

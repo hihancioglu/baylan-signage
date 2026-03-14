@@ -194,6 +194,30 @@ def _runtime_message_reader(dispatch):
             dispatch({"type": "layout_update", "payload": message.get("payload")})
 
 
+def _build_runtime_update_script(payload: object) -> str:
+    encoded_payload = json.dumps(payload, ensure_ascii=False)
+    return (
+        "(function(payload){"
+        "function tryApply(){"
+        "if(typeof window.__baylanApplyRuntimeConfig==='function'){"
+        "window.__baylanApplyRuntimeConfig(payload);"
+        "return true;"
+        "}"
+        "window.__baylanPendingConfig=payload;"
+        "return false;"
+        "}"
+        "if(tryApply()){return;}"
+        "let attempts=0;"
+        "const timer=setInterval(function(){"
+        "attempts+=1;"
+        "if(tryApply()||attempts>=40){clearInterval(timer);}"
+        "},100);"
+        "})("
+        + encoded_payload
+        + ");"
+    )
+
+
 def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
     import webview
 
@@ -216,8 +240,7 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
                     pass
                 return
             payload = message.get("payload")
-            encoded_payload = json.dumps(payload, ensure_ascii=False)
-            js = f"window.postMessage({encoded_payload}, '*');"
+            js = _build_runtime_update_script(payload)
             try:
                 window.evaluate_js(js)
             except Exception as exc:
@@ -258,8 +281,7 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
             payload = message.get("payload")
 
             def _post_js():
-                encoded_payload = json.dumps(payload, ensure_ascii=False)
-                browser.GetMainFrame().ExecuteJavascript(f"window.postMessage({encoded_payload}, '*');")
+                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload))
 
             cef.PostTask(cef.TID_UI, _post_js)
 
