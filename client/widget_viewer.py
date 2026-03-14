@@ -170,8 +170,15 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
     else:
         raise ValueError("Widget yapılandırması boş")
 
-    if not isinstance(payload.get("columns"), list):
-        payload.pop("columns", None)
+    columns = payload.get("columns")
+    if isinstance(columns, list):
+        pass
+    else:
+        parsed_columns = int(columns) if isinstance(columns, int) else None
+        if parsed_columns and parsed_columns > 0:
+            payload["columns"] = parsed_columns
+        else:
+            payload.pop("columns", None)
 
     return payload
 
