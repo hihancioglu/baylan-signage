@@ -466,6 +466,67 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             check=False,
         )
 
+    def test_play_blocking_keeps_widget_runtime_alive_by_default(self):
+        player = self._build_player()
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = None
+        player._widget_process = widget_process
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+            media_path = handle.name
+
+        media_process = unittest.mock.Mock()
+        media_process.wait.return_value = None
+        media_process.returncode = 0
+
+        try:
+            with patch.object(player, "_build_command", return_value=["mpv", media_path]), patch.object(
+                player,
+                "_prefer_non_vlc_image_command",
+                return_value=["mpv", media_path],
+            ), patch.object(player, "_resolve_executable", return_value=True), patch(
+                "subprocess.Popen",
+                return_value=media_process,
+            ), patch.object(player, "stop_widget_engine") as stop_widget_engine:
+                ok = player.play_blocking(media_path)
+
+            self.assertTrue(ok)
+            stop_widget_engine.assert_not_called()
+            self.assertIs(player._widget_process, widget_process)
+        finally:
+            Path(media_path).unlink(missing_ok=True)
+
+    def test_play_blocking_can_stop_widget_runtime_when_disabled(self):
+        with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):
+            player = self._build_player()
+
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = None
+        player._widget_process = widget_process
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+            media_path = handle.name
+
+        media_process = unittest.mock.Mock()
+        media_process.wait.return_value = None
+        media_process.returncode = 0
+
+        try:
+            with patch.object(player, "_build_command", return_value=["mpv", media_path]), patch.object(
+                player,
+                "_prefer_non_vlc_image_command",
+                return_value=["mpv", media_path],
+            ), patch.object(player, "_resolve_executable", return_value=True), patch(
+                "subprocess.Popen",
+                return_value=media_process,
+            ), patch.object(player, "stop_widget_engine") as stop_widget_engine:
+                ok = player.play_blocking(media_path)
+
+            self.assertTrue(ok)
+            stop_widget_engine.assert_called_once()
+        finally:
+            Path(media_path).unlink(missing_ok=True)
+
     def test_wait_widget_until_stop_uses_taskkill_tree_on_windows_timeout(self):
         player = self._build_player()
         process = unittest.mock.Mock()
