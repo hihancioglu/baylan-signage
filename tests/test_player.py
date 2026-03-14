@@ -405,7 +405,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(len(captured_sources), 1)
         self.assertIn("config_b64=", captured_sources[0])
 
-    def test_play_widget_blocking_uses_direct_url_for_single_iframe_widget(self):
+    def test_play_widget_blocking_uses_engine_source_for_single_iframe_widget(self):
         player = self._build_player()
         process = unittest.mock.Mock()
         process.poll.return_value = 0
@@ -427,7 +427,8 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        self.assertEqual(captured_sources, ["https://www.google.com"])
+        self.assertEqual(len(captured_sources), 1)
+        self.assertIn("config_b64=", captured_sources[0])
 
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
