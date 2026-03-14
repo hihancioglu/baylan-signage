@@ -28,13 +28,21 @@ import socketio
 
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
     return Path(__file__).resolve().parent
 
 
 BASE_DIR = _module_base()
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+
+FROZEN_EXECUTABLE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
+if FROZEN_EXECUTABLE_DIR and str(FROZEN_EXECUTABLE_DIR) not in sys.path:
+    sys.path.insert(0, str(FROZEN_EXECUTABLE_DIR))
+
+for module_dir in (BASE_DIR / "client", FROZEN_EXECUTABLE_DIR / "client" if FROZEN_EXECUTABLE_DIR else None):
+    if module_dir and module_dir.is_dir() and str(module_dir) not in sys.path:
+        sys.path.insert(0, str(module_dir))
 
 CLIENT_PACKAGE_PARENT = BASE_DIR.parent
 if str(CLIENT_PACKAGE_PARENT) not in sys.path:
@@ -50,11 +58,12 @@ def _import_client_modules():
         return importlib.import_module(module_name)
 
     def _load_from_file(module_name: str):
-        module_filename = f"{module_name}.py"
-        candidates = [
-            BASE_DIR / module_filename,
-            BASE_DIR / "client" / module_filename,
-        ]
+        module_filenames = [f"{module_name}.py", f"{module_name}.pyc"]
+        candidate_roots = [BASE_DIR, BASE_DIR / "client"]
+        if FROZEN_EXECUTABLE_DIR:
+            candidate_roots.extend([FROZEN_EXECUTABLE_DIR, FROZEN_EXECUTABLE_DIR / "client"])
+
+        candidates = [root / module_filename for root in candidate_roots for module_filename in module_filenames]
 
         for candidate in candidates:
             if not candidate.is_file():
