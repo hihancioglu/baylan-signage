@@ -132,10 +132,10 @@
                       <div class="col-12 col-md-2"><select id="playlist-item-type" class="form-select" onchange="togglePlaylistItemInputs()"><option value="media">Medya</option><option value="widget">Widget</option></select></div>
                       <div class="col-12 col-md-3" id="playlist-media-col"><select id="media-select" class="form-select"></select></div>
                       <div class="col-12 col-md-3 d-none" id="playlist-widget-col"><select id="widget-select" class="form-select"></select></div>
-                      <div class="col-12 col-md-2" id="playlist-duration-col"><input id="playlist-image-duration" class="form-control" type="number" min="1" value="8" placeholder="Görsel süre (sn)" /></div>
+                      <div class="col-12 col-md-2" id="playlist-duration-col"><input id="playlist-image-duration" class="form-control" type="number" min="1" value="8" placeholder="Süre (sn)" /></div>
                       <div class="col-auto"><button class="btn btn-primary" onclick="addItemToPlaylist()">Playliste Ekle</button></div>
                     </div>
-                    <div class="form-text" id="playlist-add-help">Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.</div>
+                    <div class="form-text" id="playlist-add-help">Medya için görsel süresi, widget için oynatma süresi belirleyin. Videolarda bu alan kullanılmaz.</div>
                   </div>
                 </div>
 
@@ -785,10 +785,10 @@ function togglePlaylistItemInputs(){
   const mediaMode = itemType === 'media';
   mediaCol.classList.toggle('d-none', !mediaMode);
   widgetCol.classList.toggle('d-none', mediaMode);
-  durationCol.classList.toggle('d-none', !mediaMode);
+  durationCol.classList.remove('d-none');
   helpText.textContent = mediaMode
-    ? 'Görsel eklerken kaç saniye gösterileceğini girin. Videolarda bu alan kullanılmaz.'
-    : 'Widget seçimi yaparak Playliste Ekle butonunu kullanın.';
+    ? 'Medya için görsel süresi, widget için oynatma süresi belirleyin. Videolarda bu alan kullanılmaz.'
+    : 'Widget için süre belirleyin; süre bitince sıradaki playlist öğesine geçilir.';
 }
 
 async function loadWidgets(){
@@ -1216,6 +1216,13 @@ async function addItemToPlaylist(){
     if((selectedWidget?.type || '').toLowerCase() === 'url'){
       payload.widget_url = selectedWidget?.content || selectedWidget?.url || '';
     }
+
+    const durationSec = Number(document.getElementById('playlist-image-duration').value || 8);
+    if(!durationSec || durationSec <= 0){
+      alert('Widget süresi 1 sn veya daha büyük olmalı');
+      return;
+    }
+    payload.duration_sec = durationSec;
   }else{
     const mediaId = Number(document.getElementById('media-select').value);
     if(!mediaId){
