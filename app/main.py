@@ -1933,6 +1933,17 @@ def add_playlist_item(playlist_id):
     order_no = body.get("order_no", 0)
     duration_sec = body.get("duration_sec")
 
+    def _parse_positive_duration(raw_value, *, default_value: int | None = None) -> int | None:
+        if raw_value is None:
+            return default_value
+        try:
+            duration_value = int(raw_value)
+        except (TypeError, ValueError):
+            raise ValueError("invalid duration_sec")
+        if duration_value <= 0:
+            raise ValueError("duration_sec must be > 0")
+        return duration_value
+
     if item_type not in {"media", "widget"}:
         return jsonify({"error": "item_type must be one of: media, widget"}), 400
 
@@ -1951,11 +1962,9 @@ def add_playlist_item(playlist_id):
             duration = None
             if media_type == "image":
                 try:
-                    duration = int(duration_sec) if duration_sec is not None else 8
-                except (TypeError, ValueError):
-                    return jsonify({"error": "invalid duration_sec"}), 400
-                if duration <= 0:
-                    return jsonify({"error": "duration_sec must be > 0"}), 400
+                    duration = _parse_positive_duration(duration_sec, default_value=8)
+                except ValueError as exc:
+                    return jsonify({"error": str(exc)}), 400
 
             item = PlaylistItem(
                 playlist_id=playlist_id,
@@ -1978,13 +1987,18 @@ def add_playlist_item(playlist_id):
                 if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                     return jsonify({"error": "widget_url must be a valid http/https URL"}), 400
 
+            try:
+                widget_duration = _parse_positive_duration(duration_sec, default_value=None)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+
             item = PlaylistItem(
                 playlist_id=playlist_id,
                 path=widget_url or None,
                 order_no=order_no,
                 item_type="widget",
                 media_type="widget",
-                duration_sec=None,
+                duration_sec=widget_duration,
                 widget_id=widget_id,
                 widget_payload=(json.dumps(widget_payload, ensure_ascii=False) if isinstance(widget_payload, (dict, list)) else (str(widget_payload) if widget_payload is not None else None)),
                 widget_url=widget_url or None,
