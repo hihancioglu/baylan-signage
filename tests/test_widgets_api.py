@@ -100,6 +100,38 @@ class TestWidgetsApi(unittest.TestCase):
             after_delete = client.get(f"/api/playlists/{pid}/items").get_json() or []
             self.assertEqual(after_delete, [])
 
+    def test_dashboard_widget_type_is_supported(self):
+        client = self.main.app.test_client()
+        dashboard_content = {
+            "columns": 2,
+            "widgets": [
+                {"type": "iframe", "url": "https://example.com/a"},
+                {"type": "iframe", "url": "https://example.com/b"},
+            ],
+        }
+
+        with patch("app.main._auth_failed", return_value=False):
+            create = client.post(
+                "/api/widgets",
+                json={"name": "Dashboard", "type": "dashboard", "content": self.main.json.dumps(dashboard_content)},
+            )
+            self.assertEqual(create.status_code, 200)
+            wid = create.get_json().get("id")
+
+            update = client.patch(
+                f"/api/widgets/{wid}",
+                json={"name": "Dashboard 2", "type": "dashboard", "content": self.main.json.dumps(dashboard_content)},
+            )
+            self.assertEqual(update.status_code, 200)
+
+            widgets = client.get('/api/widgets').get_json() or []
+            row = next((w for w in widgets if w.get('id') == wid), None)
+            self.assertIsNotNone(row)
+            self.assertEqual(row.get('type'), 'dashboard')
+
+            cleanup = client.delete(f'/api/widgets/{wid}')
+            self.assertEqual(cleanup.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

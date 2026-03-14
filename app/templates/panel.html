@@ -173,11 +173,30 @@
                     <select id="widget-type" class="form-select" onchange="updateWidgetPreview()">
                       <option value="html">HTML</option>
                       <option value="url">URL</option>
+                      <option value="dashboard">Dashboard (Çoklu Iframe)</option>
                     </select>
                   </div>
                   <div class="col-12">
                     <label class="form-label">İçerik alanı</label>
                     <textarea id="widget-content" class="form-control" rows="5" placeholder="HTML içeriği veya URL" oninput="updateWidgetPreview()"></textarea>
+                  </div>
+                </div>
+                <div id="widget-dashboard-builder" class="d-none mt-3">
+                  <div class="mini-card">
+                    <div class="card-body">
+                      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <h3 class="h6 mb-0">Dashboard Oluşturucu (Çoklu Iframe)</h3>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addDashboardIframe()">Iframe Ekle</button>
+                      </div>
+                      <p class="text-secondary small mb-2">Dashboard widget için birden fazla iframe URL ekleyin. Kaydetmeden önce içerik alanına JSON olarak yazılır.</p>
+                      <div class="row g-2 align-items-end mb-3">
+                        <div class="col-12 col-md-3">
+                          <label class="form-label small">Kolon Sayısı</label>
+                          <input id="dashboard-columns" type="number" min="1" value="2" class="form-control" onchange="syncDashboardToContent()" />
+                        </div>
+                      </div>
+                      <div id="dashboard-iframe-list" class="d-flex flex-column gap-2"></div>
+                    </div>
                   </div>
                 </div>
                 <div class="mt-3">
@@ -646,6 +665,62 @@ function resetWidgetForm(){
   document.getElementById('widget-name').value = '';
   document.getElementById('widget-type').value = 'html';
   document.getElementById('widget-content').value = '';
+  document.getElementById('dashboard-columns').value = '2';
+  document.getElementById('dashboard-iframe-list').innerHTML = '';
+  addDashboardIframe('https://example.com');
+  updateWidgetPreview();
+}
+
+function extractDashboardConfig(content){
+  try {
+    const parsed = JSON.parse(content || '{}');
+    if(!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.widgets)) return null;
+    return parsed;
+  } catch(_err){
+    return null;
+  }
+}
+
+function addDashboardIframe(initialUrl = ''){
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return;
+  const row = document.createElement('div');
+  row.className = 'input-group input-group-sm';
+  row.innerHTML = `<span class="input-group-text">Iframe</span><input class="form-control dashboard-iframe-url" placeholder="https://..." value="${escapeHtml(initialUrl)}" oninput="syncDashboardToContent()" /><button class="btn btn-outline-danger" type="button" onclick="this.parentElement.remove(); syncDashboardToContent();">Sil</button>`;
+  list.appendChild(row);
+  syncDashboardToContent();
+}
+
+function syncDashboardBuilderFromContent(content){
+  const config = extractDashboardConfig(content);
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return;
+  list.innerHTML = '';
+
+  const urls = (config?.widgets || [])
+    .map(w => (w?.type === 'iframe' || w?.type === 'url') ? String(w.url || w.content || '').trim() : '')
+    .filter(Boolean);
+
+  (urls.length ? urls : ['']).forEach(url => addDashboardIframe(url));
+  const cols = Number(config?.columns || 2);
+  document.getElementById('dashboard-columns').value = String(cols > 0 ? cols : 2);
+}
+
+function syncDashboardToContent(){
+  const type = document.getElementById('widget-type').value;
+  if(type !== 'dashboard') return;
+
+  const cols = Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
+  const urls = Array.from(document.querySelectorAll('.dashboard-iframe-url'))
+    .map(el => String(el.value || '').trim())
+    .filter(Boolean);
+
+  const payload = {
+    columns: cols,
+    widgets: urls.map(url => ({type: 'iframe', url}))
+  };
+
+  document.getElementById('widget-content').value = JSON.stringify(payload, null, 2);
   updateWidgetPreview();
 }
 
@@ -658,7 +733,9 @@ function fillWidgetForm(widgetId){
   document.getElementById('widget-id').value = widget.id;
   document.getElementById('widget-name').value = widget.name || '';
   document.getElementById('widget-type').value = (widget.type || 'html').toLowerCase();
-  document.getElementById('widget-content').value = widget.content || widget.payload || widget.widget_payload || widget.url || '';
+  const content = widget.content || widget.payload || widget.widget_payload || widget.url || '';
+  document.getElementById('widget-content').value = content;
+  if((widget.type || '').toLowerCase() === 'dashboard') syncDashboardBuilderFromContent(content);
   updateWidgetPreview();
 }
 
@@ -666,6 +743,10 @@ function updateWidgetPreview(){
   const type = document.getElementById('widget-type').value;
   const content = document.getElementById('widget-content').value.trim();
   const preview = document.getElementById('widget-preview');
+  const dashboardBuilder = document.getElementById('widget-dashboard-builder');
+  dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
+  if(type === 'dashboard' && !document.querySelector('.dashboard-iframe-url')) addDashboardIframe('');
+
   if(!content){
     preview.textContent = 'Önizleme için içerik girin.';
     return;
@@ -673,6 +754,21 @@ function updateWidgetPreview(){
 
   if(type === 'url'){
     preview.innerHTML = `<a href="${escapeHtml(content)}" target="_blank" rel="noopener">${escapeHtml(content)}</a>`;
+    return;
+  }
+
+  if(type === 'dashboard'){
+    const config = extractDashboardConfig(content);
+    if(!config){
+      preview.innerHTML = '<span class="text-danger">Dashboard JSON formatı geçersiz.</span>';
+      return;
+    }
+    const widgets = (config.widgets || []).filter(w => w && (w.type === 'iframe' || w.type === 'url'));
+    if(!widgets.length){
+      preview.innerHTML = '<span class="text-secondary">Dashboard için en az bir iframe URL ekleyin.</span>';
+      return;
+    }
+    preview.innerHTML = widgets.map((w, idx) => `<div><strong>#${idx+1}:</strong> ${escapeHtml(w.url || w.content || '')}</div>`).join('');
     return;
   }
 
