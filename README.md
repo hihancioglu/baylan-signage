@@ -83,19 +83,16 @@ Notlar:
 - Backend başlatılamazsa diğer backend denenir; Python gösterici tamamen kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
 
 ### Frozen build'de widget viewer'ı aktif etme
-`client/player.py` içinde frozen (`agent.exe`) modda Python widget gösterici için aynı klasörde `widget_viewer(.exe)` aranır.
+`client/player.py` içinde frozen (`BaylanSignageAgent.exe`) modda URL widget gösterimi için agent, aynı executable'ı `--widget` parametresiyle ikinci process olarak başlatır.
 
 Aktivasyon için:
-- `client/build_agent.ps1` script'ini **varsayılan ayarlarla** çalıştırın (widget viewer sidecar exe'si üretir).
-- `dist` klasöründen en az şu iki dosyayı birlikte dağıtın: `BaylanSignageAgent.exe`, `widget_viewer.exe`.
-- Widget viewer için ayrıca `cefpython3` veya `pywebview` bağımlılıklarından en az biri kurulu olmalıdır.
-- CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa viewer PyInstaller çağrısına `--collect-all cefpython3` ekler.
+- `client/build_agent.ps1` script'ini çalıştırın; tek artifact üretilir: `dist/BaylanSignageAgent.exe`.
+- Runtime'da widget process çağrısı `BaylanSignageAgent.exe --widget <url>` şeklindedir.
+- Widget viewer backend'i için en az bir bağımlılık kullanılabilir olmalıdır: `cefpython3` veya `pywebview`.
+- CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa agent PyInstaller çağrısına `--collect-all cefpython3` ekler.
 - `-EnableCefCollect` verilse bile build hard-fail olmaz: `cefpython3` bulunamazsa CEF collect adımı uyarı ile atlanır.
-- `pywebview` kuruluysa build script'i viewer tarafında gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım da hataya düşmeden atlanır.
+- `pywebview` kuruluysa build script gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım hataya düşmeden atlanır.
 
 `WIDGET_SINGLE_ENGINE=1` paketleme notu:
-- Agent build artık `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.
-- Sidecar `widget_viewer.exe` build'i aynı dosyayı executable yanında erişilebilir olacak şekilde paketler; tek-engine akışı viewer tarafında da çalışır.
+- Agent build `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.
 - Bu nedenle dağıtımda `widget_engine.html` dosyasını ayrıca kopyalamanız gerekmez (build script kullanıldığı sürece).
-
-Viewer build'ini kapatmak isterseniz `-SkipViewerBuild` parametresini geçebilirsiniz; bu durumda frozen modda Python widget viewer devre dışı kalır.

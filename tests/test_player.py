@@ -194,6 +194,27 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         )
 
 
+
+    def test_build_python_widget_command_uses_current_executable_with_widget_flag_in_frozen_mode(self):
+        player = self._build_player()
+
+        with patch("client.player.sys.frozen", True, create=True), patch("client.player.sys.executable", "/tmp/BaylanSignageAgent.exe"):
+            command = player._build_python_widget_command("https://example.com")
+
+        self.assertEqual(command, ["/tmp/BaylanSignageAgent.exe", "--widget", "https://example.com"])
+
+    def test_is_python_widget_command_accepts_single_exe_widget_mode(self):
+        player = self._build_player()
+
+        with patch("client.player.sys.executable", "/tmp/BaylanSignageAgent.exe"):
+            result = player._is_python_widget_command([
+                "/tmp/BaylanSignageAgent.exe",
+                "--widget",
+                "https://example.com",
+            ])
+
+        self.assertTrue(result)
+
     def test_widget_popen_kwargs_uses_create_no_window_for_python_viewer_on_windows(self):
         player = self._build_player()
         with patch("client.player.os.name", "nt"), patch.object(player, "_is_python_widget_command", return_value=True), patch("client.player.subprocess.CREATE_NO_WINDOW", 134217728, create=True):
