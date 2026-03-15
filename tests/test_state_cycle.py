@@ -113,7 +113,7 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
 
         fake_playback.start.assert_called_once()
-        fake_playback.stop.assert_called_once()
+        fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
         fake_idle_background.hide.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
@@ -135,6 +135,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):

@@ -2128,7 +2128,10 @@ def run_state_cycle():
         playback.start()
         if user_activity_detected:
             idle_background.hide()
-            playback.stop(stop_widget_runtime=True)
+            # Idle bekleme aşamasından kullanıcı etkileşimi ile çıkarken
+            # widget runtime'ı kapatmayalım; bir sonraki idle geçişinde
+            # viewer yeniden açılıp gri pencere flash'i oluşturmasın.
+            playback.stop(stop_widget_runtime=False)
             set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s")
             return idle_sec
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
@@ -2160,7 +2163,8 @@ def run_state_cycle():
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
         return_to_erp_window()
-        playback.stop(stop_widget_runtime=True)
+        # Idle mode'dan ACTIVE'e dönüşte widget runtime arkaplanda kalsın.
+        playback.stop(stop_widget_runtime=False)
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
