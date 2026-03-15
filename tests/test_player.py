@@ -588,6 +588,28 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.player = _FakePlaybackPlayer()
         return controller
 
+    def test_prewarms_widget_runtime_by_default_on_startup(self):
+        from client.client import PlaybackController
+
+        fake_player = unittest.mock.Mock()
+        with patch("client.client.BorderlessFullscreenPlayer", return_value=fake_player), patch.dict("os.environ", {}, clear=False):
+            PlaybackController(_FakeGuiRuntime())
+
+        fake_player.start_widget_engine_if_needed.assert_called_once()
+
+    def test_can_disable_widget_runtime_prewarm_via_env(self):
+        from client.client import PlaybackController
+
+        fake_player = unittest.mock.Mock()
+        with patch("client.client.BorderlessFullscreenPlayer", return_value=fake_player), patch.dict(
+            "os.environ",
+            {"WIDGET_PREWARM_ON_STARTUP": "0"},
+            clear=False,
+        ):
+            PlaybackController(_FakeGuiRuntime())
+
+        fake_player.start_widget_engine_if_needed.assert_not_called()
+
     def test_disables_mpv_playlist_when_image_has_custom_duration(self):
         controller = self._build_controller()
         entries = [
