@@ -2088,10 +2088,14 @@ def run_state_cycle():
 
     if current_state == ClientState.IDLE_PENDING:
         playback.start()
-        # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
-        # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
-        # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
-        set_state(ClientState.PLAYING, "player_started")
+        # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
+        # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
+        # yapılmadığı için ekran siyah kalabilir.
+        if playback.current_content_name():
+            # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
+            # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
+            # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
+            set_state(ClientState.PLAYING, "player_started")
 
     if current_state == ClientState.PLAYING and playback.current_content_name():
         idle_background.hide()
