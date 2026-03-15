@@ -753,6 +753,22 @@ class BorderlessFullscreenPlayer:
         self._terminate_process(process, timeout_sec=2, force_tree=True)
         self._widget_process = None
 
+    def background_widget_engine(self) -> bool:
+        process = self._widget_process
+        if not process or process.poll() is not None or not process.stdin:
+            if process and process.poll() is not None:
+                self._widget_process = None
+            return False
+
+        try:
+            with self._widget_process_stdin_lock:
+                process.stdin.write('{"type":"background"}\n')
+                process.stdin.flush()
+            return True
+        except Exception as exc:
+            _safe_print(f"⚠️ widget runtime background moduna alınamadı: {exc}")
+            return False
+
     def wait_widget_duration(self, duration_sec: int) -> bool:
         deadline = time.monotonic() + max(1, int(duration_sec))
         while True:
@@ -1024,6 +1040,8 @@ class BorderlessFullscreenPlayer:
 
         if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
+        elif not stop_widget_runtime:
+            self.background_widget_engine()
 
         self._process = None
         if stop_widget_runtime:
