@@ -612,6 +612,10 @@ class BorderlessFullscreenPlayer:
     def _build_widget_source(self, widget_source: str, widget_config: dict | None = None) -> str:
         source = self._normalize_widget_source(widget_source)
         direct_url_source = self._single_url_widget_source(widget_config)
+        if not direct_url_source:
+            direct_url_source = self._single_iframe_widget_url(
+                self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
+            )
         if direct_url_source:
             return direct_url_source
 
@@ -702,7 +706,11 @@ class BorderlessFullscreenPlayer:
             return False
 
     def is_direct_url_widget(self, widget_config: dict | None = None) -> bool:
-        return bool(self._single_url_widget_source(widget_config))
+        if self._single_url_widget_source(widget_config):
+            return True
+
+        normalized_payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
+        return bool(self._single_iframe_widget_url(normalized_payload))
 
     def update_widget_layout(self, widget_source: str, widget_config: dict | None = None) -> bool:
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
