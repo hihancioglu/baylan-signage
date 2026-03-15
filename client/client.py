@@ -2177,15 +2177,6 @@ def main():
                     logging.exception("Socket connection attempt failed")
                     return False
 
-        while not shutdown_event.is_set():
-            try:
-                if ensure_socket_connected(time.monotonic()):
-                    break
-                time.sleep(RECONNECT_RETRY_SEC)
-            except KeyboardInterrupt:
-                print("🛑 Client interrupted during connect")
-                return
-
         next_heartbeat_at = time.monotonic()
         next_config_pull_at = time.monotonic()
 
