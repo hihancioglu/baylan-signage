@@ -549,6 +549,8 @@ class BorderlessFullscreenPlayer:
             columns = widget_config.get("columns")
             if isinstance(columns, list) and columns:
                 payload["columns"] = columns
+            elif isinstance(columns, int) and columns > 0:
+                payload["columns"] = columns
 
         normalized_fallback = self._normalize_widget_source(fallback_source)
         if "widgets" not in payload and normalized_fallback:
