@@ -243,7 +243,11 @@ def _start_with_fallback(webview_module) -> None:
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
     single_engine_enabled = os.getenv("WIDGET_SINGLE_ENGINE", "0").strip().lower() in {"1", "true", "yes"}
     source = _normalize_url(widget_url) if str(widget_url or "").strip() else ""
+    has_layout_config = isinstance(widget_config, dict) and isinstance(widget_config.get("widgets"), list)
     if not single_engine_enabled:
+        return source
+
+    if not has_layout_config:
         return source
 
     payload = _normalize_widget_payload(widget_config if isinstance(widget_config, dict) else {}, fallback_url=source)
