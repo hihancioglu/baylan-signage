@@ -273,6 +273,8 @@ def _runtime_message_reader(dispatch):
             break
         if message_type == "layout_update":
             dispatch({"type": "layout_update", "payload": message.get("payload")})
+        if message_type == "background":
+            dispatch({"type": "background"})
 
 
 def _build_runtime_update_script(payload: object) -> str:
@@ -345,6 +347,13 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidd
                 except Exception:
                     pass
                 return
+            if message.get("type") == "background":
+                try:
+                    window.hide()
+                except Exception:
+                    pass
+                shown_once = False
+                return
             payload = message.get("payload")
             if not shown_once:
                 shown_once = True
@@ -398,6 +407,14 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bo
             nonlocal shown_once
             if message.get("type") == "stop":
                 cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
+                return
+            if message.get("type") == "background":
+                shown_once = False
+
+                def _hide_window():
+                    _set_cef_window_visible(browser, False)
+
+                cef.PostTask(cef.TID_UI, _hide_window)
                 return
 
             payload = message.get("payload")

@@ -508,13 +508,20 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
         widget_process.poll.return_value = None
+        widget_process.stdin = unittest.mock.Mock()
         player._widget_process = widget_process
 
         with patch.object(player, "stop_widget_engine") as stop_widget_engine:
             player.stop()
 
         stop_widget_engine.assert_not_called()
+        widget_process.stdin.write.assert_called_once_with('{"type":"background"}\n')
+        widget_process.stdin.flush.assert_called_once_with()
         self.assertIs(player._widget_process, widget_process)
+
+    def test_background_widget_engine_returns_false_when_not_running(self):
+        player = self._build_player()
+        self.assertFalse(player.background_widget_engine())
 
     def test_play_blocking_keeps_widget_runtime_alive_by_default(self):
         player = self._build_player()
