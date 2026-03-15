@@ -390,6 +390,23 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload, config)
 
+    def test_build_widget_layout_payload_preserves_numeric_columns(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={
+                "widgets": [
+                    {"type": "iframe", "url": "https://example.com/first"},
+                    {"type": "iframe", "url": "https://example.com/second"},
+                ],
+                "columns": 2,
+            },
+        )
+
+        self.assertEqual(payload["columns"], 2)
+        self.assertEqual(len(payload["widgets"]), 2)
+
     def test_play_widget_blocking_prefers_widget_config_source(self):
         player = self._build_player()
         process = unittest.mock.Mock()
