@@ -229,7 +229,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch('client.player.sys._MEIPASS', '/tmp/nonexistent-meipass', create=True):
             source = player._build_widget_source('https://example.com', widget_config={'widgets': [{'type': 'iframe', 'url': 'https://example.com'}]})
 
-        self.assertIn('widget_engine.html', source)
+        self.assertEqual(source, 'https://example.com')
         self.assertNotIn('/tmp/nonexistent-meipass', source)
 
     def test_terminate_process_prefers_taskkill_for_windows_tree(self):
@@ -373,6 +373,16 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(widget_source, "https://example.com/direct-open")
 
+    def test_build_widget_source_uses_direct_source_for_single_iframe_widget(self):
+        player = self._build_player()
+
+        widget_source = player._build_widget_source(
+            "https://fallback.example.com",
+            widget_config={"widgets": [{"type": "iframe", "url": "https://example.com/direct-iframe"}]},
+        )
+
+        self.assertEqual(widget_source, "https://example.com/direct-iframe")
+
     def test_build_widget_layout_payload_treats_html_embed_as_embed_widget(self):
         player = self._build_player()
 
@@ -447,7 +457,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(len(captured_sources), 1)
         self.assertIn("config_b64=", captured_sources[0])
 
-    def test_play_widget_blocking_uses_engine_source_for_single_iframe_widget(self):
+    def test_play_widget_blocking_uses_direct_source_for_single_iframe_widget(self):
         player = self._build_player()
         process = unittest.mock.Mock()
         process.poll.return_value = 0
@@ -470,7 +480,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(len(captured_sources), 1)
-        self.assertIn("config_b64=", captured_sources[0])
+        self.assertEqual(captured_sources[0], "https://www.google.com")
 
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
