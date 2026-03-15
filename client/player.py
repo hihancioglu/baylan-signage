@@ -611,6 +611,10 @@ class BorderlessFullscreenPlayer:
 
     def _build_widget_source(self, widget_source: str, widget_config: dict | None = None) -> str:
         source = self._normalize_widget_source(widget_source)
+        direct_url_source = self._single_url_widget_source(widget_config)
+        if direct_url_source:
+            return direct_url_source
+
         payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
         if payload is None:
             return source
@@ -623,6 +627,28 @@ class BorderlessFullscreenPlayer:
     def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
         source = self._normalize_widget_source(widget_source)
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
+
+    def _single_url_widget_source(self, widget_config: dict | None) -> str | None:
+        if not isinstance(widget_config, dict):
+            return None
+
+        widgets = widget_config.get("widgets")
+        if not isinstance(widgets, list) or len(widgets) != 1:
+            return None
+
+        widget = widgets[0]
+        if not isinstance(widget, dict):
+            return None
+
+        widget_type = str(widget.get("type") or "").strip().lower()
+        if widget_type != "url":
+            return None
+
+        raw_source = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+        if not raw_source:
+            return None
+
+        return self._normalize_widget_source(raw_source)
 
     @staticmethod
     def _single_iframe_widget_url(widget_payload: dict | None) -> str | None:

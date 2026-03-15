@@ -363,6 +363,16 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             },
         )
 
+    def test_build_widget_source_uses_direct_source_for_single_url_widget(self):
+        player = self._build_player()
+
+        widget_source = player._build_widget_source(
+            "https://fallback.example.com",
+            widget_config={"widgets": [{"type": "url", "url": "example.com/direct-open"}]},
+        )
+
+        self.assertEqual(widget_source, "https://example.com/direct-open")
+
     def test_build_widget_layout_payload_treats_html_embed_as_embed_widget(self):
         player = self._build_player()
 
