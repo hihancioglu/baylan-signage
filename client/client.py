@@ -1061,6 +1061,7 @@ class PlaybackController:
             return None
 
         raw_widget_payload = normalized.get("widget_payload")
+        payload_columns = None
         widget_entries = None
         if isinstance(raw_widget_payload, list):
             widget_entries = raw_widget_payload
@@ -1069,10 +1070,15 @@ class PlaybackController:
                 widget_entries = raw_widget_payload.get("widgets")
             elif raw_widget_payload:
                 widget_entries = [raw_widget_payload]
+            payload_columns = self._normalize_widget_columns(raw_widget_payload.get("columns"))
+
+        resolved_columns = self._normalize_widget_columns(normalized.get("columns"))
+        if resolved_columns is None:
+            resolved_columns = payload_columns
 
         widget_config = {
             "widgets": widget_entries,
-            "columns": self._normalize_widget_columns(normalized.get("columns")),
+            "columns": resolved_columns,
         }
         widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or "").strip()
         if widget_config["widgets"] is None and widget_url:
