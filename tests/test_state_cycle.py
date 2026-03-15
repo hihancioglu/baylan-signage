@@ -59,6 +59,22 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback.start.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.PLAYING)
 
+    def test_idle_pending_transitions_to_playing_when_widget_selected_without_display_name(self):
+        self._configure_common()
+        main.current_state = main.ClientState.IDLE_PENDING
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "https://example.com/widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com/widget"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=65.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        fake_playback.start.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
 
 if __name__ == "__main__":
     unittest.main()

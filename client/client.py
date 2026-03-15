@@ -1045,7 +1045,9 @@ class PlaybackController:
     @staticmethod
     def _item_label(item: dict) -> str:
         normalized = PlaybackController._normalize_item(item or {})
-        return str(normalized.get("display_name") or Path(str(normalized.get("local_path") or normalized.get("path") or "")).name)
+        media_name = Path(str(normalized.get("local_path") or normalized.get("path") or "")).name
+        widget_name = str(normalized.get("widget_url") or "").strip()
+        return str(normalized.get("display_name") or media_name or widget_name)
 
     @staticmethod
     def _resolve_widget_duration_sec(item: dict) -> int:
