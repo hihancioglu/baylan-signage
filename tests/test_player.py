@@ -464,7 +464,8 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
-        player = self._build_player()
+        with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):
+            player = self._build_player()
         process = unittest.mock.Mock()
         process.poll.return_value = None
         process.pid = 4242
@@ -482,6 +483,18 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             stderr=subprocess.DEVNULL,
             check=False,
         )
+
+    def test_stop_keeps_widget_runtime_alive_by_default(self):
+        player = self._build_player()
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = None
+        player._widget_process = widget_process
+
+        with patch.object(player, "stop_widget_engine") as stop_widget_engine:
+            player.stop()
+
+        stop_widget_engine.assert_not_called()
+        self.assertIs(player._widget_process, widget_process)
 
     def test_play_blocking_keeps_widget_runtime_alive_by_default(self):
         player = self._build_player()

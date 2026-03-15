@@ -968,17 +968,23 @@ class BorderlessFullscreenPlayer:
             if playlist_file:
                 Path(playlist_file).unlink(missing_ok=True)
 
-    def stop(self):
+    def stop(self, stop_widget_runtime: bool | None = None):
         self._stop_requested = True
+
+        if stop_widget_runtime is None:
+            stop_widget_runtime = not self._keep_widget_runtime_warm
 
         if self._process and self._process.poll() is None:
             self._terminate_process(self._process, timeout_sec=5)
 
-        if self._widget_process and self._widget_process.poll() is None:
+        if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
 
         self._process = None
-        self._widget_process = None
+        if stop_widget_runtime:
+            self._widget_process = None
+        elif self._widget_process and self._widget_process.poll() is not None:
+            self._widget_process = None
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen, timeout_sec: float, force_tree: bool = False) -> None:

@@ -1235,11 +1235,11 @@ class PlaybackController:
         self._worker.start()
         print("▶️ playback worker started")
 
-    def stop(self):
+    def stop(self, stop_widget_runtime: bool | None = None):
         self._running = False
         self.overlay.hide()
         self._background_overlay.hide()
-        self.player.stop()
+        self.player.stop(stop_widget_runtime=stop_widget_runtime)
 
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=1)
@@ -2255,7 +2255,7 @@ def main():
                 continue
 
         idle_background.hide()
-        playback.stop()
+        playback.stop(stop_widget_runtime=True)
         try:
             sio.disconnect()
         except Exception:
