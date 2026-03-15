@@ -129,7 +129,7 @@
       }
     }
 
-    function attachIframeBlockDetection(wrapper, frame) {
+    function attachIframeBlockDetection(wrapper, frame, onBlocked) {
       let settled = false;
       let loadedAtLeastOnce = false;
       const maxWaitMs = 30000;
@@ -140,6 +140,9 @@
         if (settled) return;
         settled = true;
         wrapper.classList.add("blocked");
+        if (typeof onBlocked === "function") {
+          onBlocked();
+        }
       };
       const success = () => {
         if (settled) return;
@@ -175,6 +178,11 @@
     function loadWidgets(config) {
       const container = document.getElementById("widgets");
       container.innerHTML = "";
+      const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
+      const singleIframeMode =
+        widgetCount === 1 &&
+        String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
+
       (config.widgets || []).forEach((w) => {
         if (w.type === "iframe") {
           const wrapper = document.createElement("div");
@@ -188,7 +196,11 @@
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
-          attachIframeBlockDetection(wrapper, frame);
+          attachIframeBlockDetection(wrapper, frame, () => {
+            if (singleIframeMode && w.url && window.location.href !== w.url) {
+              window.location.replace(w.url);
+            }
+          });
           container.appendChild(wrapper);
           return;
         }
