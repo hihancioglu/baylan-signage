@@ -1012,6 +1012,14 @@ class PlaybackController:
         self.media_manager.save_playback_state(state_snapshot)
 
     @staticmethod
+    def _normalize_widget_columns(columns):
+        if isinstance(columns, list):
+            return columns
+        if isinstance(columns, int) and columns > 0:
+            return columns
+        return None
+
+    @staticmethod
     def _normalize_item(item: dict) -> dict:
         normalized = dict(item) if isinstance(item, dict) else {}
         normalized["item_type"] = str(normalized.get("item_type") or normalized.get("media_type") or "media").strip().lower() or "media"
@@ -1029,8 +1037,7 @@ class PlaybackController:
             widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or normalized.get("path") or "").strip()
             normalized["widget_url"] = widget_url or None
 
-            columns = normalized.get("columns")
-            normalized["columns"] = columns if isinstance(columns, list) else None
+            normalized["columns"] = PlaybackController._normalize_widget_columns(normalized.get("columns"))
         return normalized
 
     @staticmethod
@@ -1063,7 +1070,7 @@ class PlaybackController:
 
         widget_config = {
             "widgets": widget_entries,
-            "columns": normalized.get("columns") if isinstance(normalized.get("columns"), list) else None,
+            "columns": self._normalize_widget_columns(normalized.get("columns")),
         }
         widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or "").strip()
         if widget_config["widgets"] is None and widget_url:
