@@ -16,6 +16,7 @@ CHROME_KIOSK_SWITCHES = {
     "disable-session-crashed-bubble": "",
     "disable-features": "TranslateUI",
 }
+CEF_BLACK_BACKGROUND = 0xFF000000
 WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 WEATHER_WIDGET_HREF_PATTERN = re.compile(
     r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>',
@@ -336,7 +337,12 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
     cef.Initialize(settings={"context_menu": {"enabled": False}}, switches=switches)
     window_info = cef.WindowInfo()
     window_info.SetAsPopup(0, "Baylan Widget")
-    browser = cef.CreateBrowserSync(window_info=window_info, url=widget_url, window_title="Baylan Widget")
+    browser = cef.CreateBrowserSync(
+        window_info=window_info,
+        url=widget_url,
+        window_title="Baylan Widget",
+        settings={"background_color": CEF_BLACK_BACKGROUND},
+    )
 
     if runtime_ipc:
         def dispatch(message: dict) -> None:
