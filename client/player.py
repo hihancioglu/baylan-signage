@@ -530,9 +530,12 @@ class BorderlessFullscreenPlayer:
                             normalized_widget["type"] = "embed"
                             normalized_widget["html"] = str(raw_url)
                             normalized_widget.pop("url", None)
-                        else:
+                        elif str(raw_url).strip():
                             normalized_widget["type"] = "iframe"
                             normalized_widget["url"] = self._normalize_widget_source(str(raw_url))
+                        else:
+                            normalized_widget["type"] = "empty"
+                            normalized_widget.pop("url", None)
                     elif widget_type == "html":
                         normalized_widget["type"] = "card"
                         normalized_widget["html"] = str(
@@ -551,6 +554,10 @@ class BorderlessFullscreenPlayer:
                 payload["columns"] = columns
             elif isinstance(columns, int) and columns > 0:
                 payload["columns"] = columns
+
+            rows = widget_config.get("rows")
+            if isinstance(rows, int) and rows > 0:
+                payload["rows"] = rows
 
         normalized_fallback = self._normalize_widget_source(fallback_source)
         if "widgets" not in payload and normalized_fallback:
