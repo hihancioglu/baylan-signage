@@ -98,34 +98,47 @@
       return fallback;
     }
 
-    function isLikelyBlockedIframe(frame) {
+    function inspectIframeState(frame) {
       try {
         const doc = frame.contentDocument;
-        if (!doc) return false;
+        if (!doc) return { status: "unknown" };
 
         const locationHref = String(doc.location && doc.location.href || "").toLowerCase();
         const title = String(doc.title || "").toLowerCase();
         const bodyText = String(doc.body && doc.body.innerText || "").toLowerCase();
         const combinedText = `${title} ${bodyText}`;
-        const blockedKeywords = [
+        const transientConnectionKeywords = [
           "refused to connect",
           "connection refused",
+          "bağlantıyı reddetti",
+          "siteye ulaşılamıyor",
+          "site can\'t be reached",
+          "err_connection_refused",
+        ];
+        const blockedKeywords = [
           "x-frame-options",
           "frame-ancestors",
           "can't be displayed",
           "cannot be displayed",
           "içinde görüntülenemiyor",
-          "bağlantıyı reddetti",
         ];
 
-        if (blockedKeywords.some((keyword) => combinedText.includes(keyword))) {
-          return true;
+        if (transientConnectionKeywords.some((keyword) => combinedText.includes(keyword))) {
+          return { status: "transient_connection" };
         }
 
-        return locationHref === "about:blank";
+        if (blockedKeywords.some((keyword) => combinedText.includes(keyword))) {
+          return { status: "blocked" };
+        }
+
+        if (locationHref === "about:blank") {
+          return { status: "blocked" };
+        }
+
+        return { status: "ready" };
       } catch (_err) {
         // Cross-origin içeriklere erişim normalde kısıtlıdır; bu durumda yükleme başarılı kabul edilir.
-        return false;
+        return { status: "ready" };
       }
     }
 
@@ -135,6 +148,10 @@
       const maxWaitMs = 30000;
       const pollMs = 1500;
       const deadline = Date.now() + maxWaitMs;
+      const maxTransientRetries = 4;
+      const retryDelayMs = 1000;
+      let transientRetryCount = 0;
+      const initialSrc = frame.src;
 
       const block = () => {
         if (settled) return;
@@ -151,8 +168,18 @@
 
       const verifyFrame = () => {
         if (settled || !loadedAtLeastOnce) return;
-        if (!isLikelyBlockedIframe(frame)) {
+        const state = inspectIframeState(frame);
+        if (!state || state.status === "ready") {
           success();
+          return;
+        }
+        if (state.status === "transient_connection" && transientRetryCount < maxTransientRetries) {
+          transientRetryCount += 1;
+          window.setTimeout(() => {
+            if (settled) return;
+            const separator = initialSrc.includes("?") ? "&" : "?";
+            frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
+          }, retryDelayMs);
           return;
         }
         if (Date.now() >= deadline) {
