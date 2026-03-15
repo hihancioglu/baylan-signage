@@ -61,9 +61,18 @@ class TestWidgetViewer(unittest.TestCase):
             widget_viewer.CEF_BLACK_BACKGROUND,
         )
 
-    def test_build_engine_url_wraps_source_when_enabled(self):
+    def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url("https://example.com")
+
+        self.assertEqual(result, "https://example.com")
+
+    def test_build_engine_url_wraps_source_when_layout_exists(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(
+                "https://example.com",
+                widget_config={"widgets": [{"type": "iframe", "url": "https://example.com"}]},
+            )
 
         self.assertIn("widget_engine.html", result)
         self.assertIn("config_b64=", result)
@@ -73,7 +82,10 @@ class TestWidgetViewer(unittest.TestCase):
         with patch.dict('os.environ', {'WIDGET_SINGLE_ENGINE': '1'}, clear=False), patch(
             'client.widget_viewer.sys._MEIPASS', '/tmp/nonexistent-meipass', create=True
         ):
-            result = widget_viewer._build_engine_url('https://example.com')
+            result = widget_viewer._build_engine_url(
+                'https://example.com',
+                widget_config={'widgets': [{'type': 'iframe', 'url': 'https://example.com'}]},
+            )
 
         self.assertIn('widget_engine.html', result)
         self.assertNotIn('/tmp/nonexistent-meipass', result)
