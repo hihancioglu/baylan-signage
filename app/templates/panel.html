@@ -1383,7 +1383,8 @@ async function loadItems(){
     li.className = 'list-group-item playlist-item';
     li.draggable = true;
     li.dataset.id = i.id;
-    const durationText = (i.media_type === 'image' && i.duration_sec) ? ` (${i.duration_sec} sn)` : '';
+    const shouldShowDuration = ['image', 'widget'].includes((i.media_type || '').toLowerCase()) && Number(i.duration_sec) > 0;
+    const durationText = shouldShowDuration ? ` (${i.duration_sec} sn)` : '';
     li.textContent = `${i.label || i.path}${durationText}`;
     li.addEventListener('click',()=>{
       selectedPlaylistItemId = i.id;
