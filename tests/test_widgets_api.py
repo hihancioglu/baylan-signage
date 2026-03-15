@@ -16,6 +16,20 @@ class TestWidgetsApi(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmpdir.cleanup()
 
+    def setUp(self):
+        db = self.main.db_session()
+        try:
+            db.query(self.main.DeviceGroup).delete()
+            db.query(self.main.GroupPlaylist).delete()
+            db.query(self.main.PlaylistItem).delete()
+            db.query(self.main.Playlist).delete()
+            db.query(self.main.Device).delete()
+            db.query(self.main.Group).delete()
+            db.query(self.main.AppSetting).delete()
+            db.commit()
+        finally:
+            db.close()
+
     def test_widget_crud(self):
         client = self.main.app.test_client()
         with patch("app.main._auth_failed", return_value=False):
@@ -178,6 +192,57 @@ class TestWidgetsApi(unittest.TestCase):
             )
             self.assertEqual(add_item.status_code, 400)
             self.assertEqual(add_item.get_json(), {"error": "duration_sec must be > 0"})
+
+    def test_updating_widget_pushes_config_to_affected_devices(self):
+        client = self.main.app.test_client()
+        with patch("app.main._auth_failed", return_value=False):
+            create_group = client.post("/api/groups", json={"name": "Widget Push Group"})
+            self.assertEqual(create_group.status_code, 200)
+            gid = create_group.get_json().get("id")
+
+            db = self.main.db_session()
+            try:
+                db.add(self.main.Device(hostname="screen-1"))
+                db.commit()
+            finally:
+                db.close()
+
+            bind_group = client.post("/api/devices/screen-1/group/{}".format(gid))
+            self.assertEqual(bind_group.status_code, 200)
+
+            create_widget = client.post(
+                "/api/widgets",
+                json={"name": "Dashboard", "type": "url", "content": "https://example.com/one"},
+            )
+            self.assertEqual(create_widget.status_code, 200)
+            wid = create_widget.get_json().get("id")
+
+            create_playlist = client.post(
+                "/api/playlists",
+                json={"name": "Widget Push Playlist", "enabled": True},
+            )
+            self.assertEqual(create_playlist.status_code, 200)
+            pid = create_playlist.get_json().get("id")
+
+            bind_playlist = client.post(f"/api/groups/{gid}/playlist/{pid}")
+            self.assertEqual(bind_playlist.status_code, 200)
+
+            add_item = client.post(
+                f"/api/playlists/{pid}/items",
+                json={"item_type": "widget", "widget_id": wid, "order_no": 0},
+            )
+            self.assertEqual(add_item.status_code, 200)
+
+            with patch("app.main._emit_config_update") as emit_config_update:
+                update = client.patch(
+                    f"/api/widgets/{wid}",
+                    json={"name": "Dashboard Updated", "type": "url", "content": "https://example.com/two"},
+                )
+
+            self.assertEqual(update.status_code, 200)
+            emit_config_update.assert_called_once()
+            hostnames = emit_config_update.call_args.args[0]
+            self.assertIn("screen-1", hostnames)
 
 
 if __name__ == "__main__":

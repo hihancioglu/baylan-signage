@@ -685,6 +685,22 @@ def _hostnames_for_playlist(db, playlist_id):
     return [r[0] for r in rows]
 
 
+def _hostnames_for_widget(db, widget_id):
+    playlist_ids = [
+        row[0]
+        for row in db.query(PlaylistItem.playlist_id)
+        .filter(PlaylistItem.widget_id == int(widget_id))
+        .distinct()
+        .all()
+    ]
+
+    hostnames = set()
+    for playlist_id in playlist_ids:
+        hostnames.update(_hostnames_for_playlist(db, playlist_id))
+
+    return list(hostnames)
+
+
 def _emit_command(db, cmd, target_type, target_value):
     target_hostnames = _target_hostnames(db, target_type, target_value)
     if target_type == "all":
@@ -1560,6 +1576,7 @@ def update_widget(widget_id):
 
     db = db_session()
     try:
+        affected_hostnames = _hostnames_for_widget(db, widget_id)
         widgets = _load_widgets(db)
         target = next((item for item in widgets if item["id"] == widget_id), None)
         if not target:
@@ -1570,6 +1587,8 @@ def update_widget(widget_id):
         target["content"] = content
         _save_widgets(db, widgets)
         db.commit()
+
+        _emit_config_update(affected_hostnames)
         return jsonify({"ok": True})
     finally:
         db.close()
