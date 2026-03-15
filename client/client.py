@@ -2090,7 +2090,7 @@ def run_state_cycle():
     if not content_enabled:
         idle_background.hide()
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING}:
-            playback.stop()
+            playback.stop(stop_widget_runtime=True)
             set_state(ClientState.ACTIVE, "content_disabled")
         return get_idle_seconds()
 
@@ -2106,7 +2106,7 @@ def run_state_cycle():
     if not idle_mode_enabled:
         idle_background.hide()
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING, ClientState.RETURNING}:
-            playback.stop()
+            playback.stop(stop_widget_runtime=True)
             return_to_erp_window()
             set_state(ClientState.ACTIVE, "idle_mode_disabled")
         return idle_sec
@@ -2119,7 +2119,7 @@ def run_state_cycle():
         playback.start()
         if user_activity_detected:
             idle_background.hide()
-            playback.stop()
+            playback.stop(stop_widget_runtime=True)
             set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s")
             return idle_sec
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
@@ -2151,11 +2151,11 @@ def run_state_cycle():
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
         return_to_erp_window()
-        playback.stop()
+        playback.stop(stop_widget_runtime=True)
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
-        playback.stop()
+        playback.stop(stop_widget_runtime=True)
         playback._active_widget_signature = None
 
     return idle_sec
