@@ -101,13 +101,9 @@
     function isLikelyBlockedIframe(frame) {
       try {
         const doc = frame.contentDocument;
-        if (!doc) return true;
+        if (!doc) return false;
 
         const locationHref = String(doc.location && doc.location.href || "").toLowerCase();
-        if (!locationHref || locationHref === "about:blank") {
-          return true;
-        }
-
         const title = String(doc.title || "").toLowerCase();
         const bodyText = String(doc.body && doc.body.innerText || "").toLowerCase();
         const combinedText = `${title} ${bodyText}`;
@@ -121,7 +117,12 @@
           "içinde görüntülenemiyor",
           "bağlantıyı reddetti",
         ];
-        return blockedKeywords.some((keyword) => combinedText.includes(keyword));
+
+        if (blockedKeywords.some((keyword) => combinedText.includes(keyword))) {
+          return true;
+        }
+
+        return locationHref === "about:blank";
       } catch (_err) {
         // Cross-origin içeriklere erişim normalde kısıtlıdır; bu durumda yükleme başarılı kabul edilir.
         return false;
@@ -130,6 +131,11 @@
 
     function attachIframeBlockDetection(wrapper, frame) {
       let settled = false;
+      let loadedAtLeastOnce = false;
+      const maxWaitMs = 30000;
+      const pollMs = 1500;
+      const deadline = Date.now() + maxWaitMs;
+
       const block = () => {
         if (settled) return;
         settled = true;
@@ -140,17 +146,30 @@
         settled = true;
       };
 
-      frame.addEventListener("error", block);
-      frame.addEventListener("load", () => {
-        if (isLikelyBlockedIframe(frame)) {
+      const verifyFrame = () => {
+        if (settled || !loadedAtLeastOnce) return;
+        if (!isLikelyBlockedIframe(frame)) {
+          success();
+          return;
+        }
+        if (Date.now() >= deadline) {
           block();
           return;
         }
-        success();
-      }, { once: true });
+        window.setTimeout(verifyFrame, pollMs);
+      };
+
+      frame.addEventListener("error", block);
+      frame.addEventListener("load", () => {
+        loadedAtLeastOnce = true;
+        verifyFrame();
+      });
+
       window.setTimeout(() => {
-        if (!settled) block();
-      }, 10000);
+        if (!settled && !loadedAtLeastOnce) {
+          block();
+        }
+      }, maxWaitMs);
     }
 
     function loadWidgets(config) {
