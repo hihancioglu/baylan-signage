@@ -114,6 +114,29 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["columns"], 2)
 
+
+    def test_build_engine_url_preserves_empty_cells_and_rows(self):
+        config = {
+            "widgets": [
+                {"type": "iframe", "url": "https://widget-a.example.com"},
+                {"type": "empty"},
+                {"type": "iframe", "url": "https://widget-b.example.com"},
+                {"type": "empty"},
+            ],
+            "columns": 2,
+            "rows": 2,
+        }
+
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(widget_url=None, widget_config=config)
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["rows"], 2)
+        self.assertEqual(payload["widgets"][1], {"type": "empty"})
+        self.assertEqual(payload["widgets"][3], {"type": "empty"})
+
     def test_normalize_url_uses_file_uri_for_existing_local_file(self):
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as handle:
             handle.write(b"<html></html>")

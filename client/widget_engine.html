@@ -25,6 +25,7 @@
     .iframe-widget.blocked .iframe-fallback { display: block; }
     .iframe-widget.blocked iframe { visibility: hidden; }
     .card { padding: 16px; font-size: 24px; display: flex; align-items: center; justify-content: center; }
+    .empty-cell { background: transparent; border: 1px dashed rgba(255,255,255,0.15); }
   </style>
 </head>
 <body>
@@ -55,6 +56,10 @@
 
       const widgets = Array.isArray(input.widgets) ? input.widgets.filter((w) => w && typeof w === "object") : [];
       const normalized = { widgets };
+      const parsedRows = Number(input.rows);
+      if (Number.isFinite(parsedRows) && parsedRows > 0) {
+        normalized.rows = parsedRows;
+      }
       if (Array.isArray(input.columns)) {
         normalized.columns = input.columns;
       } else {
@@ -69,7 +74,17 @@
     function applyLayout(config) {
       const container = document.getElementById("widgets");
       const columns = Array.isArray(config.columns) ? config.columns.length : Number(config.columns || 1);
-      container.style.setProperty("--cols", String(Math.max(1, Number(columns) || 1)));
+      const cols = Math.max(1, Number(columns) || 1);
+      container.style.setProperty("--cols", String(cols));
+
+      const minRows = Number(config.rows || 0);
+      const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
+      const targetRows = Math.max(minRows, Math.ceil(widgetCount / cols));
+      if (targetRows > 0) {
+        container.style.gridTemplateRows = `repeat(${targetRows}, minmax(0, 1fr))`;
+      } else {
+        container.style.removeProperty("grid-template-rows");
+      }
     }
 
     function buildIframeFallback(url) {
@@ -180,7 +195,15 @@
             scriptNode.replaceWith(runnable);
           });
           container.appendChild(embed);
+          return;
         }
+        if (w.type === "empty") {
+          const empty = document.createElement("div");
+          empty.className = "widget empty-cell";
+          container.appendChild(empty);
+          return;
+        }
+
       });
     }
 

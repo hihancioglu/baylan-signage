@@ -703,8 +703,15 @@ function dashboardColumns(){
 
 function collectDashboardIframeUrls(){
   return Array.from(document.querySelectorAll('.dashboard-iframe-url'))
-    .map(el => String(el.value || '').trim())
-    .filter(Boolean);
+    .map(el => String(el.value || '').trim());
+}
+
+function normalizeDashboardRowItems(urls, cols){
+  const values = Array.isArray(urls) ? urls : [];
+  const lastFilledIndex = values.reduce((last, url, index) => (String(url || '').trim() ? index : last), -1);
+  if(lastFilledIndex < 0) return new Array(cols).fill('');
+  const totalCells = Math.max(cols, Math.ceil((lastFilledIndex + 1) / cols) * cols);
+  return Array.from({length: totalCells}, (_, index) => values[index] || '');
 }
 
 function buildDashboardIframeCell(url = ''){
@@ -733,11 +740,8 @@ function addDashboardIframeRow(initialUrls = []){
 }
 
 function removeDashboardIframe(button){
-  const cell = button?.closest('.dashboard-iframe-item');
-  if(cell) cell.remove();
-
-  const row = button?.closest('.dashboard-iframe-row');
-  if(row && !row.querySelector('.dashboard-iframe-item')) row.remove();
+  const input = button?.closest('.dashboard-iframe-item')?.querySelector('.dashboard-iframe-url');
+  if(input) input.value = '';
 
   refreshDashboardIframeLabels();
   syncDashboardToContent();
@@ -754,15 +758,14 @@ function refreshDashboardIframeLabels(){
 }
 
 function reflowDashboardIframeRows(){
-  const urls = collectDashboardIframeUrls();
   const cols = dashboardColumns();
+  const urls = normalizeDashboardRowItems(collectDashboardIframeUrls(), cols);
   const list = document.getElementById('dashboard-iframe-list');
   if(!list) return;
 
   list.innerHTML = '';
-  const items = urls.length ? urls : [''];
-  for(let i = 0; i < items.length; i += cols){
-    addDashboardIframeRow(items.slice(i, i + cols));
+  for(let i = 0; i < urls.length; i += cols){
+    addDashboardIframeRow(urls.slice(i, i + cols));
   }
   refreshDashboardIframeLabels();
   syncDashboardToContent();
@@ -773,16 +776,25 @@ function syncDashboardBuilderFromContent(content){
   const list = document.getElementById('dashboard-iframe-list');
   if(!list) return;
 
-  const urls = (config?.widgets || [])
-    .map(w => (w?.type === 'iframe' || w?.type === 'url') ? String(w.url || w.content || '').trim() : '')
-    .filter(Boolean);
-
   const cols = Number(config?.columns || 2);
-  document.getElementById('dashboard-columns').value = String(cols > 0 ? cols : 2);
+  const parsedCols = cols > 0 ? cols : 2;
+  const rows = Number(config?.rows || 0);
+  const minCellsFromRows = rows > 0 ? rows * parsedCols : 0;
+  const urls = (config?.widgets || [])
+    .map(w => {
+      if(!w || typeof w !== 'object') return '';
+      if(w.type === 'empty') return '';
+      if(w.type === 'iframe' || w.type === 'url') return String(w.url || w.content || '').trim();
+      return '';
+    });
+
+  document.getElementById('dashboard-columns').value = String(parsedCols);
   list.innerHTML = '';
-  const rowItems = urls.length ? urls : [''];
-  for(let i = 0; i < rowItems.length; i += dashboardColumns()){
-    addDashboardIframeRow(rowItems.slice(i, i + dashboardColumns()));
+  const rowItems = normalizeDashboardRowItems(urls, dashboardColumns());
+  const totalCells = Math.max(rowItems.length, minCellsFromRows || 0, dashboardColumns());
+  const finalCells = Array.from({length: totalCells}, (_, index) => rowItems[index] || '');
+  for(let i = 0; i < finalCells.length; i += dashboardColumns()){
+    addDashboardIframeRow(finalCells.slice(i, i + dashboardColumns()));
   }
   refreshDashboardIframeLabels();
   syncDashboardToContent();
@@ -793,11 +805,13 @@ function syncDashboardToContent(){
   if(type !== 'dashboard') return;
 
   const cols = dashboardColumns();
-  const urls = collectDashboardIframeUrls();
+  const urls = normalizeDashboardRowItems(collectDashboardIframeUrls(), cols);
+  const rows = Math.max(1, Math.ceil(urls.length / cols));
 
   const payload = {
     columns: cols,
-    widgets: urls.map(url => ({type: 'iframe', url}))
+    rows,
+    widgets: urls.map(url => url ? ({type: 'iframe', url}) : ({type: 'empty'}))
   };
 
   document.getElementById('widget-content').value = JSON.stringify(payload, null, 2);
@@ -843,12 +857,29 @@ function updateWidgetPreview(){
       preview.innerHTML = '<span class="text-danger">Dashboard JSON formatı geçersiz.</span>';
       return;
     }
-    const widgets = (config.widgets || []).filter(w => w && (w.type === 'iframe' || w.type === 'url'));
-    if(!widgets.length){
+    const cols = Math.max(1, Number(config.columns) || 1);
+    const cells = (config.widgets || []).map((w) => {
+      if(!w || typeof w !== 'object' || w.type === 'empty') return '';
+      if(w.type === 'iframe' || w.type === 'url') return String(w.url || w.content || '').trim();
+      return '';
+    });
+    const normalizedCells = normalizeDashboardRowItems(cells, cols);
+    if(!normalizedCells.some(Boolean)){
       preview.innerHTML = '<span class="text-secondary">Dashboard için en az bir iframe URL ekleyin.</span>';
       return;
     }
-    preview.innerHTML = widgets.map((w, idx) => `<div><strong>#${idx+1}:</strong> ${escapeHtml(w.url || w.content || '')}</div>`).join('');
+    const rows = Math.max(1, Math.ceil(normalizedCells.length / cols));
+    const previewRows = [];
+    for(let row = 0; row < rows; row += 1){
+      const cellsInRow = [];
+      for(let col = 0; col < cols; col += 1){
+        const idx = (row * cols) + col;
+        const value = normalizedCells[idx] || '';
+        cellsInRow.push(`<div class="border rounded p-2 bg-white"><div class="fw-semibold mb-1">${row + 1}. Satır ${dashboardColumnLabel(col, cols)}</div><div class="small text-break ${value ? '' : 'text-secondary'}">${value ? escapeHtml(value) : 'Boş'}</div></div>`);
+      }
+      previewRows.push(`<div class="dashboard-iframe-row" style="--dashboard-columns:${cols}">${cellsInRow.join('')}</div>`);
+    }
+    preview.innerHTML = `<div class="d-flex flex-column gap-2">${previewRows.join('')}</div>`;
     return;
   }
 
