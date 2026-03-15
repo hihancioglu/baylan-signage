@@ -150,9 +150,12 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                         normalized_widget["type"] = "embed"
                         normalized_widget["html"] = str(raw_url)
                         normalized_widget.pop("url", None)
-                else:
+                elif str(raw_url).strip():
                     normalized_widget["type"] = "iframe"
                     normalized_widget["url"] = _normalize_url(str(raw_url))
+                else:
+                    normalized_widget["type"] = "empty"
+                    normalized_widget.pop("url", None)
             elif widget_type == "html":
                 normalized_widget["type"] = "card"
                 normalized_widget["html"] = str(
@@ -180,6 +183,13 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
             payload["columns"] = parsed_columns
         else:
             payload.pop("columns", None)
+
+    rows = payload.get("rows")
+    parsed_rows = int(rows) if isinstance(rows, int) else None
+    if parsed_rows and parsed_rows > 0:
+        payload["rows"] = parsed_rows
+    else:
+        payload.pop("rows", None)
 
     return payload
 

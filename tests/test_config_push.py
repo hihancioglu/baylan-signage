@@ -295,6 +295,51 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(payload["widgets"][1]["url"], "https://example.com/b")
         self.assertEqual(payload["columns"], 2)
         self.assertIsNone(cfg["videos"][0]["widget_url"])
+
+
+    def test_build_config_dashboard_widget_preserves_empty_cells_and_rows(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Widget Dashboard Grid Group")
+            playlist = self.main.Playlist(name="Widget Dashboard Grid Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-widget-dashboard-grid")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    media_type="widget",
+                    widget_id=18,
+                    order_no=0,
+                )
+            )
+            db.commit()
+
+            self.main._save_widgets(
+                db,
+                [
+                    {
+                        "id": 18,
+                        "name": "Dashboard Widget Grid",
+                        "type": "dashboard",
+                        "content": '{"columns":2,"rows":2,"widgets":[{"type":"iframe","url":"https://example.com/a"},{"type":"empty"},{"type":"iframe","url":""},{"type":"iframe","url":"https://example.com/d"}]}',
+                    }
+                ],
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-widget-dashboard-grid")
+        payload = cfg["videos"][0]["widget_payload"]
+        self.assertEqual(payload["columns"], 2)
+        self.assertEqual(payload["rows"], 2)
+        self.assertEqual([w.get("type") for w in payload["widgets"]], ["iframe", "empty", "empty", "iframe"])
+
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:

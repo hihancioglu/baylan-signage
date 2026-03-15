@@ -358,6 +358,7 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         if widget_type in {"iframe", "url"}:
             url = str(widget.get("url") or widget.get("content") or "").strip()
             if not url:
+                normalized_widgets.append({"type": "empty"})
                 continue
             if _looks_like_embed_html(url):
                 normalized_widgets.append({"type": "embed", "html": url})
@@ -368,6 +369,10 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         if widget_type == "card":
             html = str(widget.get("html") or widget.get("content") or "")
             normalized_widgets.append({"type": "card", "html": html})
+            continue
+
+        if widget_type == "empty":
+            normalized_widgets.append({"type": "empty"})
 
     if not normalized_widgets:
         return None
@@ -378,6 +383,10 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         payload["columns"] = columns
     elif isinstance(columns, int) and columns > 0:
         payload["columns"] = columns
+
+    rows = parsed.get("rows")
+    if isinstance(rows, int) and rows > 0:
+        payload["rows"] = rows
     return payload
 
 
