@@ -912,7 +912,7 @@ class PlaybackController:
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
-        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}:
+        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "0").strip().lower() in {"1", "true", "yes"}:
             self.player.start_widget_engine_if_needed()
 
     @staticmethod
