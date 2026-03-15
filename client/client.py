@@ -145,6 +145,12 @@ def _resolve_windows_writable_path(path_value: str | None, default_relative_path
 
     return _resolve_runtime_path(default_relative_path)
 
+
+def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
+    args = argv if argv is not None else sys.argv[1:]
+    normalized = {str(arg).strip().lower() for arg in args if isinstance(arg, str)}
+    return "--widget" in normalized or "--runtime-ipc" in normalized
+
 SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
@@ -913,7 +919,10 @@ class PlaybackController:
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
-        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}:
+        if (
+            os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
+            and not _is_widget_viewer_process()
+        ):
             self.player.start_widget_engine_if_needed()
 
     @staticmethod
