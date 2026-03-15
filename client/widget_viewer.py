@@ -299,7 +299,28 @@ def _build_runtime_update_script(payload: object) -> str:
     )
 
 
-def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
+
+
+def _set_cef_window_visible(browser, visible: bool) -> None:
+    try:
+        handle = int(browser.GetOuterWindowHandle())
+    except Exception:
+        return
+
+    if handle <= 0:
+        return
+
+    try:
+        import ctypes
+
+        SW_HIDE = 0
+        SW_SHOW = 5
+        ctypes.windll.user32.ShowWindow(handle, SW_SHOW if visible else SW_HIDE)
+    except Exception:
+        pass
+
+
+def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> None:
     import webview
 
     window = webview.create_window(
@@ -308,12 +329,16 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
         fullscreen=True,
         frameless=True,
         on_top=True,
+        hidden=start_hidden,
         background_color="#000000",
         text_select=False,
     )
 
     if runtime_ipc:
+        shown_once = not start_hidden
+
         def dispatch(message: dict) -> None:
+            nonlocal shown_once
             if message.get("type") == "stop":
                 try:
                     webview.destroy_window()
@@ -321,6 +346,12 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
                     pass
                 return
             payload = message.get("payload")
+            if not shown_once:
+                shown_once = True
+                try:
+                    window.show()
+                except Exception:
+                    pass
             js = _build_runtime_update_script(payload)
             try:
                 window.evaluate_js(js)
@@ -332,7 +363,7 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False) -> None:
     _start_with_fallback(webview)
 
 
-def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
+def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> None:
     from cefpython3 import cefpython as cef
 
     switches = dict(CHROME_KIOSK_SWITCHES)
@@ -357,9 +388,14 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
         window_title="Baylan Widget",
         settings={"background_color": CEF_BLACK_BACKGROUND},
     )
+    if start_hidden:
+        _set_cef_window_visible(browser, False)
 
     if runtime_ipc:
+        shown_once = not start_hidden
+
         def dispatch(message: dict) -> None:
+            nonlocal shown_once
             if message.get("type") == "stop":
                 cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
                 return
@@ -367,6 +403,10 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False) -> None:
             payload = message.get("payload")
 
             def _post_js():
+                nonlocal shown_once
+                if not shown_once:
+                    shown_once = True
+                    _set_cef_window_visible(browser, True)
                 browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload))
 
             cef.PostTask(cef.TID_UI, _post_js)
@@ -383,6 +423,7 @@ def main() -> int:
         return 2
 
     runtime_ipc = "--runtime-ipc" in sys.argv[2:]
+    start_hidden = "--start-hidden" in sys.argv[2:]
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
@@ -395,9 +436,9 @@ def main() -> int:
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
             if backend == "cef":
-                _start_with_cef(widget_url, runtime_ipc=runtime_ipc)
+                _start_with_cef(widget_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
             else:
-                _start_with_pywebview(widget_url, runtime_ipc=runtime_ipc)
+                _start_with_pywebview(widget_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
             return 0
         except Exception as exc:
             errors.append(f"{backend}: {exc}")

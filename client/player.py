@@ -689,6 +689,7 @@ class BorderlessFullscreenPlayer:
             self._python_widget_viewer_runtime_enabled = False
             return False
         command.append("--runtime-ipc")
+        command.append("--start-hidden")
 
         try:
             self._stop_requested = False
