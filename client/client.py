@@ -1025,6 +1025,45 @@ class PlaybackController:
         return None
 
     @staticmethod
+    def _parse_dashboard_widget_payload(raw_payload: dict) -> dict | None:
+        if not isinstance(raw_payload, dict):
+            return None
+
+        widget_type = str(raw_payload.get("type") or "").strip().lower()
+        if widget_type != "dashboard":
+            return None
+
+        raw_content = str(raw_payload.get("content") or "").strip()
+        if not raw_content:
+            return None
+
+        try:
+            parsed = json.loads(raw_content)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+
+        widgets = parsed.get("widgets")
+        if not isinstance(widgets, list):
+            return None
+
+        normalized: dict[str, object] = {"widgets": list(widgets)}
+        columns = PlaybackController._normalize_widget_columns(parsed.get("columns"))
+        if columns is not None:
+            normalized["columns"] = columns
+
+        rows = parsed.get("rows")
+        if isinstance(rows, int) and rows > 0:
+            normalized["rows"] = rows
+
+        name = str(raw_payload.get("name") or "").strip()
+        if name:
+            normalized["name"] = name
+        return normalized
+
+    @staticmethod
     def _normalize_item(item: dict) -> dict:
         normalized = dict(item) if isinstance(item, dict) else {}
         normalized["item_type"] = str(normalized.get("item_type") or normalized.get("media_type") or "media").strip().lower() or "media"
@@ -1066,6 +1105,10 @@ class PlaybackController:
             return None
 
         raw_widget_payload = normalized.get("widget_payload")
+        if isinstance(raw_widget_payload, dict):
+            parsed_dashboard_payload = self._parse_dashboard_widget_payload(raw_widget_payload)
+            if parsed_dashboard_payload:
+                raw_widget_payload = parsed_dashboard_payload
         payload_columns = None
         widget_entries = None
         if isinstance(raw_widget_payload, list):
