@@ -1089,11 +1089,20 @@ class PlaybackController:
         ).hexdigest()
         return widget_url, widget_config, widget_signature
 
-    def _prewarm_next_widget(self, playlist_entries: list[dict], loop_mode: str, runtime_state: dict) -> None:
+    def _prewarm_next_widget(
+        self,
+        playlist_entries: list[dict],
+        loop_mode: str,
+        runtime_state: dict,
+        just_played_index: int | None = None,
+    ) -> None:
         if loop_mode != "sequential" or not playlist_entries:
             return
 
-        current_index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+        if just_played_index is None:
+            current_index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+        else:
+            current_index = int(just_played_index) % len(playlist_entries)
         next_item = playlist_entries[(current_index + 1) % len(playlist_entries)]
         next_spec = self._build_widget_playback_spec(next_item)
         if not next_spec:
@@ -1360,6 +1369,10 @@ class PlaybackController:
                 if not ok:
                     print(f"⚠️ bozuk/oynatılamayan içerik atlandı: {self._item_label(item)}")
 
+                played_index = None
+                if loop_mode == "sequential":
+                    played_index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+
                 if interrupted and item_type != "widget" and self.player._is_video(media_path):
                     elapsed = max(0.0, time.monotonic() - started_at)
                     runtime_state["resume_sec"] = resume_sec + elapsed
@@ -1370,7 +1383,12 @@ class PlaybackController:
                     else:
                         runtime_state["index"] = (int(runtime_state.get("index") or 0) + 1) % len(playlist_entries)
 
-                self._prewarm_next_widget(playlist_entries, loop_mode, runtime_state)
+                self._prewarm_next_widget(
+                    playlist_entries,
+                    loop_mode,
+                    runtime_state,
+                    just_played_index=played_index,
+                )
                 self._persist_playback_state()
         except Exception as exc:
             logging.exception("Playback worker crashed")
@@ -2091,8 +2109,10 @@ def run_state_cycle():
 
     if current_state == ClientState.RETURNING:
         idle_background.hide()
-        playback.stop()
+        # ERP penceresini öne aldıktan sonra player'ı durdurmak,
+        # mpv/widget kapanışında masaüstü parlamasını azaltır.
         return_to_erp_window()
+        playback.stop()
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
