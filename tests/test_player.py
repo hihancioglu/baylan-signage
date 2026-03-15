@@ -744,6 +744,34 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertTrue(widget_signature)
 
+    def test_build_widget_playback_spec_parses_dashboard_widget_content_payload(self):
+        controller = self._build_controller()
+
+        widget_url, widget_config, widget_signature = controller._build_widget_playback_spec(
+            {
+                "item_type": "widget",
+                "widget_payload": {
+                    "name": "Dashboard",
+                    "type": "dashboard",
+                    "content": json.dumps(
+                        {
+                            "columns": 2,
+                            "widgets": [
+                                {"type": "iframe", "url": "https://example.com/left"},
+                                {"type": "iframe", "url": "https://example.com/right"},
+                            ],
+                        }
+                    ),
+                },
+            }
+        )
+
+        self.assertEqual(widget_url, "")
+        self.assertEqual(widget_config["columns"], 2)
+        self.assertEqual(len(widget_config["widgets"]), 2)
+        self.assertEqual(widget_config["widgets"][0]["type"], "iframe")
+        self.assertTrue(widget_signature)
+
     def test_failed_mpv_playlist_falls_back_to_single_playback(self):
         from client.client import PlaybackController
 
