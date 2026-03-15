@@ -701,6 +701,9 @@ class BorderlessFullscreenPlayer:
             self._widget_process = None
             return False
 
+    def is_direct_url_widget(self, widget_config: dict | None = None) -> bool:
+        return bool(self._single_url_widget_source(widget_config))
+
     def update_widget_layout(self, widget_source: str, widget_config: dict | None = None) -> bool:
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
         if payload is None:

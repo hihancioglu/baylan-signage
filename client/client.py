@@ -1087,7 +1087,7 @@ class PlaybackController:
         }
         widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or "").strip()
         if widget_config["widgets"] is None and widget_url:
-            widget_config["widgets"] = [{"type": "iframe", "url": widget_url}]
+            widget_config["widgets"] = [{"type": "url", "url": widget_url}]
         if widget_config["columns"] is None:
             widget_config.pop("columns", None)
         if widget_config.get("widgets") is None:
@@ -1343,17 +1343,26 @@ class PlaybackController:
                         )
 
                     widget_spec = self._build_widget_playback_spec(item)
+                    direct_url_widget = False
                     if widget_spec is None:
                         ok = False
                     else:
                         widget_url, widget_config, widget_signature = widget_spec
-                        if widget_signature != self._active_widget_signature:
+                        direct_url_widget = self.player.is_direct_url_widget(widget_config)
+                        if direct_url_widget:
+                            self._active_widget_signature = None
+                            ok = self.player.play_widget_blocking(
+                                widget_url,
+                                widget_duration_sec,
+                                widget_config=widget_config,
+                            )
+                        elif widget_signature != self._active_widget_signature:
                             ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
                             self._active_widget_signature = widget_signature if ok else None
                         else:
                             ok = True
 
-                    if ok:
+                    if ok and not direct_url_widget:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
                     interrupted = self.player.last_play_was_interrupted()
                 else:
