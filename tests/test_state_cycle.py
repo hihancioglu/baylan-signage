@@ -97,6 +97,26 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback.start.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.PLAYING)
 
+    def test_idle_pending_returns_active_when_activity_detected_before_content_selected(self):
+        self._configure_common()
+        main.current_state = main.ClientState.IDLE_PENDING
+        main._last_observed_idle_sec = 80.0
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+
+        fake_idle_background = Mock()
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", fake_idle_background), patch.object(
+            main, "get_idle_seconds", return_value=10.0
+        ):
+            main.run_state_cycle()
+
+        fake_playback.start.assert_called_once()
+        fake_playback.stop.assert_called_once()
+        fake_idle_background.hide.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
 
     def test_playing_transitions_to_returning_when_idle_drops_even_above_resume_threshold(self):
         self._configure_common()

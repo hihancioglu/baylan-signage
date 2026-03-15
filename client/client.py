@@ -2117,6 +2117,11 @@ def run_state_cycle():
 
     if current_state == ClientState.IDLE_PENDING:
         playback.start()
+        if user_activity_detected:
+            idle_background.hide()
+            playback.stop()
+            set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s")
+            return idle_sec
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
         # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
         # yapılmadığı için ekran siyah kalabilir.
