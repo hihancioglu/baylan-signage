@@ -152,7 +152,9 @@ CONFIG_PULL_INTERVAL_SEC = float(os.getenv("CONFIG_PULL_INTERVAL_SEC", "30"))
 STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
+ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
+WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
@@ -488,6 +490,7 @@ idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 idle_mode_enabled = True
 content_enabled = True
 current_state = ClientState.ACTIVE
+_last_observed_idle_sec: float | None = None
 emergency_active = False
 work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
@@ -2068,6 +2071,8 @@ def on_command(data):
 
 
 def run_state_cycle():
+    global _last_observed_idle_sec
+
     def _playback_has_selected_content() -> bool:
         if playback.current_content_name():
             return True
@@ -2090,6 +2095,13 @@ def run_state_cycle():
         return get_idle_seconds()
 
     idle_sec = get_idle_seconds()
+    previous_idle_sec = _last_observed_idle_sec
+    _last_observed_idle_sec = idle_sec
+    activity_by_idle_drop = (
+        isinstance(previous_idle_sec, (int, float))
+        and (previous_idle_sec - idle_sec) >= ACTIVITY_IDLE_DROP_SEC
+    )
+    user_activity_detected = idle_sec <= ACTIVITY_RESUME_SEC or activity_by_idle_drop
 
     if not idle_mode_enabled:
         idle_background.hide()
@@ -2114,17 +2126,18 @@ def run_state_cycle():
             # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
             set_state(ClientState.PLAYING, "player_started")
 
-    if current_state == ClientState.PLAYING and playback.current_content_name():
-        idle_background.hide()
-
     played_for_sec = time.monotonic() - playing_started_at
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
     active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
+    if current_state == ClientState.PLAYING and playback.current_content_name():
+        if active_item_type != "widget" or played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+            idle_background.hide()
+
     minimum_playing_before_return = 0.0 if active_item_type == "widget" else MIN_PLAYING_SECONDS
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
-        and idle_sec <= ACTIVITY_RESUME_SEC
+        and user_activity_detected
     ):
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
