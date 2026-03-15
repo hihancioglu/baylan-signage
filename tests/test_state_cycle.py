@@ -154,6 +154,21 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_idle_background.hide.assert_not_called()
 
+    def test_active_state_keeps_widget_runtime_warm(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=10.0
+        ):
+            main.run_state_cycle()
+
+        fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+
 
 if __name__ == "__main__":
     unittest.main()

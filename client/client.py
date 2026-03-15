@@ -2164,7 +2164,9 @@ def run_state_cycle():
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
-        playback.stop(stop_widget_runtime=True)
+        # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
+        # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
+        playback.stop(stop_widget_runtime=False)
         playback._active_widget_signature = None
 
     return idle_sec
