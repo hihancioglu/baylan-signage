@@ -907,7 +907,7 @@ class PlaybackController:
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
         self._active_widget_signature: str | None = None
 
-        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}:
+        if os.getenv("WIDGET_PREWARM_ON_STARTUP", "0").strip().lower() in {"1", "true", "yes"}:
             self.player.start_widget_engine_if_needed()
 
     @staticmethod
