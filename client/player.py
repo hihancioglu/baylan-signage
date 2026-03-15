@@ -151,30 +151,12 @@ class BorderlessFullscreenPlayer:
     def _prefer_python_widget_viewer() -> bool:
         return os.getenv("WIDGET_USE_PYTHON_VIEWER", "1").strip().lower() in {"1", "true", "yes"}
 
-    @staticmethod
-    def _find_frozen_widget_viewer_executable() -> str | None:
-        if not getattr(sys, "frozen", False):
-            return None
-
-        executable_dir = Path(sys.executable).resolve().parent
-        for candidate in ("widget_viewer.exe", "widget_viewer"):
-            viewer_path = executable_dir / candidate
-            if viewer_path.exists() and viewer_path.is_file():
-                return str(viewer_path)
-        return None
-
     def _detect_python_widget_viewer_support(self) -> bool:
         if not self._python_widget_viewer_enabled():
             return False
 
         if os.name != "nt":
             _safe_print("⚠️ Python widget viewer pasif: sadece Windows'ta destekleniyor")
-            return False
-
-        if getattr(sys, "frozen", False) and self._find_frozen_widget_viewer_executable() is None:
-            _safe_print(
-                "⚠️ Python widget viewer pasif: frozen build içinde bağımsız widget_viewer executable bulunamadı"
-            )
             return False
 
         backend = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
@@ -212,9 +194,8 @@ class BorderlessFullscreenPlayer:
 
     def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
         viewer_path = _resolve_runtime_resource("widget_viewer.py")
-        frozen_viewer = self._find_frozen_widget_viewer_executable()
-        if frozen_viewer:
-            return [frozen_viewer, widget_source]
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--widget", widget_source]
         if not viewer_path.is_file():
             _safe_print(f"⚠️ widget viewer script bulunamadı: {viewer_path}")
             return None
@@ -232,10 +213,14 @@ class BorderlessFullscreenPlayer:
         if not command:
             return False
         script_path = str(_runtime_resource_path("widget_viewer.py"))
-        if len(command) >= 2 and command[1] == script_path:
+        normalized_executable = str(Path(sys.executable).resolve())
+        if (
+            len(command) >= 3
+            and command[0] == normalized_executable
+            and command[1] == "--widget"
+        ):
             return True
-        frozen_viewer = self._find_frozen_widget_viewer_executable()
-        if frozen_viewer and command[0] == frozen_viewer:
+        if len(command) >= 2 and command[1] == script_path:
             return True
         return Path(command[0]).name.lower() in {"widget_viewer.exe", "widget_viewer"}
 

@@ -1,3 +1,4 @@
+import argparse
 import json
 import hashlib
 import importlib
@@ -2349,5 +2350,55 @@ def main():
         release_instance_lock()
 
 
+def _parse_cli_args(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--widget", dest="widget_url", help="Widget URL to launch in viewer mode")
+    parser.add_argument(
+        "--runtime-ipc",
+        action="store_true",
+        help="Widget viewer runtime IPC mode (used internally by agent runtime controller)",
+    )
+    parser.add_argument(
+        "--start-hidden",
+        action="store_true",
+        help="Start widget viewer hidden (used internally by agent runtime controller)",
+    )
+    return parser.parse_known_args(argv)
+
+
+def _run_widget_entrypoint(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> int:
+    from widget_viewer import _build_engine_url, _normalize_url, _start_with_cef, _start_with_pywebview, _viewer_backend_order, _safe_print
+
+    try:
+        normalized_url = _build_engine_url(_normalize_url(widget_url))
+    except Exception as exc:
+        _safe_print(f"Geçersiz widget URL: {exc}")
+        return 2
+
+    errors: list[str] = []
+    for backend in _viewer_backend_order():
+        try:
+            _safe_print(f"Widget viewer backend deneniyor: {backend}")
+            if backend == "cef":
+                _start_with_cef(normalized_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+            else:
+                _start_with_pywebview(normalized_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+            return 0
+        except Exception as exc:
+            errors.append(f"{backend}: {exc}")
+
+    _safe_print(f"Widget viewer başlatılamadı: {'; '.join(errors)}")
+    return 1
+
+
 if __name__ == "__main__":
+    args, _unknown_args = _parse_cli_args()
+    if args.widget_url:
+        raise SystemExit(
+            _run_widget_entrypoint(
+                args.widget_url,
+                runtime_ipc=args.runtime_ipc,
+                start_hidden=args.start_hidden,
+            )
+        )
     main()

@@ -3,7 +3,6 @@ param(
     [string]$ClientScript = "client/client.py",
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
-    [switch]$SkipViewerBuild,
     [switch]$EnableCefCollect,
     [switch]$SkipInstallPyInstaller,
     [switch]$ForceUpgradePyInstaller
@@ -79,12 +78,33 @@ $clientPyInstallerArgs = @(
     "player"
     "--hidden-import"
     "state_machine"
-    "--hidden-import"
-    "widget_viewer"
     "--distpath"
     $OutputDir
     $ClientScript
 )
+
+
+if ($EnableCefCollect) {
+    & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[agent] CEF bulundu, --collect-all cefpython3 eklenecek."
+        $clientPyInstallerArgs += @("--collect-all", "cefpython3")
+    } else {
+        Write-Warning "-EnableCefCollect verildi ancak cefpython3 bulunamadı; CEF collect adımı atlanıyor."
+    }
+}
+
+& $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[agent] pywebview bulundu, collect/hidden-import parametreleri ekleniyor."
+    $clientPyInstallerArgs += @(
+        "--collect-all", "webview",
+        "--hidden-import", "webview.platforms.winforms",
+        "--hidden-import", "webview.platforms.edgechromium"
+    )
+} else {
+    Write-Host "[agent] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
+}
 
 & $Python -m PyInstaller @clientPyInstallerArgs
 
@@ -97,54 +117,7 @@ if (!(Test-Path $artifact)) {
     throw "Client artifact not found: $artifact"
 }
 
-if (-not $SkipViewerBuild) {
-    Write-Host "[3/5] Building widget viewer sidecar executable..."
-
-    $viewerPyInstallerArgs = @(
-        "--noconfirm"
-        "--clean"
-        "--onefile"
-        "--noconsole"
-        "--name"
-        "widget_viewer"
-        "--add-data"
-        "client/widget_engine.html;."
-        "--distpath"
-        $OutputDir
-    )
-
-    if ($EnableCefCollect) {
-        & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[viewer] CEF bulundu, --collect-all cefpython3 eklenecek."
-            $viewerPyInstallerArgs += @("--collect-all", "cefpython3")
-        } else {
-            Write-Warning "-EnableCefCollect verildi ancak cefpython3 bulunamadı; CEF collect adımı atlanıyor."
-        }
-    }
-
-    & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[viewer] pywebview bulundu, backend fallback için collect/hidden-import parametreleri ekleniyor."
-        $viewerPyInstallerArgs += @(
-            "--collect-all", "webview",
-            "--hidden-import", "webview.platforms.winforms",
-            "--hidden-import", "webview.platforms.edgechromium"
-        )
-    } else {
-        Write-Host "[viewer] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
-    }
-
-    $viewerPyInstallerArgs += "client/widget_viewer.py"
-
-    & $Python -m PyInstaller @viewerPyInstallerArgs
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Widget viewer build failed with exit code $LASTEXITCODE"
-    }
-} else {
-    Write-Host "[3/5] Skipping viewer sidecar executable builds..."
-}
+Write-Host "[3/5] Viewer sidecar build adımı kaldırıldı (tek EXE mimarisi)."
 
 $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
@@ -174,7 +147,4 @@ if (-not $markerEmbedded) {
 }
 
 Write-Host "[5/5] Client build completed: $artifact"
-if (-not $SkipViewerBuild) {
-    Write-Host "Viewer artifact: $(Join-Path $OutputDir 'widget_viewer.exe')"
-}
 Write-Host "Embedded build marker: $buildVersion"
