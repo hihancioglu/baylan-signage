@@ -2068,6 +2068,13 @@ def on_command(data):
 
 
 def run_state_cycle():
+    def _playback_has_selected_content() -> bool:
+        if playback.current_content_name():
+            return True
+
+        active_item = getattr(playback, "_active_item", None)
+        return isinstance(active_item, dict) and bool(active_item)
+
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
@@ -2101,7 +2108,7 @@ def run_state_cycle():
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
         # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
         # yapılmadığı için ekran siyah kalabilir.
-        if playback.current_content_name():
+        if _playback_has_selected_content():
             # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
             # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
             # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
