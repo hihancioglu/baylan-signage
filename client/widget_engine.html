@@ -206,6 +206,7 @@
 
     const widgetPlaylistCache = new Map();
     let activeWidgetSignature = null;
+    let lastRenderedSignature = null;
 
     function createMediaWidget(w) {
       const wrapper = document.createElement("div");
@@ -226,7 +227,8 @@
       video.controls = w.controls === true;
       video.playsInline = true;
       video.loop = w.loop === true;
-      video.preload = "auto";
+      video.preload = String(w.preload || "metadata");
+      video.disablePictureInPicture = true;
       const startPositionSec = Number(w.start_position_sec || 0);
       if (Number.isFinite(startPositionSec) && startPositionSec > 0) {
         const seekToStart = () => {
@@ -242,8 +244,33 @@
       return wrapper;
     }
 
+    function cleanupMediaElements(container) {
+      container.querySelectorAll("video").forEach((video) => {
+        try {
+          video.pause();
+        } catch (_err) {
+          // noop
+        }
+        try {
+          video.removeAttribute("src");
+          video.load();
+        } catch (_err) {
+          // noop
+        }
+      });
+
+      container.querySelectorAll("img").forEach((image) => {
+        try {
+          image.removeAttribute("src");
+        } catch (_err) {
+          // noop
+        }
+      });
+    }
+
     function loadWidgets(config) {
       const container = document.getElementById("widgets");
+      cleanupMediaElements(container);
       container.innerHTML = "";
       const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
       const singleIframeMode =
@@ -347,12 +374,16 @@
 
       const config = normalizeConfig(input);
       const normalizedSignature = typeof signature === "string" ? signature.trim() : "";
+      if (normalizedSignature && normalizedSignature === lastRenderedSignature) {
+        return;
+      }
       if (normalizedSignature) {
         widgetPlaylistCache.set(normalizedSignature, config);
         activeWidgetSignature = normalizedSignature;
       } else {
         activeWidgetSignature = null;
       }
+      lastRenderedSignature = normalizedSignature || null;
       applyLayout(config);
       loadWidgets(config);
     }
