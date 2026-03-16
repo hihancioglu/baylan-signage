@@ -896,6 +896,8 @@ class BorderlessFullscreenPlayer:
 
         if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
+        elif self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
+            self.background_widget_engine()
 
         process = None
 
@@ -962,6 +964,8 @@ class BorderlessFullscreenPlayer:
 
         if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
+        elif self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
+            self.background_widget_engine()
 
         duration = self.image_duration_sec if image_duration_sec is None else image_duration_sec
         playlist_file = None
