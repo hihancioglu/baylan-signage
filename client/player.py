@@ -12,6 +12,7 @@ import ctypes
 import time
 import threading
 import re
+import logging
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
@@ -22,6 +23,17 @@ def _safe_print(message: str) -> None:
         print(message)
     except OSError:
         pass
+
+
+LOGGER = logging.getLogger("baylan.client.player")
+DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+
+def _debug_log(message: str) -> None:
+    if not DEBUG_MODE_ENABLED:
+        return
+    LOGGER.debug(message)
+    _safe_print(f"[DEBUG][player] {message}")
 
 
 def _runtime_resource_path(*relative_parts: str) -> Path:
@@ -123,6 +135,7 @@ class BorderlessFullscreenPlayer:
             os.getenv("WIDGET_KEEP_RUNTIME_WARM", "1").strip().lower() in {"1", "true", "yes"}
         )
         self._last_interrupted = False
+        _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
 
     @staticmethod
     def _windows_hidden_process_kwargs() -> dict:
@@ -750,6 +763,7 @@ class BorderlessFullscreenPlayer:
         if not process or process.poll() is not None or not process.stdin:
             return False
 
+        _debug_log("background_widget_engine requested")
         try:
             with self._widget_process_stdin_lock:
                 process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
@@ -774,6 +788,7 @@ class BorderlessFullscreenPlayer:
                 continue
             normalized_items.append({"signature": signature, "payload": payload})
 
+        _debug_log(f"sync_widget_runtime_playlist | items={len(normalized_items)} active_signature={active_signature}")
         message = {
             "type": "playlist_sync",
             "payload": {
@@ -794,6 +809,7 @@ class BorderlessFullscreenPlayer:
             _safe_print("⚠️ widget layout payload geçersiz")
             return False
 
+        _debug_log(f"update_widget_layout | signature={widget_signature} source={widget_source[:120]}")
         message = {
             "type": "layout_update",
             "payload": {
@@ -838,6 +854,7 @@ class BorderlessFullscreenPlayer:
 
     def wait_widget_duration(self, duration_sec: int) -> bool:
         deadline = time.monotonic() + max(1, int(duration_sec))
+        _debug_log(f"wait_widget_duration start | duration_sec={duration_sec} has_process={self._widget_process is not None}")
         while True:
             if self._stop_requested:
                 self._last_interrupted = True
@@ -869,9 +886,11 @@ class BorderlessFullscreenPlayer:
             time.sleep(0.2)
 
         if process.poll() is None:
+            _debug_log("_wait_widget_until_stop deadline/stop reached, terminating widget process")
             self._terminate_process(process, timeout_sec=2, force_tree=True)
 
         interrupted = self._stop_requested
+        _debug_log(f"_wait_widget_until_stop finished | interrupted={interrupted} returncode={process.returncode}")
         self._last_interrupted = interrupted
         return (process.returncode in (0, None)) or interrupted
 
@@ -882,6 +901,7 @@ class BorderlessFullscreenPlayer:
         widget_config: dict | None = None,
     ) -> bool:
         source = self._build_widget_source(widget_source, widget_config=widget_config)
+        _debug_log(f"play_widget_blocking start | duration_sec={duration_sec} source={source[:140] if source else ''}")
         if not source:
             self._last_interrupted = False
             _safe_print("⚠️ widget kaynağı boş")
@@ -893,6 +913,7 @@ class BorderlessFullscreenPlayer:
                 self._process = None
             self._stop_requested = False
             if self.update_widget_layout(widget_source, widget_config=widget_config):
+                _debug_log("play_widget_blocking runtime-controller path active")
                 return self.wait_widget_duration(duration_sec)
             if not self._widget_legacy_process_fallback_enabled():
                 self._last_interrupted = False
@@ -901,6 +922,7 @@ class BorderlessFullscreenPlayer:
         self.stop()
 
         command = self._build_widget_command(source)
+        _debug_log(f"play_widget_blocking fallback process command={command}")
         if not command:
             self._last_interrupted = False
             _safe_print("⚠️ widget oynatılamıyor: browser/webview komutu bulunamadı")
@@ -911,6 +933,7 @@ class BorderlessFullscreenPlayer:
         try:
             self._stop_requested = False
             process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
+            _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
             self._widget_process = process
 
             return self._wait_widget_until_stop(
@@ -961,6 +984,7 @@ class BorderlessFullscreenPlayer:
         image_duration_sec: int | None = None,
         start_position_sec: float | None = None,
     ) -> bool:
+        _debug_log(f"play_blocking start | media_path={media_path} image_duration_sec={image_duration_sec} start_position_sec={start_position_sec}")
         if not Path(media_path).exists():
             self._last_interrupted = False
             _safe_print(f"⚠️ medya bulunamadı: {media_path}")
@@ -1004,12 +1028,14 @@ class BorderlessFullscreenPlayer:
                 return False
 
             self._stop_requested = False
+            _debug_log(f"play_blocking command={command}")
             process = subprocess.Popen(command)
             self._process = process
             process.wait()
 
             interrupted = self._stop_requested
             self._last_interrupted = interrupted
+            _debug_log(f"play_blocking finished | returncode={process.returncode} interrupted={interrupted}")
             return process.returncode == 0 or interrupted
         except Exception as exc:
             self._last_interrupted = False
@@ -1101,6 +1127,7 @@ class BorderlessFullscreenPlayer:
                 Path(playlist_file).unlink(missing_ok=True)
 
     def stop(self, stop_widget_runtime: bool | None = None):
+        _debug_log(f"stop called | stop_widget_runtime={stop_widget_runtime}")
         self._stop_requested = True
 
         if stop_widget_runtime is None:
