@@ -1123,7 +1123,11 @@ class PlaybackController:
             return duration
         return default_duration
 
-    def _build_widget_playback_spec(self, item: dict) -> tuple[str, dict | None, str] | None:
+    def _build_widget_playback_spec(
+        self,
+        item: dict,
+        playlist_index: int | None = None,
+    ) -> tuple[str, dict | None, str] | None:
         normalized = self._normalize_item(item or {})
         if normalized.get("item_type") != "widget":
             return None
@@ -1162,7 +1166,11 @@ class PlaybackController:
 
         widget_signature = hashlib.sha256(
             json.dumps(
-                {"widget_url": widget_url, "widget_config": widget_config},
+                {
+                    "widget_url": widget_url,
+                    "widget_config": widget_config,
+                    "playlist_index": playlist_index,
+                },
                 ensure_ascii=False,
                 sort_keys=True,
             ).encode("utf-8")
@@ -1183,8 +1191,9 @@ class PlaybackController:
             current_index = int(runtime_state.get("index") or 0) % len(playlist_entries)
         else:
             current_index = int(just_played_index) % len(playlist_entries)
-        next_item = playlist_entries[(current_index + 1) % len(playlist_entries)]
-        next_spec = self._build_widget_playback_spec(next_item)
+        next_index = (current_index + 1) % len(playlist_entries)
+        next_item = playlist_entries[next_index]
+        next_spec = self._build_widget_playback_spec(next_item, playlist_index=next_index)
         if not next_spec:
             return
 
@@ -1201,8 +1210,8 @@ class PlaybackController:
         active_widget_signature: str | None = None,
     ) -> None:
         runtime_items: list[dict] = []
-        for entry in playlist_entries:
-            widget_spec = self._build_widget_playback_spec(entry)
+        for index, entry in enumerate(playlist_entries):
+            widget_spec = self._build_widget_playback_spec(entry, playlist_index=index)
             if not widget_spec:
                 continue
             widget_url, widget_config, widget_signature = widget_spec
@@ -1405,6 +1414,7 @@ class PlaybackController:
                         pos = 0
                     target_path = order[pos]
                     item = next((x for x in playlist_entries if x.get("local_path") == target_path), playlist_entries[0])
+                    playlist_index = playlist_entries.index(item)
                     print(
                         "🎲 Random seçim | "
                         f"pos={pos}/{len(order)} content={self._item_label(item)}"
@@ -1412,6 +1422,7 @@ class PlaybackController:
                 else:
                     index = int(runtime_state.get("index") or 0) % len(playlist_entries)
                     item = playlist_entries[index]
+                    playlist_index = index
                     print(
                         "▶️ Sequential seçim | "
                         f"index={index}/{len(playlist_entries)} "
@@ -1434,7 +1445,7 @@ class PlaybackController:
                             f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
                         )
 
-                    widget_spec = self._build_widget_playback_spec(item)
+                    widget_spec = self._build_widget_playback_spec(item, playlist_index=playlist_index)
                     direct_url_widget = False
                     if widget_spec is None:
                         ok = False
