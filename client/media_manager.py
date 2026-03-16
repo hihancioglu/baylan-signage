@@ -23,6 +23,9 @@ class MediaManager:
         self.media_store_root.mkdir(parents=True, exist_ok=True)
         self._state_lock = threading.RLock()
         self._download_jitter_max_sec = max(0.0, float(os.getenv("MEDIA_SYNC_JITTER_MAX_SEC", "20")))
+        self._source_base_url = str(
+            os.getenv("MEDIA_SOURCE_BASE_URL") or os.getenv("SERVER_URL") or ""
+        ).strip()
 
     @staticmethod
     def _sha256_text(value: str) -> str:
@@ -130,12 +133,26 @@ class MediaManager:
         parsed = urlparse(path)
         return parsed.scheme in {"http", "https"}
 
-    @staticmethod
-    def _normalize_source(source: str) -> str:
+    def _normalize_source(self, source: str) -> str:
         value = (source or "").strip()
         if value.lower().startswith(("http://", "https://")):
             return value.replace("\\", "/")
+        if value.startswith("/") and self._source_base_url:
+            return urljoin(f"{self._source_base_url.rstrip('/')}/", value.lstrip("/"))
         return value
+
+    @staticmethod
+    def _extract_source_from_item(raw_item) -> str:
+        if not isinstance(raw_item, dict):
+            return raw_item
+        return (
+            raw_item.get("path")
+            or raw_item.get("source")
+            or raw_item.get("source_url")
+            or raw_item.get("url")
+            or raw_item.get("local_path")
+            or ""
+        )
 
     @staticmethod
     def _path_exists_safely(path: Path) -> bool:
@@ -264,7 +281,7 @@ class MediaManager:
 
         downloadable_items = []
         for raw_item in playlist_items:
-            source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
+            source = self._extract_source_from_item(raw_item)
             normalized_source = self._normalize_source(source)
             item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
             widget_requires_download = bool((raw_item or {}).get("widget_requires_download")) if isinstance(raw_item, dict) else False
@@ -299,7 +316,7 @@ class MediaManager:
             self._maybe_stagger_download_start()
 
         for raw_item in playlist_items:
-            source = raw_item.get("path") if isinstance(raw_item, dict) else raw_item
+            source = self._extract_source_from_item(raw_item)
             duration_sec = raw_item.get("duration_sec") if isinstance(raw_item, dict) else None
             media_type = raw_item.get("media_type") if isinstance(raw_item, dict) else None
             item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
