@@ -120,6 +120,74 @@ class BorderlessFullscreenPlayer:
     ]
     _WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 
+    @staticmethod
+    def _windows_active_monitor_origin() -> tuple[int, int] | None:
+        if os.name != "nt" or not hasattr(ctypes, "windll"):
+            return None
+
+        user32 = ctypes.windll.user32
+        monitor_from_window = getattr(user32, "MonitorFromWindow", None)
+        get_monitor_info = getattr(user32, "GetMonitorInfoW", None)
+        get_foreground_window = getattr(user32, "GetForegroundWindow", None)
+        if not monitor_from_window or not get_monitor_info or not get_foreground_window:
+            return None
+
+        hwnd = get_foreground_window()
+        if not hwnd:
+            return None
+
+        MONITOR_DEFAULTTONEAREST = 2
+        monitor_handle = monitor_from_window(hwnd, MONITOR_DEFAULTTONEAREST)
+        if not monitor_handle:
+            return None
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", ctypes.c_ulong),
+            ]
+
+        monitor_info = MONITORINFO()
+        monitor_info.cbSize = ctypes.sizeof(MONITORINFO)
+        if not get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
+            return None
+
+        return int(monitor_info.rcMonitor.left), int(monitor_info.rcMonitor.top)
+
+    @classmethod
+    def _apply_windows_monitor_position(cls, flags: list[str]) -> list[str]:
+        if os.name != "nt":
+            return list(flags)
+
+        monitor_origin = cls._windows_active_monitor_origin()
+        if monitor_origin is None:
+            return list(flags)
+
+        x, y = monitor_origin
+        positioned_flags: list[str] = []
+        replaced = False
+        for flag in flags:
+            if isinstance(flag, str) and flag.startswith("--window-position="):
+                positioned_flags.append(f"--window-position={x},{y}")
+                replaced = True
+            else:
+                positioned_flags.append(flag)
+
+        if not replaced:
+            positioned_flags.append(f"--window-position={x},{y}")
+
+        return positioned_flags
+
     def __init__(self):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
         self.static_image_duration_sec = int(os.getenv("STATIC_IMAGE_DURATION_SEC", "86400"))
@@ -424,6 +492,7 @@ class BorderlessFullscreenPlayer:
             windows_browser = self._resolve_windows_kiosk_browser()
             if windows_browser:
                 executable, extra_flags = windows_browser
+                extra_flags = self._apply_windows_monitor_position(extra_flags)
                 command = [executable]
                 widget_arg_included = False
                 for flag in extra_flags:
