@@ -26,6 +26,8 @@
     .iframe-widget.blocked iframe { visibility: hidden; }
     .card { padding: 16px; font-size: 24px; display: flex; align-items: center; justify-content: center; }
     .empty-cell { background: transparent; border: 1px dashed rgba(255,255,255,0.15); }
+    .media-widget { position: relative; display:flex; align-items:center; justify-content:center; background:#000; }
+    .media-widget img, .media-widget video { width:100%; height:100%; object-fit:contain; background:#000; }
   </style>
 </head>
 <body>
@@ -205,6 +207,41 @@
     const widgetPlaylistCache = new Map();
     let activeWidgetSignature = null;
 
+    function createMediaWidget(w) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "widget media-widget";
+
+      if (w.type === "image") {
+        const image = document.createElement("img");
+        image.src = String(w.url || "");
+        image.alt = "Signage image";
+        wrapper.appendChild(image);
+        return wrapper;
+      }
+
+      const video = document.createElement("video");
+      video.src = String(w.url || "");
+      video.autoplay = w.autoplay !== false;
+      video.muted = w.muted !== false;
+      video.controls = w.controls === true;
+      video.playsInline = true;
+      video.loop = w.loop === true;
+      video.preload = "auto";
+      const startPositionSec = Number(w.start_position_sec || 0);
+      if (Number.isFinite(startPositionSec) && startPositionSec > 0) {
+        const seekToStart = () => {
+          try {
+            video.currentTime = startPositionSec;
+          } catch (_err) {
+            // noop
+          }
+        };
+        video.addEventListener("loadedmetadata", seekToStart, { once: true });
+      }
+      wrapper.appendChild(video);
+      return wrapper;
+    }
+
     function loadWidgets(config) {
       const container = document.getElementById("widgets");
       container.innerHTML = "";
@@ -256,6 +293,10 @@
             scriptNode.replaceWith(runnable);
           });
           container.appendChild(embed);
+          return;
+        }
+        if (w.type === "video" || w.type === "image") {
+          container.appendChild(createMediaWidget(w));
           return;
         }
         if (w.type === "empty") {
