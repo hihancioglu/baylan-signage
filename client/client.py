@@ -1060,6 +1060,40 @@ class PlaybackController:
         return None
 
     @staticmethod
+    def _widget_config_has_playable_content(widget_config: dict | None) -> bool:
+        if not isinstance(widget_config, dict):
+            return False
+
+        widgets = widget_config.get("widgets")
+        if not isinstance(widgets, list) or not widgets:
+            return False
+
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type == "empty":
+                continue
+
+            if widget_type in {"iframe", "url", "video", "image"}:
+                candidate = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+                if candidate:
+                    return True
+                continue
+
+            if widget_type == "embed":
+                html = str(widget.get("html") or widget.get("content") or "").strip()
+                if html:
+                    return True
+                continue
+
+            # Bilinmeyen tipleri, custom renderer tarafından oynatılabilir olabilir varsayımıyla kabul et.
+            return True
+
+        return False
+
+    @staticmethod
     def _parse_dashboard_widget_payload(raw_payload: dict) -> dict | None:
         if not isinstance(raw_payload, dict):
             return None
@@ -1198,6 +1232,10 @@ class PlaybackController:
             widget_config.pop("columns", None)
         if widget_config.get("widgets") is None:
             widget_config = None
+
+        if not widget_url and not self._widget_config_has_playable_content(widget_config):
+            log_debug("widget spec skipped | reason=no_playable_widget_source")
+            return None
 
         widget_signature = hashlib.sha256(
             json.dumps(

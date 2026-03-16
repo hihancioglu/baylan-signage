@@ -927,6 +927,40 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertTrue(widget_signature)
 
+    def test_build_widget_playback_spec_returns_none_when_widget_has_no_playable_source(self):
+        controller = self._build_controller()
+
+        widget_spec = controller._build_widget_playback_spec(
+            {
+                "item_type": "widget",
+                "widget_payload": {
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "iframe", "url": ""},
+                        {"type": "empty"},
+                    ],
+                },
+            }
+        )
+
+        self.assertIsNone(widget_spec)
+
+    def test_build_widget_playback_spec_accepts_custom_widget_type_without_url(self):
+        controller = self._build_controller()
+
+        widget_spec = controller._build_widget_playback_spec(
+            {
+                "item_type": "widget",
+                "widget_payload": {
+                    "widgets": [
+                        {"type": "clock", "timezone": "Europe/Istanbul"},
+                    ],
+                },
+            }
+        )
+
+        self.assertIsNotNone(widget_spec)
+
     def test_sequential_widget_playlist_does_not_skip_on_second_loop(self):
         from client.client import PlaybackController
 
