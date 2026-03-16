@@ -1538,7 +1538,7 @@ class PlaybackController:
                     else:
                         runtime_state["index"] = (int(runtime_state.get("index") or 0) + 1) % len(playlist_entries)
 
-                log_debug(f"playback outcome | ok={ok} interrupted={interrupted} item_type={item_type} resume_sec={runtime_state.get("resume_sec")}")
+                log_debug(f"playback outcome | ok={ok} interrupted={interrupted} item_type={item_type} resume_sec={runtime_state.get('resume_sec')}")
                 self._prewarm_next_widget(
                     playlist_entries,
                     loop_mode,
