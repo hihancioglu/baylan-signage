@@ -351,12 +351,24 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         return bool(text) and text.startswith("<") and ">" in text
 
     for widget in widgets:
+        if isinstance(widget, str):
+            url = widget.strip()
+            if not url:
+                normalized_widgets.append({"type": "empty"})
+            elif _looks_like_embed_html(url):
+                normalized_widgets.append({"type": "embed", "html": url})
+            else:
+                normalized_widgets.append({"type": "iframe", "url": url})
+            continue
+
         if not isinstance(widget, dict):
             continue
 
         widget_type = str(widget.get("type") or "").strip().lower()
-        if widget_type in {"iframe", "url"}:
-            url = str(widget.get("url") or widget.get("content") or "").strip()
+        if widget_type in {"iframe", "url"} or (
+            not widget_type and any(str(widget.get(key) or "").strip() for key in ("url", "content", "source"))
+        ):
+            url = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
             if not url:
                 normalized_widgets.append({"type": "empty"})
                 continue
@@ -366,7 +378,7 @@ def _dashboard_widget_payload(content: str) -> dict | None:
             normalized_widgets.append({"type": "iframe", "url": url})
             continue
 
-        if widget_type == "card":
+        if widget_type in {"card", "html"}:
             html = str(widget.get("html") or widget.get("content") or "")
             normalized_widgets.append({"type": "card", "html": html})
             continue

@@ -340,6 +340,52 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(payload["rows"], 2)
         self.assertEqual([w.get("type") for w in payload["widgets"]], ["iframe", "empty", "empty", "iframe"])
 
+    def test_build_config_dashboard_widget_accepts_string_url_entries(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Widget Dashboard String Group")
+            playlist = self.main.Playlist(name="Widget Dashboard String Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-widget-dashboard-string")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    media_type="widget",
+                    widget_id=19,
+                    order_no=0,
+                )
+            )
+            db.commit()
+
+            self.main._save_widgets(
+                db,
+                [
+                    {
+                        "id": 19,
+                        "name": "Dashboard Widget String",
+                        "type": "dashboard",
+                        "content": '{"columns":3,"widgets":["https://example.com/a","https://example.com/b","https://example.com/c"]}',
+                    }
+                ],
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-widget-dashboard-string")
+        payload = cfg["videos"][0]["widget_payload"]
+        self.assertEqual(payload["columns"], 3)
+        self.assertEqual([w.get("type") for w in payload["widgets"]], ["iframe", "iframe", "iframe"])
+        self.assertEqual(
+            [w.get("url") for w in payload["widgets"]],
+            ["https://example.com/a", "https://example.com/b", "https://example.com/c"],
+        )
+
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:
