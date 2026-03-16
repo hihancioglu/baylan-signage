@@ -810,6 +810,10 @@ class BorderlessFullscreenPlayer:
             return False
 
         _debug_log(f"update_widget_layout | signature={widget_signature} source={widget_source[:120]}")
+        # Yeni bir layout oynatımı başlarken önceki stop isteği (ör. state geçişinden
+        # kalan bayrak) temizlenmeli; aksi halde wait_widget_duration hemen kesiliyor
+        # ve playback döngüsü çok hızlı tekrar ederek flicker üretiyor.
+        self._stop_requested = False
         message = {
             "type": "layout_update",
             "payload": {

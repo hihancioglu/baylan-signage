@@ -468,6 +468,22 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]},
         )
 
+
+    def test_play_media_in_widget_runtime_clears_stale_stop_flag(self):
+        player = self._build_player()
+        player._stop_requested = True
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True), patch.object(
+            player,
+            "wait_widget_duration",
+            return_value=True,
+        ) as wait_mock:
+            ok = player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", 5)
+
+        self.assertTrue(ok)
+        self.assertFalse(player._stop_requested)
+        wait_mock.assert_called_once_with(5)
+
     def test_sync_widget_runtime_playlist_sends_normalized_items(self):
         player = self._build_player()
 
