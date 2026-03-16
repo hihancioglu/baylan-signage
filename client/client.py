@@ -1037,6 +1037,20 @@ class PlaybackController:
         self.media_manager.save_playback_state(state_snapshot)
 
     @staticmethod
+    def _normalize_video_resume_sec(resume_sec: float, media_duration_sec: int | None) -> float:
+        if not isinstance(resume_sec, (int, float)):
+            return 0.0
+
+        safe_resume = max(0.0, float(resume_sec))
+        if not isinstance(media_duration_sec, int) or media_duration_sec <= 0:
+            return safe_resume
+
+        wrapped = safe_resume % float(media_duration_sec)
+        if wrapped >= max(0.0, float(media_duration_sec) - 0.25):
+            return 0.0
+        return wrapped
+
+    @staticmethod
     def _normalize_widget_columns(columns):
         if isinstance(columns, list):
             return columns
@@ -1509,11 +1523,22 @@ class PlaybackController:
                         else:
                             media_duration_sec = max(1, int(os.getenv("VIDEO_DEFAULT_DURATION_SEC", "30")))
 
+                    effective_resume_sec = resume_sec
+                    if is_video_media:
+                        effective_resume_sec = self._normalize_video_resume_sec(resume_sec, media_duration_sec)
+                        if effective_resume_sec != resume_sec:
+                            log_debug(
+                                "media resume normalized | "
+                                f"path={media_path} original_resume_sec={resume_sec} "
+                                f"effective_resume_sec={effective_resume_sec} media_duration_sec={media_duration_sec}"
+                            )
+                            resume_sec = effective_resume_sec
+
                     log_debug(f"media playback start | path={media_path} resume_sec={resume_sec} media_duration_sec={media_duration_sec}")
                     ok = self.player.play_media_in_widget_runtime_blocking(
                         media_path,
                         media_duration_sec,
-                        start_position_sec=resume_sec if resume_sec > 0 and is_video_media else None,
+                        start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
                     )
                     interrupted = self.player.last_play_was_interrupted()
                     log_debug(f"media playback end | ok={ok} interrupted={interrupted} path={media_path}")
@@ -1530,7 +1555,7 @@ class PlaybackController:
 
                 if interrupted and item_type != "widget" and self.player._is_video(media_path):
                     elapsed = max(0.0, time.monotonic() - started_at)
-                    runtime_state["resume_sec"] = resume_sec + elapsed
+                    runtime_state["resume_sec"] = self._normalize_video_resume_sec(resume_sec + elapsed, media_duration_sec)
                 else:
                     runtime_state["resume_sec"] = 0
                     if loop_mode == "random":
