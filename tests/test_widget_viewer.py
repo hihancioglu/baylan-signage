@@ -43,7 +43,7 @@ class TestWidgetViewer(unittest.TestCase):
             self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview"])
 
         with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "auto"}, clear=False):
-            self.assertEqual(widget_viewer._viewer_backend_order(), ["cef", "pywebview"])
+            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview", "cef"])
 
     def test_start_with_cef_forces_black_background(self):
         fake_cef = unittest.mock.Mock()
