@@ -376,6 +376,11 @@
       const config = normalizeConfig(input);
       const normalizedSignature = typeof signature === "string" ? signature.trim() : "";
       if (normalizedSignature && normalizedSignature === lastRenderedSignature) {
+        // Aynı signature tekrar geldiğinde (örn. pencere background->foreground geçişi)
+        // render adımını atlamak siyah ekran/stale içerik bırakabiliyor.
+        const cached = widgetPlaylistCache.get(normalizedSignature) || config;
+        applyLayout(cached);
+        loadWidgets(cached);
         return;
       }
       if (normalizedSignature) {
