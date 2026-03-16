@@ -887,7 +887,7 @@ class WorkOrderAlertOverlay:
 class PlaybackController:
     def __init__(self, gui_runtime: GuiRuntime):
         self.media_manager = MediaManager(
-            cache_root=str(_resolve_runtime_path(os.getenv("MEDIA_CACHE_DIR", "client/cache")))
+            cache_root=str(_resolve_windows_writable_path(os.getenv("MEDIA_CACHE_DIR"), "cache"))
         )
         self.player = BorderlessFullscreenPlayer()
         self.overlay = DownloadStatusOverlay(gui_runtime)
