@@ -502,6 +502,7 @@ sio = socketio.Client(
 hostname = socket.gethostname()
 connection_lock = threading.Lock()
 next_connect_attempt_at = 0.0
+connection_outage_active = False
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 idle_mode_enabled = True
@@ -2186,6 +2187,10 @@ def return_to_erp_window():
 
 @sio.event
 def connect():
+    global connection_outage_active
+    if connection_outage_active:
+        log_info("✅ Server bağlantısı geri geldi")
+    connection_outage_active = False
     print("✅ Connected to server")
 
     sio.emit(
@@ -2209,14 +2214,20 @@ def connect():
 
 @sio.event
 def disconnect():
-    global next_connect_attempt_at
+    global next_connect_attempt_at, connection_outage_active
     next_connect_attempt_at = 0.0
-    log_warning("❌ Disconnected - offline cache playlist devam edebilir")
+    if not connection_outage_active:
+        log_warning("❌ Server bağlantısı koptu")
+    connection_outage_active = True
 
 
 @sio.event
 def connect_error(data):
-    log_warning(f"⚠️ Connect error: {data}")
+    global connection_outage_active
+    if not connection_outage_active:
+        log_warning("❌ Server bağlantısı koptu")
+        log_debug(f"socket connect_error payload={data}")
+    connection_outage_active = True
 
 
 @sio.on("hello")
@@ -2437,7 +2448,7 @@ def run_state_cycle():
 
 def main():
     global update_shutdown_requested
-    global next_connect_attempt_at
+    global next_connect_attempt_at, connection_outage_active
     if already_running():
         return
 
@@ -2470,8 +2481,8 @@ def main():
                     return False
                 next_connect_attempt_at = now + RECONNECT_RETRY_SEC
                 try:
-                    log_info(
-                        f"🔄 Connecting socket | url={SERVER_URL} transports={SOCKETIO_TRANSPORTS or 'default'}"
+                    log_debug(
+                        f"connecting socket | url={SERVER_URL} transports={SOCKETIO_TRANSPORTS or 'default'}"
                     )
                     connect_kwargs = {"wait": True, "wait_timeout": 10}
                     if SOCKETIO_TRANSPORTS:
@@ -2482,8 +2493,10 @@ def main():
                 except KeyboardInterrupt:
                     raise
                 except Exception as connect_err:
-                    log_error(f"⚠️ Connection failed, retrying: {connect_err}")
-                    logging.exception("Socket connection attempt failed")
+                    if not connection_outage_active:
+                        log_warning("❌ Server bağlantısı koptu")
+                        log_debug(f"socket connect failed: {connect_err}")
+                    connection_outage_active = True
                     return False
 
         next_heartbeat_at = time.monotonic()
