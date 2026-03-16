@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import ipaddress
 import json
 import os
@@ -616,6 +617,49 @@ class BorderlessFullscreenPlayer:
     def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
         source = self._normalize_widget_source(widget_source)
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
+
+    def build_media_widget_payload(
+        self,
+        media_path: str,
+        start_position_sec: float | None = None,
+    ) -> dict:
+        normalized_media = self._normalize_widget_source(media_path)
+        media_widget: dict[str, object]
+        if self.is_image(media_path):
+            media_widget = {
+                "type": "image",
+                "url": normalized_media,
+            }
+        else:
+            media_widget = {
+                "type": "video",
+                "url": normalized_media,
+                "autoplay": True,
+                "controls": False,
+            }
+            if isinstance(start_position_sec, (int, float)) and start_position_sec > 0:
+                media_widget["start_position_sec"] = float(start_position_sec)
+
+        return {
+            "widgets": [media_widget],
+            "columns": 1,
+            "rows": 1,
+        }
+
+    def play_media_in_widget_runtime_blocking(
+        self,
+        media_path: str,
+        duration_sec: int,
+        start_position_sec: float | None = None,
+    ) -> bool:
+        payload = self.build_media_widget_payload(media_path, start_position_sec=start_position_sec)
+        signature = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if not self.update_widget_layout(media_path, widget_config=payload, widget_signature=signature):
+            self._last_interrupted = False
+            return False
+        return self.wait_widget_duration(duration_sec)
 
     def _single_url_widget_source(self, widget_config: dict | None) -> str | None:
         if not isinstance(widget_config, dict):

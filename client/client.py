@@ -1228,20 +1228,7 @@ class PlaybackController:
         self.player.sync_widget_runtime_playlist(runtime_items, active_signature=active_widget_signature)
 
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
-        for entry in playlist_entries:
-            normalized = self._normalize_item(entry or {})
-            if normalized.get("item_type") == "widget":
-                return False
-
-            media_path = str(normalized.get("local_path") or "")
-            if not media_path or not self.player.is_image(media_path):
-                continue
-
-            duration_sec = normalized.get("duration_sec")
-            if isinstance(duration_sec, int) and duration_sec > 0 and duration_sec != self.player.image_duration_sec:
-                return False
-
-        return True
+        return False
 
     def update_from_config(self, config: dict):
         with self._lock:
@@ -1486,17 +1473,26 @@ class PlaybackController:
 
                     self._active_widget_signature = None
                     self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=None)
-                    image_duration_sec = None
+
+                    media_duration_sec = None
+                    is_video_media = self.player._is_video(media_path)
                     if self.player.is_image(media_path):
                         if isinstance(duration_sec, int) and duration_sec > 0:
-                            image_duration_sec = duration_sec
+                            media_duration_sec = duration_sec
                         elif len(playlist_entries) == 1:
-                            image_duration_sec = self.player.static_image_duration_sec
+                            media_duration_sec = self.player.static_image_duration_sec
+                        else:
+                            media_duration_sec = self.player.image_duration_sec
+                    else:
+                        if isinstance(duration_sec, int) and duration_sec > 0:
+                            media_duration_sec = duration_sec
+                        else:
+                            media_duration_sec = max(1, int(os.getenv("VIDEO_DEFAULT_DURATION_SEC", "30")))
 
-                    ok = self.player.play_blocking(
+                    ok = self.player.play_media_in_widget_runtime_blocking(
                         media_path,
-                        image_duration_sec=image_duration_sec,
-                        start_position_sec=resume_sec if resume_sec > 0 and self.player._is_video(media_path) else None,
+                        media_duration_sec,
+                        start_position_sec=resume_sec if resume_sec > 0 and is_video_media else None,
                     )
                     interrupted = self.player.last_play_was_interrupted()
 

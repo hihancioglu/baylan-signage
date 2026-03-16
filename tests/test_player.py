@@ -748,13 +748,13 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ]
         self.assertFalse(controller._can_use_mpv_playlist_mode(entries))
 
-    def test_allows_mpv_playlist_when_image_duration_matches_default(self):
+    def test_disables_mpv_playlist_even_when_image_duration_matches_default(self):
         controller = self._build_controller()
         entries = [
             {"local_path": "/tmp/a.jpg", "duration_sec": 8, "media_type": "image"},
             {"local_path": "/tmp/b.png", "duration_sec": None, "media_type": "image"},
         ]
-        self.assertTrue(controller._can_use_mpv_playlist_mode(entries))
+        self.assertFalse(controller._can_use_mpv_playlist_mode(entries))
 
     def test_sanitize_playback_state_keeps_known_primitive_fields(self):
         from client.client import PlaybackController
@@ -998,7 +998,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             controller._running = False
             return True
 
-        player.play_blocking.side_effect = _single_playback
+        player.play_media_in_widget_runtime_blocking.side_effect = _single_playback
 
         with patch.object(controller, "_can_use_mpv_playlist_mode", return_value=True), patch.object(
             controller,
@@ -1013,7 +1013,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             controller._run()
 
         self.assertTrue(player.play_mpv_playlist_blocking.called)
-        self.assertTrue(player.play_blocking.called)
+        self.assertTrue(player.play_media_in_widget_runtime_blocking.called)
 
 
     def test_is_newer_version_handles_build_prefix_and_unknown_marker(self):
