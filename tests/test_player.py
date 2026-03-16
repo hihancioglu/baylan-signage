@@ -821,6 +821,61 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertTrue(widget_signature)
 
+    def test_sequential_widget_reapplies_layout_on_each_loop(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_direct_url_widget.return_value = False
+        player.update_widget_layout.return_value = True
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+
+        wait_calls = {"count": 0}
+
+        def _wait_widget_duration(_duration):
+            wait_calls["count"] += 1
+            if wait_calls["count"] >= 2:
+                controller._running = False
+            return True
+
+        player.wait_widget_duration.side_effect = _wait_widget_duration
+        controller.player = player
+
+        widget_item = {
+            "item_type": "widget",
+            "duration_sec": 5,
+            "widget_payload": {
+                "type": "dashboard",
+                "content": json.dumps(
+                    {
+                        "columns": 2,
+                        "widgets": [
+                            {"type": "iframe", "url": "https://example.com/left"},
+                            {"type": "iframe", "url": "https://example.com/right"},
+                        ],
+                    }
+                ),
+            },
+        }
+
+        with patch.object(controller, "_effective_playlist", return_value=[widget_item]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch.object(
+            controller,
+            "_prewarm_next_widget",
+            return_value=None,
+        ), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        self.assertEqual(player.update_widget_layout.call_count, 2)
+        self.assertEqual(player.wait_widget_duration.call_count, 2)
+
+
     def test_failed_mpv_playlist_falls_back_to_single_playback(self):
         from client.client import PlaybackController
 

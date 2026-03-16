@@ -1422,11 +1422,9 @@ class PlaybackController:
                                 widget_duration_sec,
                                 widget_config=widget_config,
                             )
-                        elif widget_signature != self._active_widget_signature:
+                        else:
                             ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
                             self._active_widget_signature = widget_signature if ok else None
-                        else:
-                            ok = True
 
                     if ok and not direct_url_widget:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
