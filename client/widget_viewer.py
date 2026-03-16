@@ -273,17 +273,20 @@ def _runtime_message_reader(dispatch):
             break
         if message_type == "layout_update":
             dispatch({"type": "layout_update", "payload": message.get("payload")})
+        if message_type == "playlist_sync":
+            dispatch({"type": "playlist_sync", "payload": message.get("payload")})
         if message_type == "background":
             dispatch({"type": "background"})
 
 
-def _build_runtime_update_script(payload: object) -> str:
+def _build_runtime_update_script(payload: object, signature: str | None = None) -> str:
     encoded_payload = json.dumps(payload, ensure_ascii=False)
+    encoded_signature = json.dumps(signature if str(signature or "").strip() else None, ensure_ascii=False)
     return (
-        "(function(payload){"
+        "(function(payload,signature){"
         "function tryApply(){"
         "if(typeof window.__baylanApplyRuntimeConfig==='function'){"
-        "window.__baylanApplyRuntimeConfig(payload);"
+        "window.__baylanApplyRuntimeConfig(payload,signature);"
         "return true;"
         "}"
         "window.__baylanPendingConfig=payload;"
@@ -297,6 +300,8 @@ def _build_runtime_update_script(payload: object) -> str:
         "},100);"
         "})("
         + encoded_payload
+        + ","
+        + encoded_signature
         + ");"
     )
 
@@ -354,14 +359,27 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidd
                     pass
                 shown_once = False
                 return
-            payload = message.get("payload")
+            message_type = str(message.get("type") or "").strip().lower()
+            raw_payload = message.get("payload")
+            signature = None
+            payload = None
+            if message_type == "layout_update":
+                if isinstance(raw_payload, dict):
+                    signature = raw_payload.get("signature")
+                    payload = raw_payload.get("config")
+            elif message_type == "playlist_sync":
+                payload = {"__playlist_sync": raw_payload}
+
+            if payload is None:
+                return
+
             if not shown_once:
                 shown_once = True
                 try:
                     window.show()
                 except Exception:
                     pass
-            js = _build_runtime_update_script(payload)
+            js = _build_runtime_update_script(payload, signature=signature)
             try:
                 window.evaluate_js(js)
             except Exception as exc:
@@ -417,14 +435,26 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bo
                 cef.PostTask(cef.TID_UI, _hide_window)
                 return
 
-            payload = message.get("payload")
+            message_type = str(message.get("type") or "").strip().lower()
+            raw_payload = message.get("payload")
+            signature = None
+            payload = None
+            if message_type == "layout_update":
+                if isinstance(raw_payload, dict):
+                    signature = raw_payload.get("signature")
+                    payload = raw_payload.get("config")
+            elif message_type == "playlist_sync":
+                payload = {"__playlist_sync": raw_payload}
+
+            if payload is None:
+                return
 
             def _post_js():
                 nonlocal shown_once
                 if not shown_once:
                     shown_once = True
                     _set_cef_window_visible(browser, True)
-                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload))
+                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
 
             cef.PostTask(cef.TID_UI, _post_js)
 

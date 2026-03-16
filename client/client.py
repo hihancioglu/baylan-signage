@@ -1192,8 +1192,31 @@ class PlaybackController:
         if widget_signature == self._active_widget_signature:
             return
 
-        if self.player.update_widget_layout(widget_url, widget_config=widget_config):
+        if self.player.update_widget_layout(widget_url, widget_config=widget_config, widget_signature=widget_signature):
             self._prewarmed_widget_signature = widget_signature
+
+    def _sync_widget_runtime_playlist(
+        self,
+        playlist_entries: list[dict],
+        active_widget_signature: str | None = None,
+    ) -> None:
+        runtime_items: list[dict] = []
+        for entry in playlist_entries:
+            widget_spec = self._build_widget_playback_spec(entry)
+            if not widget_spec:
+                continue
+            widget_url, widget_config, widget_signature = widget_spec
+            if self.player.is_direct_url_widget(widget_config):
+                continue
+            runtime_items.append(
+                {
+                    "signature": widget_signature,
+                    "widget_source": widget_url,
+                    "widget_config": widget_config,
+                }
+            )
+
+        self.player.sync_widget_runtime_playlist(runtime_items, active_signature=active_widget_signature)
 
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         for entry in playlist_entries:
@@ -1352,6 +1375,7 @@ class PlaybackController:
 
                 self._waiting_for_media_logged = False
                 runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
+                self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=self._active_widget_signature)
 
                 if loop_mode == "sequential":
                     playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries if entry.get("item_type") != "widget"]
@@ -1429,9 +1453,17 @@ class PlaybackController:
                             if widget_signature == self._prewarmed_widget_signature:
                                 ok = True
                             else:
-                                ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
+                                ok = self.player.update_widget_layout(
+                                    widget_url,
+                                    widget_config=widget_config,
+                                    widget_signature=widget_signature,
+                                )
                             self._active_widget_signature = widget_signature if ok else None
                             self._prewarmed_widget_signature = None
+                            self._sync_widget_runtime_playlist(
+                                playlist_entries,
+                                active_widget_signature=self._active_widget_signature,
+                            )
 
                     if ok and not direct_url_widget:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
@@ -1442,6 +1474,7 @@ class PlaybackController:
                         continue
 
                     self._active_widget_signature = None
+                    self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=None)
                     image_duration_sec = None
                     if self.player.is_image(media_path):
                         if isinstance(duration_sec, int) and duration_sec > 0:

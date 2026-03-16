@@ -448,6 +448,58 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(payload["columns"], 2)
         self.assertEqual(len(payload["widgets"]), 2)
 
+
+    def test_update_widget_layout_sends_signature_payload(self):
+        player = self._build_player()
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            ok = player.update_widget_layout(
+                "example.com/dashboard",
+                widget_config=None,
+                widget_signature="sig-1",
+            )
+
+        self.assertTrue(ok)
+        sent_message = sender.call_args.args[0]
+        self.assertEqual(sent_message["type"], "layout_update")
+        self.assertEqual(sent_message["payload"]["signature"], "sig-1")
+        self.assertEqual(
+            sent_message["payload"]["config"],
+            {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]},
+        )
+
+    def test_sync_widget_runtime_playlist_sends_normalized_items(self):
+        player = self._build_player()
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            ok = player.sync_widget_runtime_playlist(
+                [
+                    {
+                        "signature": "widget-a",
+                        "widget_source": "example.com/a",
+                        "widget_config": None,
+                    },
+                    {
+                        "signature": "",
+                        "widget_source": "example.com/ignored",
+                        "widget_config": None,
+                    },
+                ],
+                active_signature="widget-a",
+            )
+
+        self.assertTrue(ok)
+        sent_message = sender.call_args.args[0]
+        self.assertEqual(sent_message["type"], "playlist_sync")
+        payload = sent_message["payload"]
+        self.assertEqual(payload["active_signature"], "widget-a")
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["signature"], "widget-a")
+        self.assertEqual(
+            payload["items"][0]["payload"],
+            {"widgets": [{"type": "iframe", "url": "https://example.com/a"}]},
+        )
+
     def test_play_widget_blocking_prefers_widget_config_source(self):
         player = self._build_player()
         process = unittest.mock.Mock()

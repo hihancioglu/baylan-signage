@@ -202,6 +202,9 @@
       }, maxWaitMs);
     }
 
+    const widgetPlaylistCache = new Map();
+    let activeWidgetSignature = null;
+
     function loadWidgets(config) {
       const container = document.getElementById("widgets");
       container.innerHTML = "";
@@ -261,36 +264,78 @@
           container.appendChild(empty);
           return;
         }
-
       });
     }
 
-    function renderConfig(input) {
+    function syncPlaylistCache(syncPayload) {
+      const payload = syncPayload && typeof syncPayload === "object" ? syncPayload : {};
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const nextMap = new Map();
+      items.forEach((item) => {
+        if (!item || typeof item !== "object") return;
+        const signature = String(item.signature || "").trim();
+        if (!signature) return;
+        const normalizedConfig = normalizeConfig(item.payload);
+        nextMap.set(signature, normalizedConfig);
+      });
+
+      widgetPlaylistCache.clear();
+      nextMap.forEach((value, key) => widgetPlaylistCache.set(key, value));
+
+      const nextActiveSignature = typeof payload.active_signature === "string"
+        ? payload.active_signature.trim()
+        : "";
+      if (nextActiveSignature && widgetPlaylistCache.has(nextActiveSignature)) {
+        activeWidgetSignature = nextActiveSignature;
+      } else if (!nextActiveSignature || !widgetPlaylistCache.has(nextActiveSignature)) {
+        activeWidgetSignature = null;
+      }
+
+      if (activeWidgetSignature && widgetPlaylistCache.has(activeWidgetSignature)) {
+        const config = widgetPlaylistCache.get(activeWidgetSignature);
+        applyLayout(config);
+        loadWidgets(config);
+      }
+    }
+
+    function renderConfig(input, signature) {
+      if (input && typeof input === "object" && Object.prototype.hasOwnProperty.call(input, "__playlist_sync")) {
+        syncPlaylistCache(input.__playlist_sync);
+        return;
+      }
+
       const config = normalizeConfig(input);
+      const normalizedSignature = typeof signature === "string" ? signature.trim() : "";
+      if (normalizedSignature) {
+        widgetPlaylistCache.set(normalizedSignature, config);
+        activeWidgetSignature = normalizedSignature;
+      } else {
+        activeWidgetSignature = null;
+      }
       applyLayout(config);
       loadWidgets(config);
     }
 
-    window.__baylanApplyRuntimeConfig = function(payload) {
-      renderConfig(payload);
+    window.__baylanApplyRuntimeConfig = function(payload, signature) {
+      renderConfig(payload, signature);
     };
 
     if (window.__baylanPendingConfig) {
       const pendingConfig = window.__baylanPendingConfig;
       window.__baylanPendingConfig = null;
-      renderConfig(pendingConfig);
+      renderConfig(pendingConfig, null);
     }
 
     window.addEventListener("message", (event) => {
       try {
         const payload = normalizeConfig(event.data);
-        renderConfig(payload);
+        renderConfig(payload, null);
       } catch (_err) {
-        renderConfig({ widgets: [] });
+        renderConfig({ widgets: [] }, null);
       }
     });
 
-    renderConfig(parseConfig());
+    renderConfig(parseConfig(), null);
   </script>
 </body>
 </html>

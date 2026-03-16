@@ -698,12 +698,7 @@ class BorderlessFullscreenPlayer:
         normalized_payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
         return bool(self._single_iframe_widget_url(normalized_payload))
 
-    def update_widget_layout(self, widget_source: str, widget_config: dict | None = None) -> bool:
-        payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
-        if payload is None:
-            _safe_print("⚠️ widget layout payload geçersiz")
-            return False
-
+    def _send_widget_runtime_message(self, message: dict) -> bool:
         if not self.start_widget_engine_if_needed():
             return False
 
@@ -711,15 +706,58 @@ class BorderlessFullscreenPlayer:
         if not process or process.poll() is not None or not process.stdin:
             return False
 
-        message = {"type": "layout_update", "payload": payload}
         try:
             with self._widget_process_stdin_lock:
                 process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
                 process.stdin.flush()
             return True
         except Exception as exc:
-            _safe_print(f"⚠️ widget layout gönderilemedi: {exc}")
+            _safe_print(f"⚠️ widget runtime mesajı gönderilemedi: {exc}")
             return False
+
+    def sync_widget_runtime_playlist(self, widget_items: list[dict], active_signature: str | None = None) -> bool:
+        normalized_items: list[dict] = []
+        for item in widget_items or []:
+            if not isinstance(item, dict):
+                continue
+            signature = str(item.get("signature") or "").strip()
+            source = str(item.get("widget_source") or "").strip()
+            widget_config = item.get("widget_config") if isinstance(item.get("widget_config"), dict) else None
+            if not signature:
+                continue
+            payload = self._build_widget_layout_payload(source, widget_config=widget_config)
+            if payload is None:
+                continue
+            normalized_items.append({"signature": signature, "payload": payload})
+
+        message = {
+            "type": "playlist_sync",
+            "payload": {
+                "items": normalized_items,
+                "active_signature": str(active_signature or "").strip() or None,
+            },
+        }
+        return self._send_widget_runtime_message(message)
+
+    def update_widget_layout(
+        self,
+        widget_source: str,
+        widget_config: dict | None = None,
+        widget_signature: str | None = None,
+    ) -> bool:
+        payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
+        if payload is None:
+            _safe_print("⚠️ widget layout payload geçersiz")
+            return False
+
+        message = {
+            "type": "layout_update",
+            "payload": {
+                "signature": str(widget_signature or "").strip() or None,
+                "config": payload,
+            },
+        }
+        return self._send_widget_runtime_message(message)
 
     def stop_widget_engine(self) -> None:
         process = self._widget_process
