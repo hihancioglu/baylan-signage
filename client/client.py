@@ -158,6 +158,7 @@ HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "10"))
 CONFIG_PULL_INTERVAL_SEC = float(os.getenv("CONFIG_PULL_INTERVAL_SEC", "30"))
 STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
+PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
@@ -1548,6 +1549,14 @@ class PlaybackController:
 
                 if not ok:
                     print(f"⚠️ bozuk/oynatılamayan içerik atlandı: {self._item_label(item)}")
+                    if not interrupted:
+                        retry_delay_sec = max(0.0, PLAYBACK_FAILURE_RETRY_SEC)
+                        if retry_delay_sec > 0:
+                            log_debug(
+                                "playback failure retry delay | "
+                                f"delay_sec={retry_delay_sec} item_type={item_type} content={self._item_label(item)}"
+                            )
+                            time.sleep(retry_delay_sec)
 
                 played_index = None
                 if loop_mode == "sequential":
