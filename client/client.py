@@ -1072,31 +1072,42 @@ class PlaybackController:
         if not raw_content:
             return None
 
+        name = str(raw_payload.get("name") or "").strip()
+
+        def _with_name(payload: dict[str, object]) -> dict[str, object]:
+            normalized_payload = dict(payload)
+            if name:
+                normalized_payload["name"] = name
+            return normalized_payload
+
+        lowered_content = raw_content.lower()
+        if lowered_content.startswith(("http://", "https://")):
+            return _with_name({"widgets": [{"type": "iframe", "url": raw_content}]})
+
         try:
             parsed = json.loads(raw_content)
         except (TypeError, ValueError, json.JSONDecodeError):
-            return None
+            parsed = None
 
-        if not isinstance(parsed, dict):
-            return None
+        if isinstance(parsed, dict):
+            widgets = parsed.get("widgets")
+            if isinstance(widgets, list):
+                normalized: dict[str, object] = {"widgets": list(widgets)}
+                columns = PlaybackController._normalize_widget_columns(parsed.get("columns"))
+                if columns is not None:
+                    normalized["columns"] = columns
 
-        widgets = parsed.get("widgets")
-        if not isinstance(widgets, list):
-            return None
+                rows = parsed.get("rows")
+                if isinstance(rows, int) and rows > 0:
+                    normalized["rows"] = rows
 
-        normalized: dict[str, object] = {"widgets": list(widgets)}
-        columns = PlaybackController._normalize_widget_columns(parsed.get("columns"))
-        if columns is not None:
-            normalized["columns"] = columns
+                return _with_name(normalized)
 
-        rows = parsed.get("rows")
-        if isinstance(rows, int) and rows > 0:
-            normalized["rows"] = rows
+        looks_like_embed_html = any(tag in lowered_content for tag in ("<iframe", "<script", "<html", "<body"))
+        if looks_like_embed_html:
+            return _with_name({"widgets": [{"type": "embed", "html": raw_content}]})
 
-        name = str(raw_payload.get("name") or "").strip()
-        if name:
-            normalized["name"] = name
-        return normalized
+        return _with_name({"widgets": [{"type": "iframe", "url": raw_content}]})
 
     @staticmethod
     def _normalize_item(item: dict) -> dict:
