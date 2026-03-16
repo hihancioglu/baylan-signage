@@ -21,6 +21,14 @@ from urllib.parse import quote
 def _safe_print(message: str) -> None:
     try:
         print(message)
+    except UnicodeEncodeError:
+        try:
+            stream = getattr(sys, "stdout", None)
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            sanitized_message = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
+            print(sanitized_message)
+        except OSError:
+            pass
     except OSError:
         pass
 
