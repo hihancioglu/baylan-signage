@@ -23,6 +23,15 @@ WEATHER_WIDGET_HREF_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+
+def _debug_log(message: str) -> None:
+    if not DEBUG_MODE_ENABLED:
+        return
+    _safe_print(f"[DEBUG][widget_viewer] {message}")
+
+
 
 def _safe_print(message: str) -> None:
     try:
@@ -264,6 +273,7 @@ def _runtime_message_reader(dispatch):
             break
         try:
             message = json.loads(line.strip())
+            _debug_log(f"runtime message received | type={message.get('type')}")
         except Exception:
             continue
 
@@ -342,10 +352,12 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidd
     )
 
     if runtime_ipc:
+        _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
 
         def dispatch(message: dict) -> None:
             nonlocal shown_once
+            _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
                     webview.destroy_window()
@@ -381,6 +393,7 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidd
                     pass
             js = _build_runtime_update_script(payload, signature=signature)
             try:
+                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
                 window.evaluate_js(js)
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
@@ -419,10 +432,12 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bo
         _set_cef_window_visible(browser, False)
 
     if runtime_ipc:
+        _debug_log(f"cef runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
 
         def dispatch(message: dict) -> None:
             nonlocal shown_once
+            _debug_log(f"cef dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
                 return
@@ -454,6 +469,7 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bo
                 if not shown_once:
                     shown_once = True
                     _set_cef_window_visible(browser, True)
+                _debug_log(f"cef ExecuteJavascript | message_type={message_type} signature={signature}")
                 browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
 
             cef.PostTask(cef.TID_UI, _post_js)
@@ -470,6 +486,7 @@ def main() -> int:
         return 2
 
     runtime_ipc = "--runtime-ipc" in sys.argv[2:]
+    _debug_log(f"main start | argv={sys.argv} runtime_ipc={runtime_ipc}")
     start_hidden = "--start-hidden" in sys.argv[2:]
 
     try:
@@ -482,6 +499,7 @@ def main() -> int:
     for backend in _viewer_backend_order():
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
+            _debug_log(f"backend try={backend} widget_url={widget_url}")
             if backend == "cef":
                 _start_with_cef(widget_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
             else:

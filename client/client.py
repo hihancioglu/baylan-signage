@@ -166,6 +166,7 @@ STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "st
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
 DEBUG_LOG_PATH = _resolve_runtime_path(os.getenv("CLIENT_DEBUG_LOG_PATH", "client/logs/client_debug.log"))
+CLIENT_DEBUG_MODE = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 UPDATER_LAUNCHER_LOG_PATH = _resolve_runtime_path(
     os.getenv("UPDATER_LAUNCHER_LOG_PATH", "client/logs/updater_launcher.log")
 )
@@ -316,7 +317,7 @@ def setup_debug_logging():
         handlers.append(logging.StreamHandler(sys.stdout))
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if CLIENT_DEBUG_MODE else logging.INFO,
         format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
         handlers=handlers,
     )
@@ -350,6 +351,13 @@ def setup_debug_logging():
 def log_info(message: str):
     print(message)
     logging.info(message)
+
+
+def log_debug(message: str):
+    if not CLIENT_DEBUG_MODE:
+        return
+    print(f"[DEBUG] {message}")
+    logging.debug(message)
 
 
 def log_warning(message: str):
@@ -483,6 +491,7 @@ def release_instance_lock() -> None:
 setup_debug_logging()
 log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
 log_info(f"🏷️ client version: {CLIENT_VERSION}")
+log_info(f"🐞 client debug mode: {CLIENT_DEBUG_MODE}")
 
 sio = socketio.Client(
     reconnection=False,
@@ -1371,15 +1380,18 @@ class PlaybackController:
 
                 self._waiting_for_media_logged = False
                 runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
+                log_debug(f"playback loop | entries={len(playlist_entries)} loop_mode={loop_mode} state={runtime_state}")
                 self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=self._active_widget_signature)
 
                 if loop_mode == "sequential":
                     playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries if entry.get("item_type") != "widget"]
                     playlist_paths = [path for path in playlist_paths if path]
                     if self._can_use_mpv_playlist_mode(playlist_entries) and self.player.can_play_with_mpv_playlist(playlist_paths):
+                        log_debug(f"mpv playlist mode selected | media_count={len(playlist_paths)}")
                         self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist", "item_type": "media", "display_name": "MPV Playlist"}
                         self._active_item_started_at = time.monotonic()
                         ok = self.player.play_mpv_playlist_blocking(playlist_paths)
+                        log_debug(f"mpv playlist play result | ok={ok}")
                         self._active_item = None
                         self._active_item_started_at = None
                         if ok:
@@ -1401,6 +1413,7 @@ class PlaybackController:
                         pos = 0
                     target_path = order[pos]
                     item = next((x for x in playlist_entries if x.get("local_path") == target_path), playlist_entries[0])
+                    log_debug(f"random pick | target_path={target_path}")
                     playlist_index = playlist_entries.index(item)
                     print(
                         "🎲 Random seçim | "
@@ -1409,6 +1422,7 @@ class PlaybackController:
                 else:
                     index = int(runtime_state.get("index") or 0) % len(playlist_entries)
                     item = playlist_entries[index]
+                    log_debug(f"sequential pick | index={index} item_type={item.get("item_type")}")
                     playlist_index = index
                     print(
                         "▶️ Sequential seçim | "
@@ -1426,6 +1440,7 @@ class PlaybackController:
                 self._active_item_started_at = started_at
 
                 if item_type == "widget":
+                    log_debug(f"widget playback start | item={self._item_label(item)} playlist_index={playlist_index}")
                     widget_duration_sec = self._resolve_widget_duration_sec(item)
                     if not (isinstance(duration_sec, int) and duration_sec > 0):
                         print(
@@ -1438,11 +1453,13 @@ class PlaybackController:
                         ok = False
                     else:
                         widget_url, widget_config, widget_signature = widget_spec
+                        log_debug(f"widget spec | direct_url_candidate={self.player.is_direct_url_widget(widget_config)} signature={widget_signature}")
                         direct_url_widget = self.player.is_direct_url_widget(widget_config)
                         if direct_url_widget:
                             self._active_widget_signature = None
                             self._prewarmed_widget_signature = None
                             ok = self.player.play_widget_blocking(
+                                # legacy/direct-url widget path
                                 widget_url,
                                 widget_duration_sec,
                                 widget_config=widget_config,
@@ -1457,6 +1474,7 @@ class PlaybackController:
                                     widget_signature=widget_signature,
                                 )
                             self._active_widget_signature = widget_signature if ok else None
+                            log_debug(f"widget runtime layout update result | ok={ok} active_signature={self._active_widget_signature}")
                             self._prewarmed_widget_signature = None
                             self._sync_widget_runtime_playlist(
                                 playlist_entries,
@@ -1465,7 +1483,9 @@ class PlaybackController:
 
                     if ok and not direct_url_widget:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
+                    log_debug(f"widget playback end | ok={ok} direct_url_widget={direct_url_widget}")
                     interrupted = self.player.last_play_was_interrupted()
+                    log_debug(f"widget playback interrupt flag | interrupted={interrupted}")
                 else:
                     if not media_path:
                         time.sleep(0.2)
@@ -1489,12 +1509,14 @@ class PlaybackController:
                         else:
                             media_duration_sec = max(1, int(os.getenv("VIDEO_DEFAULT_DURATION_SEC", "30")))
 
+                    log_debug(f"media playback start | path={media_path} resume_sec={resume_sec} media_duration_sec={media_duration_sec}")
                     ok = self.player.play_media_in_widget_runtime_blocking(
                         media_path,
                         media_duration_sec,
                         start_position_sec=resume_sec if resume_sec > 0 and is_video_media else None,
                     )
                     interrupted = self.player.last_play_was_interrupted()
+                    log_debug(f"media playback end | ok={ok} interrupted={interrupted} path={media_path}")
 
                 self._active_item = None
                 self._active_item_started_at = None
@@ -1516,6 +1538,7 @@ class PlaybackController:
                     else:
                         runtime_state["index"] = (int(runtime_state.get("index") or 0) + 1) % len(playlist_entries)
 
+                log_debug(f"playback outcome | ok={ok} interrupted={interrupted} item_type={item_type} resume_sec={runtime_state.get("resume_sec")}")
                 self._prewarm_next_widget(
                     playlist_entries,
                     loop_mode,
@@ -2029,6 +2052,7 @@ def set_state(next_state: ClientState, reason: str):
     global playing_started_at
 
     if next_state == current_state:
+        log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
         return
 
     prev = current_state
@@ -2037,6 +2061,7 @@ def set_state(next_state: ClientState, reason: str):
         playing_started_at = time.monotonic()
     log_state_transition(prev, next_state, reason)
     print(f"🔁 STATE {prev.value} -> {next_state.value} | {reason}")
+    log_debug(f"state transition committed | from={prev.value} to={next_state.value} reason={reason}")
 
 
 def return_to_erp_window():
@@ -2222,6 +2247,11 @@ def run_state_cycle():
         and (previous_idle_sec - idle_sec) >= ACTIVITY_IDLE_DROP_SEC
     )
     user_activity_detected = idle_sec <= ACTIVITY_RESUME_SEC or activity_by_idle_drop
+    log_debug(
+        f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
+        f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
+        f"user_activity={user_activity_detected} idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
+    )
 
     if not idle_mode_enabled:
         idle_background.hide()
@@ -2236,6 +2266,7 @@ def run_state_cycle():
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")
 
     if current_state == ClientState.IDLE_PENDING:
+        log_debug("state_cycle IDLE_PENDING | ensuring playback.start")
         playback.start()
         if user_activity_detected:
             idle_background.hide()
@@ -2249,6 +2280,7 @@ def run_state_cycle():
         # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
         # yapılmadığı için ekran siyah kalabilir.
         if _playback_has_selected_content():
+            log_debug("state_cycle IDLE_PENDING -> PLAYING candidate confirmed by selected content")
             # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
             # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
             # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
@@ -2258,6 +2290,7 @@ def run_state_cycle():
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
     active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
     if current_state == ClientState.PLAYING and playback.current_content_name():
+        log_debug(f"state_cycle PLAYING visible_content | content={playback.current_content_name()} played_for_sec={played_for_sec:.3f} type={active_item_type}")
         if active_item_type != "widget" or played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
@@ -2270,6 +2303,7 @@ def run_state_cycle():
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:
+        log_debug("state_cycle RETURNING | returning focus to ERP and stopping playback")
         idle_background.hide()
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
@@ -2279,6 +2313,7 @@ def run_state_cycle():
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
+        log_debug("state_cycle ACTIVE | stopping playback with warm widget runtime")
         # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
         # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
         playback.stop(stop_widget_runtime=False)
