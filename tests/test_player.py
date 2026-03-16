@@ -484,6 +484,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertFalse(player._stop_requested)
         wait_mock.assert_called_once_with(5)
 
+
+    def test_play_media_in_widget_runtime_video_without_duration_uses_native_player(self):
+        player = self._build_player()
+
+        with patch.object(player, "_is_video", return_value=True), patch.object(
+            player,
+            "play_blocking",
+            return_value=True,
+        ) as play_blocking_mock, patch.object(player, "update_widget_layout") as update_mock:
+            ok = player.play_media_in_widget_runtime_blocking(
+                "/tmp/example.mp4",
+                None,
+                start_position_sec=12.5,
+            )
+
+        self.assertTrue(ok)
+        play_blocking_mock.assert_called_once_with(
+            "/tmp/example.mp4",
+            image_duration_sec=None,
+            start_position_sec=12.5,
+        )
+        update_mock.assert_not_called()
+
     def test_sync_widget_runtime_playlist_sends_normalized_items(self):
         player = self._build_player()
 
