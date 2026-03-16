@@ -1085,6 +1085,19 @@ class PlaybackController:
                 normalized["widget_payload"] = deepcopy(widget_payload)
             elif isinstance(widget_payload, list):
                 normalized["widget_payload"] = list(widget_payload)
+            elif isinstance(widget_payload, str):
+                parsed_widget_payload = None
+                text_payload = widget_payload.strip()
+                if text_payload:
+                    try:
+                        decoded_widget_payload = json.loads(text_payload)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        decoded_widget_payload = None
+                    if isinstance(decoded_widget_payload, dict):
+                        parsed_widget_payload = deepcopy(decoded_widget_payload)
+                    elif isinstance(decoded_widget_payload, list):
+                        parsed_widget_payload = list(decoded_widget_payload)
+                normalized["widget_payload"] = parsed_widget_payload
             else:
                 normalized["widget_payload"] = None
 
