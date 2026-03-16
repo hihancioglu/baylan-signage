@@ -183,6 +183,69 @@ class TestMediaManagerDownloadJitter(unittest.TestCase):
             self.assertEqual(entries[1]["item_type"], "widget")
             self.assertEqual(entries[1]["columns"], [{"width": 12}])
 
+
+class TestMediaManagerSourceResolution(unittest.TestCase):
+    def test_sync_playlist_entries_resolves_relative_media_url_with_server_base(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict("os.environ", {"SERVER_URL": "http://panel.local:5080"}, clear=False):
+                manager = MediaManager(cache_root=tmpdir)
+
+            opened_urls = []
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            def fake_urlopen(url, timeout=30):
+                opened_urls.append(url)
+                return DummyResponse(b"video-bytes")
+
+            with patch("client.media_manager.urlopen", side_effect=fake_urlopen):
+                entries = manager.sync_playlist_entries(
+                    [{"path": "/media/sample.mp4", "media_type": "video", "duration_sec": None}],
+                    "v-rel-path",
+                    {},
+                )
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(opened_urls, ["http://panel.local:5080/media/sample.mp4"])
+            self.assertTrue(Path(entries[0]["local_path"]).exists())
+
+    def test_sync_playlist_entries_uses_source_url_when_path_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            opened_urls = []
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            def fake_urlopen(url, timeout=30):
+                opened_urls.append(url)
+                return DummyResponse(b"video-bytes")
+
+            with patch("client.media_manager.urlopen", side_effect=fake_urlopen):
+                entries = manager.sync_playlist_entries(
+                    [{
+                        "path": "",
+                        "source_url": "https://cdn.example.com/playlist-item.mp4",
+                        "media_type": "video",
+                        "duration_sec": None,
+                    }],
+                    "v-source-url",
+                    {},
+                )
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(opened_urls, ["https://cdn.example.com/playlist-item.mp4"])
+            self.assertTrue(Path(entries[0]["local_path"]).exists())
+
 class TestMediaManagerManifestWrite(unittest.TestCase):
     def test_sync_playlist_entries_handles_manifest_write_permission_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
