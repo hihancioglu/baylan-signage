@@ -893,6 +893,12 @@ class BorderlessFullscreenPlayer:
                 return True
             time.sleep(0.2)
 
+    def clear_stop_request(self) -> None:
+        # stop(stop_widget_runtime=False) ile runtime sıcak tutulduğunda kalan stop
+        # bayrağı, sonraki widget turunda wait_widget_duration'ın anında kesilmesine
+        # neden olabilir.
+        self._stop_requested = False
+
     def _wait_widget_until_stop(
         self,
         process: subprocess.Popen,
