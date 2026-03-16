@@ -916,6 +916,7 @@ class PlaybackController:
         self._playback_state = self._sanitize_playback_state(self.media_manager.load_playback_state())
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
         self._active_widget_signature: str | None = None
+        self._prewarmed_widget_signature: str | None = None
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
@@ -1191,7 +1192,8 @@ class PlaybackController:
         if widget_signature == self._active_widget_signature:
             return
 
-        self.player.update_widget_layout(widget_url, widget_config=widget_config)
+        if self.player.update_widget_layout(widget_url, widget_config=widget_config):
+            self._prewarmed_widget_signature = widget_signature
 
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         for entry in playlist_entries:
@@ -1417,14 +1419,19 @@ class PlaybackController:
                         direct_url_widget = self.player.is_direct_url_widget(widget_config)
                         if direct_url_widget:
                             self._active_widget_signature = None
+                            self._prewarmed_widget_signature = None
                             ok = self.player.play_widget_blocking(
                                 widget_url,
                                 widget_duration_sec,
                                 widget_config=widget_config,
                             )
                         else:
-                            ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
+                            if widget_signature == self._prewarmed_widget_signature:
+                                ok = True
+                            else:
+                                ok = self.player.update_widget_layout(widget_url, widget_config=widget_config)
                             self._active_widget_signature = widget_signature if ok else None
+                            self._prewarmed_widget_signature = None
 
                     if ok and not direct_url_widget:
                         ok = self.player.wait_widget_duration(widget_duration_sec)
