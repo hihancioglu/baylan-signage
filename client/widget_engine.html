@@ -207,6 +207,7 @@
     const widgetPlaylistCache = new Map();
     let activeWidgetSignature = null;
     let lastRenderedSignature = null;
+    let runtimeControlActive = false;
 
     function createMediaWidget(w) {
       const wrapper = document.createElement("div");
@@ -291,7 +292,7 @@
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
           attachIframeBlockDetection(wrapper, frame, () => {
-            if (singleIframeMode && w.url && window.location.href !== w.url) {
+            if (!runtimeControlActive && singleIframeMode && w.url && window.location.href !== w.url) {
               window.location.replace(w.url);
             }
           });
@@ -389,6 +390,7 @@
     }
 
     window.__baylanApplyRuntimeConfig = function(payload, signature) {
+      runtimeControlActive = true;
       renderConfig(payload, signature);
     };
 
