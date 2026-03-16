@@ -485,14 +485,20 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         wait_mock.assert_called_once_with(5)
 
 
-    def test_play_media_in_widget_runtime_video_without_duration_uses_native_player(self):
+    def test_play_media_in_widget_runtime_video_without_duration_waits_until_interrupted(self):
         player = self._build_player()
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = None
+        player._widget_process = widget_process
+
+        def _sleep_and_interrupt(_seconds):
+            player._stop_requested = True
 
         with patch.object(player, "_is_video", return_value=True), patch.object(
             player,
-            "play_blocking",
+            "update_widget_layout",
             return_value=True,
-        ) as play_blocking_mock, patch.object(player, "update_widget_layout") as update_mock:
+        ) as update_mock, patch("client.player.time.sleep", side_effect=_sleep_and_interrupt):
             ok = player.play_media_in_widget_runtime_blocking(
                 "/tmp/example.mp4",
                 None,
@@ -500,12 +506,21 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             )
 
         self.assertTrue(ok)
-        play_blocking_mock.assert_called_once_with(
-            "/tmp/example.mp4",
-            image_duration_sec=None,
-            start_position_sec=12.5,
-        )
-        update_mock.assert_not_called()
+        self.assertTrue(player.last_play_was_interrupted())
+        update_mock.assert_called_once()
+
+    def test_play_media_in_widget_runtime_video_without_duration_fails_when_runtime_not_running(self):
+        player = self._build_player()
+        player._widget_process = None
+
+        with patch.object(player, "_is_video", return_value=True), patch.object(
+            player,
+            "update_widget_layout",
+            return_value=True,
+        ):
+            ok = player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None)
+
+        self.assertFalse(ok)
 
     def test_sync_widget_runtime_playlist_sends_normalized_items(self):
         player = self._build_player()
