@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import random
+import sys
 import threading
 import shutil
 import tempfile
@@ -99,7 +100,17 @@ class MediaManager:
     def _safe_print(message: str):
         try:
             print(message)
-        except OSError:
+        except UnicodeEncodeError:
+            try:
+                encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+                fallback_message = message.encode(encoding, errors="replace").decode(
+                    encoding, errors="replace"
+                )
+                print(fallback_message)
+            except (OSError, ValueError):
+                # Some Windows service/runtime contexts can have a closed/invalid stdout handle.
+                pass
+        except (OSError, ValueError):
             # Some Windows service/runtime contexts can have a closed/invalid stdout handle.
             pass
 
