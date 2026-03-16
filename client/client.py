@@ -1422,7 +1422,7 @@ class PlaybackController:
                 else:
                     index = int(runtime_state.get("index") or 0) % len(playlist_entries)
                     item = playlist_entries[index]
-                    log_debug(f"sequential pick | index={index} item_type={item.get("item_type")}")
+                    log_debug(f"sequential pick | index={index} item_type={item.get('item_type')}")
                     playlist_index = index
                     print(
                         "▶️ Sequential seçim | "
