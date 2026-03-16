@@ -178,6 +178,34 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch.object(player, "_prefer_python_widget_viewer", return_value=True):
             self.assertFalse(player._should_use_python_widget_viewer("https://example.com"))
 
+
+    def test_apply_windows_monitor_position_rewrites_window_origin(self):
+        flags = ["--kiosk", "--window-position=0,0", "--start-fullscreen"]
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            BorderlessFullscreenPlayer,
+            "_windows_active_monitor_origin",
+            return_value=(1920, 0),
+        ):
+            positioned = BorderlessFullscreenPlayer._apply_windows_monitor_position(flags)
+
+        self.assertEqual(positioned, ["--kiosk", "--window-position=1920,0", "--start-fullscreen"])
+
+    def test_build_widget_command_targets_active_monitor_for_windows_browser(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_resolve_windows_kiosk_browser",
+            return_value=("msedge", ["--kiosk", "--window-position=0,0", "--app={widget}"]),
+        ), patch.object(
+            BorderlessFullscreenPlayer,
+            "_windows_active_monitor_origin",
+            return_value=(1280, 0),
+        ):
+            command = player._build_widget_command("https://example.com")
+
+        self.assertEqual(command, ["msedge", "--kiosk", "--window-position=1280,0", "--app=https://example.com"])
     def test_build_widget_command_uses_windows_kiosk_browser_for_url(self):
         player = self._build_player()
 
