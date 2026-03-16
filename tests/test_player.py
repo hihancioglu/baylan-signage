@@ -866,7 +866,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        self.assertEqual(widget_url, "")
+        self.assertEqual(widget_url, "https://example.com/sol")
         self.assertEqual(widget_config["columns"], 2)
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertTrue(widget_signature)
@@ -893,7 +893,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        self.assertEqual(widget_url, "")
+        self.assertEqual(widget_url, "https://example.com/left")
         self.assertEqual(widget_config["columns"], 2)
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertEqual(widget_config["widgets"][0]["type"], "iframe")
@@ -922,10 +922,27 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        self.assertEqual(widget_url, "")
+        self.assertEqual(widget_url, "https://example.com/left")
         self.assertEqual(widget_config["columns"], 2)
         self.assertEqual(len(widget_config["widgets"]), 2)
         self.assertTrue(widget_signature)
+
+    def test_build_widget_playback_spec_uses_embed_html_as_fallback_source(self):
+        controller = self._build_controller()
+
+        widget_url, widget_config, _ = controller._build_widget_playback_spec(
+            {
+                "item_type": "widget",
+                "widget_payload": {
+                    "widgets": [
+                        {"type": "embed", "html": "<iframe src=\"https://example.com/embed\"></iframe>"}
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual(widget_url, "<iframe src=\"https://example.com/embed\"></iframe>")
+        self.assertEqual(widget_config["widgets"][0]["type"], "embed")
 
     def test_build_widget_playback_spec_returns_none_when_widget_has_no_playable_source(self):
         controller = self._build_controller()

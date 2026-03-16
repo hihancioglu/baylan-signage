@@ -1094,6 +1094,33 @@ class PlaybackController:
         return False
 
     @staticmethod
+    def _derive_widget_source_from_config(widget_config: dict | None) -> str:
+        if not isinstance(widget_config, dict):
+            return ""
+
+        widgets = widget_config.get("widgets")
+        if not isinstance(widgets, list):
+            return ""
+
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type in {"iframe", "url", "video", "image"}:
+                candidate = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+                if candidate:
+                    return candidate
+                continue
+
+            if widget_type == "embed":
+                candidate = str(widget.get("html") or widget.get("content") or "").strip()
+                if candidate:
+                    return candidate
+
+        return ""
+
+    @staticmethod
     def _parse_dashboard_widget_payload(raw_payload: dict) -> dict | None:
         if not isinstance(raw_payload, dict):
             return None
@@ -1226,6 +1253,8 @@ class PlaybackController:
             "columns": resolved_columns,
         }
         widget_url = str(normalized.get("widget_url") or normalized.get("local_path") or "").strip()
+        if not widget_url:
+            widget_url = self._derive_widget_source_from_config(widget_config)
         if widget_config["widgets"] is None and widget_url:
             widget_config["widgets"] = [{"type": "url", "url": widget_url}]
         if widget_config["columns"] is None:
