@@ -1054,6 +1054,40 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertTrue(player.play_mpv_playlist_blocking.called)
         self.assertTrue(player.play_media_in_widget_runtime_blocking.called)
 
+    def test_failed_media_playback_applies_retry_delay_to_prevent_tight_loop(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_image.return_value = False
+        player._is_video.return_value = True
+        player.play_media_in_widget_runtime_blocking.return_value = False
+        player.last_play_was_interrupted.return_value = False
+        controller.player = player
+
+        with patch.object(controller, "_effective_playlist", return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch.object(
+            controller,
+            "_prewarm_next_widget",
+            return_value=None,
+        ), patch("client.client.PLAYBACK_FAILURE_RETRY_SEC", 0.25), patch("time.sleep", return_value=None) as sleep_mock:
+
+            def _stop_after_retry(seconds):
+                if abs(seconds - 0.25) < 1e-9:
+                    controller._running = False
+                return None
+
+            sleep_mock.side_effect = _stop_after_retry
+            controller._running = True
+            controller._run()
+
+        self.assertGreaterEqual(player.play_media_in_widget_runtime_blocking.call_count, 1)
+        sleep_mock.assert_any_call(0.25)
+
 
     def test_is_newer_version_handles_build_prefix_and_unknown_marker(self):
         from client.client import _is_newer_version
