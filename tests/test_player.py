@@ -1034,6 +1034,41 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertEqual(player.update_widget_layout.call_count, 2)
         self.assertEqual(player.wait_widget_duration.call_count, 2)
 
+    def test_sequential_widget_clears_stop_request_before_wait(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_direct_url_widget.return_value = False
+        player.update_widget_layout.return_value = True
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+
+        def _wait_widget_duration(_duration):
+            controller._running = False
+            return True
+
+        player.wait_widget_duration.side_effect = _wait_widget_duration
+        controller.player = player
+
+        widget_item = {
+            "item_type": "widget",
+            "duration_sec": 5,
+            "widget_payload": {"type": "url", "content": "https://example.com/one"},
+        }
+
+        with patch.object(controller, "_effective_playlist", return_value=[widget_item]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        player.clear_stop_request.assert_called_once_with()
+        player.wait_widget_duration.assert_called_once_with(5)
+
 
     def test_failed_mpv_playlist_falls_back_to_single_playback(self):
         from client.client import PlaybackController

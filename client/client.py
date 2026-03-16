@@ -1508,6 +1508,7 @@ class PlaybackController:
                             )
 
                     if ok and not direct_url_widget:
+                        self.player.clear_stop_request()
                         ok = self.player.wait_widget_duration(widget_duration_sec)
                     log_debug(f"widget playback end | ok={ok} direct_url_widget={direct_url_widget}")
                     interrupted = self.player.last_play_was_interrupted()
