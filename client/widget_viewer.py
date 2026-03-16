@@ -207,7 +207,10 @@ def _viewer_backend_order() -> list[str]:
     preferred = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
     if preferred in {"cef", "pywebview"}:
         return [preferred]
-    return ["cef", "pywebview"]
+    # Windows'ta ikinci ekran/harici GPU kombinasyonlarında CEF siyah ekran
+    # davranışı gösterebildiği için varsayılan otomatik sırada pywebview'i
+    # öne alıyoruz. CEF yine fallback olarak denenir.
+    return ["pywebview", "cef"]
 
 
 def _gui_candidates() -> list[str | None]:
