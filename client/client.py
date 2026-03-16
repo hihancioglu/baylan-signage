@@ -1521,7 +1521,7 @@ class PlaybackController:
                         if isinstance(duration_sec, int) and duration_sec > 0:
                             media_duration_sec = duration_sec
                         else:
-                            media_duration_sec = max(1, int(os.getenv("VIDEO_DEFAULT_DURATION_SEC", "30")))
+                            media_duration_sec = None
 
                     effective_resume_sec = resume_sec
                     if is_video_media:

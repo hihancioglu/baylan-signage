@@ -662,14 +662,24 @@ class BorderlessFullscreenPlayer:
     def play_media_in_widget_runtime_blocking(
         self,
         media_path: str,
-        duration_sec: int,
+        duration_sec: int | None,
         start_position_sec: float | None = None,
     ) -> bool:
+        if self._is_video(media_path) and (not isinstance(duration_sec, int) or duration_sec <= 0):
+            return self.play_blocking(
+                media_path,
+                image_duration_sec=None,
+                start_position_sec=start_position_sec,
+            )
+
         payload = self.build_media_widget_payload(media_path, start_position_sec=start_position_sec)
         signature = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         if not self.update_widget_layout(media_path, widget_config=payload, widget_signature=signature):
+            self._last_interrupted = False
+            return False
+        if not isinstance(duration_sec, int) or duration_sec <= 0:
             self._last_interrupted = False
             return False
         return self.wait_widget_duration(duration_sec)
