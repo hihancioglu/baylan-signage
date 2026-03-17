@@ -19,6 +19,15 @@ class TestConfigPush(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmpdir.cleanup()
 
+
+    def test_build_command_contract_generates_unique_command_ids(self):
+        first = self.main.build_command_contract("CAPTURE_SCREEN")
+        second = self.main.build_command_contract("CAPTURE_SCREEN")
+
+        self.assertNotEqual(first["command_id"], second["command_id"])
+        self.assertTrue(first["command_id"].startswith("cmd-"))
+        self.assertTrue(second["command_id"].startswith("cmd-"))
+
     def test_emit_config_update_only_to_connected_unique_hosts(self):
         original_connected = dict(self.main.connected)
         self.main.connected.clear()
