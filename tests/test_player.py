@@ -678,7 +678,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         self.assertFalse(player.background_widget_engine())
 
-    def test_play_blocking_keeps_widget_runtime_alive_by_default(self):
+    def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
         widget_process.poll.return_value = None
@@ -703,8 +703,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
                 ok = player.play_blocking(media_path)
 
             self.assertTrue(ok)
-            stop_widget_engine.assert_not_called()
-            self.assertIs(player._widget_process, widget_process)
+            stop_widget_engine.assert_called_once()
         finally:
             Path(media_path).unlink(missing_ok=True)
 

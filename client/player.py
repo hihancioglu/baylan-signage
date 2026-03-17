@@ -1101,10 +1101,12 @@ class BorderlessFullscreenPlayer:
             self._terminate_process(self._process, timeout_sec=5)
         self._process = None
 
-        if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
+        if self._widget_process and self._widget_process.poll() is None:
+            # Harici medya oynatıcıları (mpv/vlc) ile oynatımda widget runtime'ın
+            # sıcak tutulması bazı ortamlarda siyah ekran/başlatılamama
+            # davranışına neden olabiliyor. Bu yüzden doğrudan oynatım öncesi
+            # widget runtime temizce kapatılır.
             self.stop_widget_engine()
-        elif self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
-            self.background_widget_engine()
 
         process = None
 
