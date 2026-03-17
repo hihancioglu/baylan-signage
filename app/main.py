@@ -3,7 +3,6 @@ eventlet.monkey_patch()
 
 import base64
 import hashlib
-import itertools
 import json
 import os
 import re
@@ -71,8 +70,6 @@ LATEST_SCREENSHOTS = {}  # hostname -> metadata
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
-command_seq = itertools.count(1)
-
 COMMAND_TYPES = {
     "REFRESH_CONFIG",
     "EMERGENCY_START",
@@ -614,7 +611,7 @@ def _idle_minutes_since_last_state(device):
     if state != "IDLE" or not device.last_state_at:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     last_state_at = device.last_state_at
     if getattr(last_state_at, "tzinfo", None) is not None:
         last_state_at = last_state_at.replace(tzinfo=None)
@@ -812,7 +809,7 @@ def build_command_contract(command_type: str, payload=None, ttl_sec=30, priority
 
     return {
         "type": command_type,
-        "command_id": f"cmd-{next(command_seq)}",
+        "command_id": f"cmd-{uuid.uuid4().hex}",
         "issued_at": _utc_now_iso(),
         "ttl_sec": int(ttl_sec),
         "payload": payload or {},
@@ -1069,7 +1066,7 @@ def handle_register(data):
         incoming_state = data.get("state") or data.get("current_state")
         if incoming_state:
             device.last_state = incoming_state
-            device.last_state_at = datetime.utcnow()
+            device.last_state_at = datetime.now(timezone.utc)
         device.agent_version = data.get("agent_version") or device.agent_version
         device.updater_version = data.get("updater_version") or device.updater_version
         device.os_version = data.get("os_name") or device.os_version
@@ -1077,7 +1074,7 @@ def handle_register(data):
         device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
         device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
         device.is_online = True
-        device.last_seen = datetime.utcnow()
+        device.last_seen = datetime.now(timezone.utc)
 
         db.add(device)
         db.commit()
@@ -1099,11 +1096,11 @@ def handle_heartbeat(data):
     try:
         device = db.query(Device).filter_by(hostname=hostname).first()
         if device:
-            device.last_seen = datetime.utcnow()
+            device.last_seen = datetime.now(timezone.utc)
             incoming_state = data.get("state") or data.get("current_state")
             if incoming_state:
                 device.last_state = incoming_state
-                device.last_state_at = datetime.utcnow()
+                device.last_state_at = datetime.now(timezone.utc)
             device.agent_version = data.get("agent_version") or device.agent_version
             device.updater_version = data.get("updater_version") or device.updater_version
             device.os_version = data.get("os_name") or device.os_version
@@ -1198,7 +1195,7 @@ def offline_checker():
         db = db_session()
         try:
             devices = db.query(Device).all()
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             for d in devices:
                 if d.last_seen:
@@ -1288,7 +1285,7 @@ def bind_device_group(hostname, group_id):
 
         for membership in active_memberships:
             membership.is_active = False
-            membership.unassigned_at = datetime.utcnow()
+            membership.unassigned_at = datetime.now(timezone.utc)
         db.add(DeviceGroup(device_id=device.id, group_id=group_id, is_active=True))
         db.commit()
 
@@ -1322,7 +1319,7 @@ def unbind_device_group(hostname):
 
         for membership in active_memberships:
             membership.is_active = False
-            membership.unassigned_at = datetime.utcnow()
+            membership.unassigned_at = datetime.now(timezone.utc)
 
         db.commit()
 
@@ -1485,7 +1482,7 @@ def delete_group(group_id):
         affected_hostnames = _hostnames_for_group(db, group_id)
 
         deactivated_memberships = db.query(DeviceGroup).filter_by(group_id=group_id, is_active=True).update(
-            {"is_active": False, "unassigned_at": datetime.utcnow()},
+            {"is_active": False, "unassigned_at": datetime.now(timezone.utc)},
             synchronize_session=False,
         )
         db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
