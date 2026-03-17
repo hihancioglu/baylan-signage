@@ -229,6 +229,7 @@ class BorderlessFullscreenPlayer:
         )
         self._process = None
         self._extra_processes: list[subprocess.Popen] = []
+        self._process_lock = threading.RLock()
         self._stop_requested = False
         self._widget_process = None
         self._widget_process_stdin_lock = threading.Lock()
@@ -239,6 +240,22 @@ class BorderlessFullscreenPlayer:
         )
         self._last_interrupted = False
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
+
+    def _apply_pending_stop_to_media_processes(self, processes: list[subprocess.Popen]) -> bool:
+        """
+        Close freshly started media processes if a stop request arrived concurrently.
+
+        Playback runs in a worker thread while state transitions call ``stop`` from
+        another thread. If the stop signal lands between process spawn and process
+        reference assignment, the new mpv process can miss the termination request.
+        """
+        if not self._stop_requested:
+            return False
+
+        for process in processes:
+            if process and process.poll() is None:
+                self._terminate_process(process, timeout_sec=5)
+        return True
 
     @staticmethod
     def _windows_hidden_process_kwargs() -> dict:
@@ -1319,8 +1336,12 @@ class BorderlessFullscreenPlayer:
             _debug_log(f"play_blocking command={command}")
             processes = self._launch_media_processes(command)
             process = processes[0]
-            self._process = process
-            self._extra_processes = processes[1:]
+            with self._process_lock:
+                self._process = process
+                self._extra_processes = processes[1:]
+            if self._apply_pending_stop_to_media_processes(processes):
+                self._last_interrupted = True
+                return True
             process.wait()
 
             interrupted = self._stop_requested
@@ -1352,8 +1373,12 @@ class BorderlessFullscreenPlayer:
             self._stop_requested = False
             processes = self._launch_media_processes(alternate_command)
             process = processes[0]
-            self._process = process
-            self._extra_processes = processes[1:]
+            with self._process_lock:
+                self._process = process
+                self._extra_processes = processes[1:]
+            if self._apply_pending_stop_to_media_processes(processes):
+                self._last_interrupted = True
+                return True
             process.wait()
             interrupted = self._stop_requested
             self._last_interrupted = interrupted
@@ -1364,9 +1389,10 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ medya oynatma hatası: {exc}")
             return False
         finally:
-            if self._process is process:
-                self._process = None
-            self._extra_processes = []
+            with self._process_lock:
+                if self._process is process:
+                    self._process = None
+                self._extra_processes = []
 
     def can_play_with_mpv_playlist(self, media_paths: list[str]) -> bool:
         if len(media_paths) < 2:
@@ -1438,8 +1464,12 @@ class BorderlessFullscreenPlayer:
             self._stop_requested = False
             processes = self._launch_media_processes(command)
             process = processes[0]
-            self._process = process
-            self._extra_processes = processes[1:]
+            with self._process_lock:
+                self._process = process
+                self._extra_processes = processes[1:]
+            if self._apply_pending_stop_to_media_processes(processes):
+                self._last_interrupted = True
+                return True
             process.wait()
 
             interrupted = self._stop_requested
@@ -1450,9 +1480,10 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ mpv playlist oynatma hatası: {exc}")
             return False
         finally:
-            if self._process is process:
-                self._process = None
-            self._extra_processes = []
+            with self._process_lock:
+                if self._process is process:
+                    self._process = None
+                self._extra_processes = []
             if playlist_file:
                 Path(playlist_file).unlink(missing_ok=True)
 
@@ -1463,9 +1494,12 @@ class BorderlessFullscreenPlayer:
         if stop_widget_runtime is None:
             stop_widget_runtime = not self._keep_widget_runtime_warm
 
-        if self._process and self._process.poll() is None:
-            self._terminate_process(self._process, timeout_sec=5)
-        for process in self._extra_processes:
+        with self._process_lock:
+            process = self._process
+            extra_processes = list(self._extra_processes)
+        if process and process.poll() is None:
+            self._terminate_process(process, timeout_sec=5)
+        for process in extra_processes:
             if process and process.poll() is None:
                 self._terminate_process(process, timeout_sec=5)
 
@@ -1474,8 +1508,9 @@ class BorderlessFullscreenPlayer:
         elif not stop_widget_runtime:
             self.background_widget_engine()
 
-        self._process = None
-        self._extra_processes = []
+        with self._process_lock:
+            self._process = None
+            self._extra_processes = []
         if stop_widget_runtime:
             self._widget_process = None
         elif self._widget_process and self._widget_process.poll() is not None:
