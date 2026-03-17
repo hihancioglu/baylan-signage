@@ -1838,9 +1838,14 @@ def list_playlist_items(playlist_id):
             .all()
         )
 
+        media_assets = db.query(MediaAsset.relative_path, MediaAsset.stored_name, MediaAsset.original_name).all()
         media_assets_by_relative_path = {
             media.relative_path: media.original_name
-            for media in db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
+            for media in media_assets
+        }
+        media_assets_by_stored_name = {
+            media.stored_name: media.original_name
+            for media in media_assets
         }
         widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
@@ -1863,7 +1868,12 @@ def list_playlist_items(playlist_id):
             relative_path = _extract_relative_media_path(item_path)
             if relative_path and relative_path in media_assets_by_relative_path:
                 return media_assets_by_relative_path[relative_path]
-            return Path((item_path or "").split("?")[0]).name or item_path
+
+            fallback_name = Path((item_path or "").split("?")[0]).name
+            if fallback_name and fallback_name in media_assets_by_stored_name:
+                return media_assets_by_stored_name[fallback_name]
+
+            return fallback_name or item_path
 
         serialized_items = []
         for i in items:
