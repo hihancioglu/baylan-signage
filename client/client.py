@@ -161,6 +161,7 @@ RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
+ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
@@ -509,6 +510,8 @@ idle_mode_enabled = True
 content_enabled = True
 current_state = ClientState.ACTIVE
 _last_observed_idle_sec: float | None = None
+_activity_drop_streak = 0
+_low_idle_streak = 0
 emergency_active = False
 work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
@@ -2346,7 +2349,7 @@ def on_command(data):
 
 
 def run_state_cycle():
-    global _last_observed_idle_sec
+    global _last_observed_idle_sec, _activity_drop_streak, _low_idle_streak
 
     def _playback_has_selected_content() -> bool:
         if playback.current_content_name():
@@ -2376,10 +2379,24 @@ def run_state_cycle():
         isinstance(previous_idle_sec, (int, float))
         and (previous_idle_sec - idle_sec) >= ACTIVITY_IDLE_DROP_SEC
     )
-    user_activity_detected = idle_sec <= ACTIVITY_RESUME_SEC or activity_by_idle_drop
+    if activity_by_idle_drop:
+        _activity_drop_streak += 1
+    elif isinstance(previous_idle_sec, (int, float)) and idle_sec >= previous_idle_sec:
+        _activity_drop_streak = 0
+
+    if idle_sec <= ACTIVITY_RESUME_SEC:
+        _low_idle_streak += 1
+    else:
+        _low_idle_streak = 0
+
+    activity_drop_confirmed = _activity_drop_streak >= max(ACTIVITY_DROP_CONFIRM_COUNT, 1)
+    low_idle_confirmed = _low_idle_streak >= 3
+    user_activity_detected = activity_drop_confirmed or low_idle_confirmed
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
         f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
+        f"drop_streak={_activity_drop_streak} drop_confirmed={activity_drop_confirmed} "
+        f"low_idle_streak={_low_idle_streak} low_idle_confirmed={low_idle_confirmed} "
         f"user_activity={user_activity_detected} idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
     )
 
