@@ -63,6 +63,60 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIn("--image-display-duration=5", cmd)
         self.assertEqual(cmd[0], "mpv")
 
+    def test_play_blocking_retries_with_alternate_player_after_failure(self):
+        player = self._build_player()
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as media_file:
+            with patch.object(player, "_resolve_executable", return_value=True), patch.object(
+                player,
+                "_build_command",
+                return_value=["mpv", media_file.name],
+            ), patch.object(
+                player,
+                "_build_alternate_command",
+                return_value=["vlc", media_file.name],
+            ), patch("client.player.subprocess.Popen") as popen:
+                first_process = unittest.mock.Mock()
+                first_process.returncode = 1
+                first_process.wait.return_value = 1
+                first_process.poll.return_value = 1
+
+                second_process = unittest.mock.Mock()
+                second_process.returncode = 0
+                second_process.wait.return_value = 0
+                second_process.poll.return_value = 0
+
+                popen.side_effect = [first_process, second_process]
+
+                ok = player.play_blocking(media_file.name)
+
+        self.assertTrue(ok)
+        self.assertEqual(popen.call_count, 2)
+
+    def test_play_blocking_returns_false_when_primary_fails_and_no_alternate(self):
+        player = self._build_player()
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as media_file:
+            with patch.object(player, "_resolve_executable", return_value=True), patch.object(
+                player,
+                "_build_command",
+                return_value=["mpv", media_file.name],
+            ), patch.object(
+                player,
+                "_build_alternate_command",
+                return_value=None,
+            ), patch("client.player.subprocess.Popen") as popen:
+                first_process = unittest.mock.Mock()
+                first_process.returncode = 2
+                first_process.wait.return_value = 2
+                first_process.poll.return_value = 2
+                popen.return_value = first_process
+
+                ok = player.play_blocking(media_file.name)
+
+        self.assertFalse(ok)
+        self.assertEqual(popen.call_count, 1)
+
     def test_prefers_mpv_for_images_when_vlc_selected(self):
         player = self._build_player()
         with patch.object(player, "_build_mpv_image_command", return_value=["mpv", "img.jpg"]), patch.object(

@@ -1062,6 +1062,48 @@ class BorderlessFullscreenPlayer:
         # doğrudan subprocess'e gönderildiğinde bulunamıyor. Dış quote'ları temizle.
         return [self._strip_outer_quotes(part) for part in command]
 
+    def _build_alternate_command(
+        self,
+        media_path: str,
+        image_duration_sec: int | None,
+        start_position_sec: float | None,
+        failed_command: list[str],
+    ) -> list[str] | None:
+        if not failed_command:
+            return None
+
+        failed_executable = Path(self._strip_outer_quotes(failed_command[0])).name.lower()
+        if "mpv" in failed_executable:
+            alternate_template = self.VLC_VIDEO_TEMPLATE if self._is_video(media_path) else self.VLC_IMAGE_TEMPLATE
+            alternate_command = self._split_command_text(
+                alternate_template.format(player="vlc", media="{media}", duration=image_duration_sec or self.image_duration_sec)
+            )
+        elif "vlc" in failed_executable:
+            alternate_template = self.MPV_VIDEO_TEMPLATE if self._is_video(media_path) else self.MPV_IMAGE_TEMPLATE
+            alternate_command = self._split_command_text(
+                alternate_template.format(player="mpv", media="{media}", duration=image_duration_sec or self.image_duration_sec)
+            )
+        else:
+            return None
+
+        alternate_command = [media_path if part == "{media}" else part for part in alternate_command]
+        alternate_command = [self._strip_outer_quotes(part) for part in alternate_command]
+        if start_position_sec and self._is_video(media_path):
+            exe_name = Path(self._strip_outer_quotes(alternate_command[0])).name.lower()
+            if "vlc" in exe_name:
+                alternate_command.insert(1, f"--start-time={max(0, float(start_position_sec)):.3f}")
+            elif "mpv" in exe_name:
+                alternate_command.insert(1, f"--start={max(0, float(start_position_sec)):.3f}")
+
+        if not self._resolve_executable(alternate_command):
+            return None
+
+        return self._prefer_non_vlc_image_command(
+            media_path,
+            alternate_command,
+            image_duration_sec=image_duration_sec,
+        )
+
     @staticmethod
     def _strip_outer_quotes(value: str) -> str:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
@@ -1137,8 +1179,38 @@ class BorderlessFullscreenPlayer:
             process.wait()
 
             interrupted = self._stop_requested
+            if process.returncode == 0 or interrupted:
+                self._last_interrupted = interrupted
+                _debug_log(f"play_blocking finished | returncode={process.returncode} interrupted={interrupted}")
+                return True
+
+            alternate_command = self._build_alternate_command(
+                media_path,
+                image_duration_sec=image_duration_sec,
+                start_position_sec=start_position_sec,
+                failed_command=command,
+            )
+            if not alternate_command:
+                self._last_interrupted = False
+                _debug_log(f"play_blocking finished | returncode={process.returncode} interrupted=False no_alternate=true")
+                return False
+
+            _safe_print(
+                "⚠️ birincil player başarısız oldu, alternatif player ile yeniden denenecek: "
+                f"{Path(self._strip_outer_quotes(alternate_command[0])).name}"
+            )
+            _debug_log(
+                "play_blocking alternate command | "
+                f"failed_returncode={process.returncode} alternate={alternate_command}"
+            )
+
+            self._stop_requested = False
+            process = subprocess.Popen(alternate_command)
+            self._process = process
+            process.wait()
+            interrupted = self._stop_requested
             self._last_interrupted = interrupted
-            _debug_log(f"play_blocking finished | returncode={process.returncode} interrupted={interrupted}")
+            _debug_log(f"play_blocking alternate finished | returncode={process.returncode} interrupted={interrupted}")
             return process.returncode == 0 or interrupted
         except Exception as exc:
             self._last_interrupted = False
