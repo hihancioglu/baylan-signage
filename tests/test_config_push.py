@@ -735,6 +735,33 @@ class TestConfigPush(unittest.TestCase):
         devices = {row.get("hostname"): row for row in (resp.get_json() or [])}
         self.assertEqual(devices["pc-encoded"].get("last_content_display_name"), "Kampanya Videosu Final.mp4")
 
+    def test_list_devices_resolves_relative_media_path_to_original_name(self):
+        db = self.main.db_session()
+        try:
+            device = self.main.Device(
+                hostname="pc-relative-path",
+                is_online=True,
+                last_state="IDLE",
+                last_content_name="media/946ee45fc71368270f5b.mp4",
+            )
+            asset = self.main.MediaAsset(
+                original_name="MacaHane Tanitim.mp4",
+                stored_name="946ee45fc71368270f5b.mp4",
+                relative_path="media/946ee45fc71368270f5b.mp4",
+                content_type="video/mp4",
+            )
+            db.add_all([device, asset])
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().get("/api/devices")
+
+        self.assertEqual(resp.status_code, 200)
+        devices = {row.get("hostname"): row for row in (resp.get_json() or [])}
+        self.assertEqual(devices["pc-relative-path"].get("last_content_display_name"), "MacaHane Tanitim.mp4")
+
     def test_build_config_resolves_encoded_playlist_path_display_name(self):
         db = self.main.db_session()
         try:
