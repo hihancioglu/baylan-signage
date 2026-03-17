@@ -62,7 +62,7 @@
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('is_online')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('last_seen')">Son Heartbeat (UTC+3)</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('is_online')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('last_seen')">Son Heartbeat (UTC+3)</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
                     <tbody id="devices-body"></tbody>
                   </table>
                 </div>
@@ -515,6 +515,19 @@ function getDeviceStateText(device){
   return (normalizedState.includes('IDLE') || hasContentOnScreen) ? 'IDLE' : 'AKTIF';
 }
 
+function getDeviceContentText(device){
+  const lastContentName = (device.last_content_name || '').trim();
+  if(lastContentName) return lastContentName;
+
+  const stateDisplay = (device.state_display || '').trim();
+  if(stateDisplay && stateDisplay.toUpperCase() !== (device.last_state || '').toUpperCase()) return stateDisplay;
+
+  const normalizedState = (device.last_state || '').toUpperCase();
+  if(normalizedState.includes('IDLE')) return 'FallbackMedia';
+
+  return '-';
+}
+
 function sortDevices(field){
   if(deviceSortField === field){
     deviceSortDirection = deviceSortDirection === 'asc' ? 'desc' : 'asc';
@@ -550,6 +563,9 @@ function renderDevicesTable(){
     }else if(deviceSortField === 'state_text'){
       left = getDeviceStateText(a);
       right = getDeviceStateText(b);
+    }else if(deviceSortField === 'content_text'){
+      left = getDeviceContentText(a).toLocaleLowerCase('tr-TR');
+      right = getDeviceContentText(b).toLocaleLowerCase('tr-TR');
     }else{
       left = String(a[deviceSortField] || '').toLocaleLowerCase('tr-TR');
       right = String(b[deviceSortField] || '').toLocaleLowerCase('tr-TR');
@@ -565,8 +581,9 @@ function renderDevicesTable(){
     const tr = document.createElement('tr');
     const safeHostname = encodeURIComponent(d.hostname || '');
     const stateText = getDeviceStateText(d);
+    const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${d.alias||''}" /></td><td>${d.hostname||''}</td><td>${d.agent_version||'-'}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${formatHeartbeatUtc3(d.last_seen)}</td><td>${stateText}</td><td>${d.group||'-'}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button></td>`;
     body.appendChild(tr);
   });
 }
