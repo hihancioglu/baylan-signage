@@ -230,6 +230,89 @@
       video.loop = w.loop === true;
       video.preload = String(w.preload || "metadata");
       video.disablePictureInPicture = true;
+
+      const stallTimeoutMs = Number(w.stall_timeout_ms || 10000);
+      const maxRecoveries = Number(w.max_stall_recoveries || 4);
+      let recoveryCount = 0;
+      let lastProgressAt = Date.now();
+      let lastKnownTime = 0;
+
+      const markProgress = () => {
+        lastProgressAt = Date.now();
+        if (Number.isFinite(video.currentTime) && video.currentTime >= 0) {
+          lastKnownTime = video.currentTime;
+        }
+      };
+
+      const recoverFromStall = () => {
+        if (video.ended || video.paused) return;
+        if (recoveryCount >= Math.max(0, maxRecoveries)) return;
+
+        recoveryCount += 1;
+        const resumeTime = Math.max(0, Number.isFinite(video.currentTime) ? video.currentTime : lastKnownTime);
+        const currentSrc = String(video.currentSrc || video.src || "");
+        if (!currentSrc) return;
+
+        try {
+          video.pause();
+          video.src = "";
+          video.load();
+          video.src = currentSrc;
+          video.load();
+        } catch (_err) {
+          // noop
+        }
+
+        const resumePlayback = () => {
+          try {
+            if (resumeTime > 0) {
+              video.currentTime = resumeTime;
+            }
+          } catch (_err) {
+            // noop
+          }
+          try {
+            const maybePromise = video.play();
+            if (maybePromise && typeof maybePromise.catch === "function") {
+              maybePromise.catch(() => {});
+            }
+          } catch (_err) {
+            // noop
+          }
+        };
+
+        if (video.readyState >= 1) {
+          resumePlayback();
+        } else {
+          video.addEventListener("loadedmetadata", resumePlayback, { once: true });
+        }
+
+        markProgress();
+      };
+
+      const stallMonitor = window.setInterval(() => {
+        if (video.ended) {
+          window.clearInterval(stallMonitor);
+          return;
+        }
+        if (video.paused || video.seeking) return;
+        if (Date.now() - lastProgressAt < Math.max(1500, stallTimeoutMs)) return;
+        recoverFromStall();
+      }, 1000);
+
+      video.addEventListener("timeupdate", markProgress);
+      video.addEventListener("progress", markProgress);
+      video.addEventListener("playing", markProgress);
+      video.addEventListener("waiting", () => {
+        if (Date.now() - lastProgressAt >= Math.max(1500, stallTimeoutMs)) {
+          recoverFromStall();
+        }
+      });
+      video.addEventListener("stalled", recoverFromStall);
+      video.addEventListener("error", recoverFromStall);
+      video.addEventListener("ended", () => window.clearInterval(stallMonitor), { once: true });
+      video.addEventListener("emptied", () => window.clearInterval(stallMonitor), { once: true });
+
       const startPositionSec = Number(w.start_position_sec || 0);
       if (Number.isFinite(startPositionSec) && startPositionSec > 0) {
         const seekToStart = () => {
