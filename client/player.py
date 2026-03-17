@@ -121,7 +121,7 @@ class BorderlessFullscreenPlayer:
     _WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 
     @staticmethod
-    def _windows_active_monitor_origin() -> tuple[int, int] | None:
+    def _windows_active_monitor_bounds() -> tuple[int, int, int, int] | None:
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return None
 
@@ -162,29 +162,51 @@ class BorderlessFullscreenPlayer:
         if not get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
             return None
 
-        return int(monitor_info.rcMonitor.left), int(monitor_info.rcMonitor.top)
+        left = int(monitor_info.rcMonitor.left)
+        top = int(monitor_info.rcMonitor.top)
+        right = int(monitor_info.rcMonitor.right)
+        bottom = int(monitor_info.rcMonitor.bottom)
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        return left, top, width, height
+
+    @classmethod
+    def _windows_active_monitor_origin(cls) -> tuple[int, int] | None:
+        monitor_bounds = cls._windows_active_monitor_bounds()
+        if monitor_bounds is None:
+            return None
+        x, y, _, _ = monitor_bounds
+        return x, y
 
     @classmethod
     def _apply_windows_monitor_position(cls, flags: list[str]) -> list[str]:
         if os.name != "nt":
             return list(flags)
 
-        monitor_origin = cls._windows_active_monitor_origin()
-        if monitor_origin is None:
+        monitor_bounds = cls._windows_active_monitor_bounds()
+        if monitor_bounds is None:
             return list(flags)
 
-        x, y = monitor_origin
+        x, y, width, height = monitor_bounds
         positioned_flags: list[str] = []
-        replaced = False
+        position_replaced = False
+        size_replaced = False
         for flag in flags:
             if isinstance(flag, str) and flag.startswith("--window-position="):
                 positioned_flags.append(f"--window-position={x},{y}")
-                replaced = True
+                position_replaced = True
+            elif isinstance(flag, str) and flag.startswith("--window-size="):
+                positioned_flags.append(f"--window-size={width},{height}")
+                size_replaced = True
+            elif flag in {"--start-fullscreen", "--start-maximized"}:
+                continue
             else:
                 positioned_flags.append(flag)
 
-        if not replaced:
+        if not position_replaced:
             positioned_flags.append(f"--window-position={x},{y}")
+        if not size_replaced:
+            positioned_flags.append(f"--window-size={width},{height}")
 
         return positioned_flags
 
