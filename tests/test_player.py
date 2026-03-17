@@ -1015,7 +1015,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.is_direct_url_widget.return_value = False
         player.update_widget_layout.return_value = True
         player.last_play_was_interrupted.return_value = False
-        player._is_video.return_value = False
+        player._is_video.return_value = True
 
         wait_calls = {"count": 0}
 
@@ -1159,14 +1159,14 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.can_play_with_mpv_playlist.return_value = True
         player.play_mpv_playlist_blocking.return_value = False
         player.last_play_was_interrupted.return_value = False
-        player._is_video.return_value = False
+        player._is_video.return_value = True
         controller.player = player
 
         def _single_playback(*args, **kwargs):
             controller._running = False
             return True
 
-        player.play_media_in_widget_runtime_blocking.side_effect = _single_playback
+        player.play_blocking.side_effect = _single_playback
 
         with patch.object(controller, "_can_use_mpv_playlist_mode", return_value=True), patch.object(
             controller,
@@ -1181,7 +1181,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             controller._run()
 
         self.assertTrue(player.play_mpv_playlist_blocking.called)
-        self.assertTrue(player.play_media_in_widget_runtime_blocking.called)
+        self.assertTrue(player.play_blocking.called)
 
     def test_failed_media_playback_applies_retry_delay_to_prevent_tight_loop(self):
         from client.client import PlaybackController
@@ -1191,7 +1191,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.image_duration_sec = 8
         player.is_image.return_value = False
         player._is_video.return_value = True
-        player.play_media_in_widget_runtime_blocking.return_value = False
+        player.play_blocking.return_value = False
         player.last_play_was_interrupted.return_value = False
         controller.player = player
 
@@ -1214,7 +1214,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             controller._running = True
             controller._run()
 
-        self.assertGreaterEqual(player.play_media_in_widget_runtime_blocking.call_count, 1)
+        self.assertGreaterEqual(player.play_blocking.call_count, 1)
         sleep_mock.assert_any_call(0.25)
 
 

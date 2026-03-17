@@ -1616,11 +1616,17 @@ class PlaybackController:
                             resume_sec = effective_resume_sec
 
                     log_debug(f"media playback start | path={media_path} resume_sec={resume_sec} media_duration_sec={media_duration_sec}")
-                    ok = self.player.play_media_in_widget_runtime_blocking(
-                        media_path,
-                        media_duration_sec,
-                        start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
-                    )
+                    if is_video_media and media_duration_sec is None:
+                        ok = self.player.play_blocking(
+                            media_path,
+                            start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                        )
+                    else:
+                        ok = self.player.play_media_in_widget_runtime_blocking(
+                            media_path,
+                            media_duration_sec,
+                            start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
+                        )
                     interrupted = self.player.last_play_was_interrupted()
                     log_debug(f"media playback end | ok={ok} interrupted={interrupted} path={media_path}")
 
