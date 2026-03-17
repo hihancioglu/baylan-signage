@@ -179,11 +179,15 @@ class BorderlessFullscreenPlayer:
         return x, y
 
     @classmethod
-    def _apply_windows_monitor_position(cls, flags: list[str]) -> list[str]:
+    def _apply_windows_monitor_position(
+        cls,
+        flags: list[str],
+        monitor_bounds: tuple[int, int, int, int] | None = None,
+    ) -> list[str]:
         if os.name != "nt":
             return list(flags)
 
-        monitor_bounds = cls._windows_active_monitor_bounds()
+        monitor_bounds = monitor_bounds or cls._windows_active_monitor_bounds()
         if monitor_bounds is None:
             return list(flags)
 
@@ -224,6 +228,7 @@ class BorderlessFullscreenPlayer:
             default_image_command,
         )
         self._process = None
+        self._extra_processes: list[subprocess.Popen] = []
         self._stop_requested = False
         self._widget_process = None
         self._widget_process_stdin_lock = threading.Lock()
@@ -258,6 +263,53 @@ class BorderlessFullscreenPlayer:
     @staticmethod
     def _python_widget_viewer_enabled() -> bool:
         return os.getenv("PYTHON_WIDGET_VIEWER_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+
+    @staticmethod
+    def _should_clone_to_all_monitors() -> bool:
+        return os.getenv("MIRROR_PLAYLIST_TO_ALL_MONITORS", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
+        if os.name != "nt" or not hasattr(ctypes, "windll"):
+            return []
+
+        enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
+        if not enum_display_monitors:
+            return []
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        monitor_rects: list[tuple[int, int, int, int]] = []
+        callback_type = ctypes.WINFUNCTYPE(
+            ctypes.c_int,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(RECT),
+            wintypes.LPARAM,
+        )
+
+        def _collect_monitor(_monitor, _hdc, rect_ptr, _data):
+            if not rect_ptr:
+                return 1
+            rect = rect_ptr.contents
+            width = max(1, int(rect.right - rect.left))
+            height = max(1, int(rect.bottom - rect.top))
+            monitor_rects.append((int(rect.left), int(rect.top), width, height))
+            return 1
+
+        try:
+            enum_display_monitors(0, 0, callback_type(_collect_monitor), 0)
+        except Exception:
+            return []
+
+        monitor_rects.sort(key=lambda item: (item[1], item[0]))
+        return monitor_rects
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
@@ -1017,6 +1069,64 @@ class BorderlessFullscreenPlayer:
         self._last_interrupted = interrupted
         return (process.returncode in (0, None)) or interrupted
 
+    def _wait_widget_processes_until_stop(self, processes: list[subprocess.Popen], max_duration_sec: int | None = None) -> bool:
+        if not processes:
+            self._last_interrupted = False
+            return False
+
+        deadline = None
+        if max_duration_sec is not None:
+            deadline = time.monotonic() + max(1, int(max_duration_sec))
+
+        while True:
+            if self._stop_requested:
+                break
+            if all(process.poll() is not None for process in processes):
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            time.sleep(0.2)
+
+        for process in processes:
+            if process.poll() is None:
+                self._terminate_process(process, timeout_sec=2, force_tree=True)
+
+        interrupted = self._stop_requested
+        self._last_interrupted = interrupted
+        return all(process.returncode in (0, None) for process in processes) or interrupted
+
+    def _build_widget_commands_for_monitors(self, source: str) -> list[list[str]]:
+        command = self._build_widget_command(source)
+        if not command:
+            return []
+
+        if not self._should_clone_to_all_monitors() or os.name != "nt":
+            return [command]
+
+        monitor_bounds_list = self._windows_connected_monitor_bounds()
+        if len(monitor_bounds_list) <= 1 or self._is_python_widget_command(command):
+            return [command]
+
+        return [
+            [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
+            for monitor_bounds in monitor_bounds_list
+        ]
+
+    def _launch_media_processes(self, command: list[str]) -> list[subprocess.Popen]:
+        processes = [subprocess.Popen(command)]
+        if not self._should_clone_to_all_monitors() or os.name != "nt" or not self._is_mpv_command(command):
+            return processes
+
+        monitor_bounds_list = self._windows_connected_monitor_bounds()
+        if len(monitor_bounds_list) <= 1:
+            return processes
+
+        for monitor_index in range(1, len(monitor_bounds_list)):
+            monitor_command = [*command]
+            monitor_command.insert(1, f"--screen={monitor_index}")
+            processes.append(subprocess.Popen(monitor_command))
+        return processes
+
     def play_widget_blocking(
         self,
         widget_source: str,
@@ -1030,7 +1140,13 @@ class BorderlessFullscreenPlayer:
             _safe_print("⚠️ widget kaynağı boş")
             return False
 
-        if self._widget_runtime_controller_enabled():
+        multi_monitor_widget_mode = (
+            self._should_clone_to_all_monitors()
+            and os.name == "nt"
+            and len(self._windows_connected_monitor_bounds()) > 1
+        )
+
+        if self._widget_runtime_controller_enabled() and not multi_monitor_widget_mode:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None
@@ -1044,25 +1160,25 @@ class BorderlessFullscreenPlayer:
 
         self.stop()
 
-        command = self._build_widget_command(source)
-        _debug_log(f"play_widget_blocking fallback process command={command}")
-        if not command:
+        commands = self._build_widget_commands_for_monitors(source)
+        _debug_log(f"play_widget_blocking fallback process commands={commands}")
+        if not commands:
             self._last_interrupted = False
             _safe_print("⚠️ widget oynatılamıyor: browser/webview komutu bulunamadı")
             return False
 
-        process = None
-        using_python_widget_viewer = self._is_python_widget_command(command)
+        processes: list[subprocess.Popen] = []
+        using_python_widget_viewer = self._is_python_widget_command(commands[0])
         try:
             self._stop_requested = False
-            process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
-            _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
-            self._widget_process = process
+            for command in commands:
+                process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
+                processes.append(process)
+                _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
+            self._widget_process = processes[0]
+            self._extra_processes = processes[1:]
 
-            return self._wait_widget_until_stop(
-                process,
-                max_duration_sec=duration_sec,
-            )
+            return self._wait_widget_processes_until_stop(processes, max_duration_sec=duration_sec)
         except Exception as exc:
             self._last_interrupted = False
             if using_python_widget_viewer:
@@ -1070,8 +1186,9 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ widget oynatma hatası: {exc}")
             return False
         finally:
-            if self._widget_process is process:
+            if self._widget_process and self._widget_process in processes:
                 self._widget_process = None
+            self._extra_processes = []
 
     def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
         template = self.video_command if self._is_video(media_path) else self.image_command
@@ -1163,7 +1280,11 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = True
         if self._process and self._process.poll() is None:
             self._terminate_process(self._process, timeout_sec=5)
+        for process in self._extra_processes:
+            if process and process.poll() is None:
+                self._terminate_process(process, timeout_sec=5)
         self._process = None
+        self._extra_processes = []
 
         if self._widget_process and self._widget_process.poll() is None:
             # Harici medya oynatıcıları (mpv/vlc) ile oynatımda widget runtime'ın
@@ -1196,8 +1317,10 @@ class BorderlessFullscreenPlayer:
 
             self._stop_requested = False
             _debug_log(f"play_blocking command={command}")
-            process = subprocess.Popen(command)
+            processes = self._launch_media_processes(command)
+            process = processes[0]
             self._process = process
+            self._extra_processes = processes[1:]
             process.wait()
 
             interrupted = self._stop_requested
@@ -1227,8 +1350,10 @@ class BorderlessFullscreenPlayer:
             )
 
             self._stop_requested = False
-            process = subprocess.Popen(alternate_command)
+            processes = self._launch_media_processes(alternate_command)
+            process = processes[0]
             self._process = process
+            self._extra_processes = processes[1:]
             process.wait()
             interrupted = self._stop_requested
             self._last_interrupted = interrupted
@@ -1241,6 +1366,7 @@ class BorderlessFullscreenPlayer:
         finally:
             if self._process is process:
                 self._process = None
+            self._extra_processes = []
 
     def can_play_with_mpv_playlist(self, media_paths: list[str]) -> bool:
         if len(media_paths) < 2:
@@ -1265,7 +1391,11 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = True
         if self._process and self._process.poll() is None:
             self._terminate_process(self._process, timeout_sec=5)
+        for extra_process in self._extra_processes:
+            if extra_process and extra_process.poll() is None:
+                self._terminate_process(extra_process, timeout_sec=5)
         self._process = None
+        self._extra_processes = []
 
         if not self._keep_widget_runtime_warm and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
@@ -1306,8 +1436,10 @@ class BorderlessFullscreenPlayer:
             ]
 
             self._stop_requested = False
-            process = subprocess.Popen(command)
+            processes = self._launch_media_processes(command)
+            process = processes[0]
             self._process = process
+            self._extra_processes = processes[1:]
             process.wait()
 
             interrupted = self._stop_requested
@@ -1320,6 +1452,7 @@ class BorderlessFullscreenPlayer:
         finally:
             if self._process is process:
                 self._process = None
+            self._extra_processes = []
             if playlist_file:
                 Path(playlist_file).unlink(missing_ok=True)
 
@@ -1332,6 +1465,9 @@ class BorderlessFullscreenPlayer:
 
         if self._process and self._process.poll() is None:
             self._terminate_process(self._process, timeout_sec=5)
+        for process in self._extra_processes:
+            if process and process.poll() is None:
+                self._terminate_process(process, timeout_sec=5)
 
         if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
             self.stop_widget_engine()
@@ -1339,6 +1475,7 @@ class BorderlessFullscreenPlayer:
             self.background_widget_engine()
 
         self._process = None
+        self._extra_processes = []
         if stop_widget_runtime:
             self._widget_process = None
         elif self._widget_process and self._widget_process.poll() is not None:
