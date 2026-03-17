@@ -1199,7 +1199,11 @@ def offline_checker():
 
             for d in devices:
                 if d.last_seen:
-                    delta = now - d.last_seen
+                    last_seen = d.last_seen
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=timezone.utc)
+
+                    delta = now - last_seen
                     if delta > timedelta(minutes=5):
                         d.is_online = False
 
