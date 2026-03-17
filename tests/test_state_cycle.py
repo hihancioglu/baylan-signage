@@ -13,6 +13,8 @@ class TestRunStateCycle(unittest.TestCase):
         self.orig_playing_started_at = main.playing_started_at
         self.orig_emergency_active = main.emergency_active
         self.orig_last_observed_idle_sec = main._last_observed_idle_sec
+        self.orig_activity_drop_streak = main._activity_drop_streak
+        self.orig_low_idle_streak = main._low_idle_streak
 
     def tearDown(self):
         main.current_state = self.orig_state
@@ -22,6 +24,8 @@ class TestRunStateCycle(unittest.TestCase):
         main.playing_started_at = self.orig_playing_started_at
         main.emergency_active = self.orig_emergency_active
         main._last_observed_idle_sec = self.orig_last_observed_idle_sec
+        main._activity_drop_streak = self.orig_activity_drop_streak
+        main._low_idle_streak = self.orig_low_idle_streak
 
     def _configure_common(self):
         main.idle_mode_enabled = True
@@ -29,6 +33,8 @@ class TestRunStateCycle(unittest.TestCase):
         main.emergency_active = False
         main.idle_timeout_sec = 60
         main._last_observed_idle_sec = None
+        main._activity_drop_streak = 0
+        main._low_idle_streak = 0
 
     def test_idle_pending_waits_for_selected_content_before_playing_state(self):
         self._configure_common()
@@ -137,6 +143,23 @@ class TestRunStateCycle(unittest.TestCase):
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
         self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
+    def test_playing_hides_idle_overlay_when_selected_content_has_no_resolved_name(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 90.0
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = {"item_type": "media", "local_path": "C:/media/dashboard.mp4"}
+
+        fake_idle_background = Mock()
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", fake_idle_background), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        fake_idle_background.hide.assert_called_once()
 
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):
         self._configure_common()

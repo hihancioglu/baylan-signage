@@ -2436,8 +2436,14 @@ def run_state_cycle():
     played_for_sec = time.monotonic() - playing_started_at
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
     active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
-    if current_state == ClientState.PLAYING and playback.current_content_name():
-        log_debug(f"state_cycle PLAYING visible_content | content={playback.current_content_name()} played_for_sec={played_for_sec:.3f} type={active_item_type}")
+    has_selected_content = _playback_has_selected_content()
+    content_name = playback.current_content_name()
+    if current_state == ClientState.PLAYING and has_selected_content:
+        log_debug(
+            "state_cycle PLAYING visible_content | "
+            f"content={content_name or '<unnamed-content>'} "
+            f"played_for_sec={played_for_sec:.3f} type={active_item_type}"
+        )
         if active_item_type != "widget" or played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
