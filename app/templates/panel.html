@@ -460,14 +460,14 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body text-center bg-dark-subtle">
-          <img id="device-screenshot-image" class="img-fluid rounded" alt="Cihaz ekran görüntüsü" />
+          <img id="device-screenshot-image" class="img-fluid rounded mb-2" alt="Cihaz ekran görüntüsü" />
+          <div id="device-screenshot-meta" class="small text-start text-dark"></div>
         </div>
       </div>
     </div>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 const hdr = { 'Content-Type': 'application/json' };
 let cachedPlaylists = [];
@@ -605,31 +605,60 @@ function renderDevicesTable(){
 
 async function showDeviceScreenshot(encodedHostname, triggerButton){
   const hostname = decodeURIComponent(encodedHostname || '');
-  const aliasInput = document.getElementById(`device-alias-${encodeURIComponent(hostname)}`);
-  const row = aliasInput?.closest('tr');
-  if(!row){
-    alert('Ekran görüntüsü alınacak satır bulunamadı.');
-    return;
-  }
-  if(typeof html2canvas !== 'function'){
-    alert('ScreenShot modülü yüklenemedi.');
+  if(!hostname){
+    alert('Geçersiz cihaz adı.');
     return;
   }
 
   const button = triggerButton || null;
   if(button) button.disabled = true;
-  try{
-    const canvas = await html2canvas(row, { backgroundColor: '#ffffff', scale: 2 });
-    const image = document.getElementById('device-screenshot-image');
-    const title = document.getElementById('device-screenshot-title');
-    if(image) image.src = canvas.toDataURL('image/png');
-    if(title) title.textContent = `${hostname || 'Cihaz'} - ScreenShot`;
 
-    const modalElement = document.getElementById('device-screenshot-modal');
-    if(modalElement) bootstrap.Modal.getOrCreateInstance(modalElement).show();
+  const image = document.getElementById('device-screenshot-image');
+  const title = document.getElementById('device-screenshot-title');
+  const meta = document.getElementById('device-screenshot-meta');
+  if(image) image.src = '';
+  if(title) title.textContent = `${hostname} - ScreenShot`; 
+  if(meta) meta.innerHTML = '<span class="text-secondary">Cihazdan Windows ekran görüntüsü isteniyor...</span>';
+
+  const modalElement = document.getElementById('device-screenshot-modal');
+  if(modalElement) bootstrap.Modal.getOrCreateInstance(modalElement).show();
+
+  try{
+    const captureResp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/screenshot/capture`, {});
+    if(!captureResp.ok){
+      alert(captureResp.error || 'ScreenShot komutu gönderilemedi.');
+      return;
+    }
+
+    const commandId = captureResp.command_id;
+    let screenshotResp = null;
+    for(let i = 0; i < 12; i++){
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const candidate = await jget(`/api/devices/${encodeURIComponent(hostname)}/screenshot`);
+      if(candidate?.ok && (!commandId || candidate.command_id === commandId)){
+        screenshotResp = candidate;
+        break;
+      }
+    }
+
+    if(!screenshotResp?.ok){
+      alert('Cihazdan ekran görüntüsü alınamadı. Cihaz online olduğundan emin olun.');
+      if(meta) meta.innerHTML = '<span class="text-danger">Ekran görüntüsü alınamadı.</span>';
+      return;
+    }
+
+    if(image) image.src = screenshotResp.image_url;
+    if(meta){
+      meta.innerHTML = `
+        <div><strong>Durum:</strong> ${escapeHtml(screenshotResp.state || '-')}</div>
+        <div><strong>Ekrandaki İçerik:</strong> ${escapeHtml(screenshotResp.content_name || '-')}</div>
+        <div><strong>Alınma Zamanı:</strong> ${escapeHtml(formatHeartbeatUtc3(screenshotResp.captured_at))}</div>
+      `;
+    }
   }catch(err){
     console.error(err);
     alert('ScreenShot alınırken hata oluştu.');
+    if(meta) meta.innerHTML = '<span class="text-danger">ScreenShot alınırken hata oluştu.</span>';
   }finally{
     if(button) button.disabled = false;
   }

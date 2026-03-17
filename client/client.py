@@ -1,6 +1,7 @@
 import argparse
 import json
 import hashlib
+import base64
 import importlib
 import importlib.util
 import logging
@@ -23,6 +24,7 @@ from urllib import request as urllib_request
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from logging.handlers import TimedRotatingFileHandler, WatchedFileHandler
 
 import socketio
@@ -526,6 +528,7 @@ SUPPORTED_COMMANDS = {
     "EMERGENCY_STOP",
     "RESTART_AGENT",
     "PING",
+    "CAPTURE_SCREEN",
 }
 
 
@@ -2126,6 +2129,16 @@ def _restart_agent():
     return "reboot_requested"
 
 
+def _capture_screen_jpeg_base64() -> str:
+    from PIL import ImageGrab
+
+    image = ImageGrab.grab(all_screens=True)
+    image = image.convert("RGB")
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def _handle_command(command):
     global emergency_active
     cmd_type = command.get("type")
@@ -2146,6 +2159,20 @@ def _handle_command(command):
         return "emergency_stopped"
     if cmd_type == "RESTART_AGENT":
         return _restart_agent()
+    if cmd_type == "CAPTURE_SCREEN":
+        image_base64 = _capture_screen_jpeg_base64()
+        sio.emit(
+            "device_screenshot",
+            {
+                "hostname": hostname,
+                "command_id": command.get("command_id"),
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "state": current_state.value,
+                "content_name": playback.current_content_name() or "",
+                "image_base64": image_base64,
+            },
+        )
+        return "screen_captured"
     return "ignored"
 
 
