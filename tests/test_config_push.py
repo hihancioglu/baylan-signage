@@ -219,9 +219,47 @@ class TestConfigPush(unittest.TestCase):
             db.close()
 
         cfg = self.main.build_config("pc-widget")
+        self.assertEqual(cfg["videos"][0]["display_name"], "Yeni Widget")
         self.assertEqual(cfg["videos"][0]["widget_payload"]["name"], "Yeni Widget")
         self.assertEqual(cfg["videos"][0]["widget_payload"]["content"], "<div>yeni</div>")
         self.assertIsNone(cfg["videos"][0]["widget_url"])
+
+    def test_build_config_media_item_uses_uploaded_original_name_for_display(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Media Group")
+            playlist = self.main.Playlist(name="Media Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-media")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.MediaAsset(
+                    original_name="Dokumanhane Tanitim.mp4",
+                    stored_name="41c6520085cd25ee7bd1.mp4",
+                    relative_path="media/41c6520085cd25ee7bd1.mp4",
+                    content_type="video/mp4",
+                    file_size=123,
+                    checksum="abc123",
+                )
+            )
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="media",
+                    media_type="video",
+                    path="media/41c6520085cd25ee7bd1.mp4",
+                    order_no=0,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-media")
+        self.assertEqual(cfg["videos"][0]["display_name"], "Dokumanhane Tanitim.mp4")
 
     def test_build_config_widget_payload_string_is_decoded_for_html_widget(self):
         db = self.main.db_session()
