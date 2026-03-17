@@ -238,12 +238,12 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         with patch("client.player.os.name", "nt"), patch.object(
             BorderlessFullscreenPlayer,
-            "_windows_active_monitor_origin",
-            return_value=(1920, 0),
+            "_windows_active_monitor_bounds",
+            return_value=(1920, 0, 1920, 1080),
         ):
             positioned = BorderlessFullscreenPlayer._apply_windows_monitor_position(flags)
 
-        self.assertEqual(positioned, ["--kiosk", "--window-position=1920,0", "--start-fullscreen"])
+        self.assertEqual(positioned, ["--kiosk", "--window-position=1920,0", "--window-size=1920,1080"])
 
     def test_build_widget_command_targets_active_monitor_for_windows_browser(self):
         player = self._build_player()
@@ -254,12 +254,33 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             return_value=("msedge", ["--kiosk", "--window-position=0,0", "--app={widget}"]),
         ), patch.object(
             BorderlessFullscreenPlayer,
-            "_windows_active_monitor_origin",
-            return_value=(1280, 0),
+            "_windows_active_monitor_bounds",
+            return_value=(1280, 0, 1280, 1024),
         ):
             command = player._build_widget_command("https://example.com")
 
-        self.assertEqual(command, ["msedge", "--kiosk", "--window-position=1280,0", "--app=https://example.com"])
+        self.assertEqual(
+            command,
+            [
+                "msedge",
+                "--kiosk",
+                "--window-position=1280,0",
+                "--app=https://example.com",
+                "--window-size=1280,1024",
+            ],
+        )
+
+    def test_apply_windows_monitor_position_rewrites_size_and_drops_fullscreen_flags(self):
+        flags = ["--kiosk", "--start-maximized", "--window-size=800,600", "--start-fullscreen"]
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            BorderlessFullscreenPlayer,
+            "_windows_active_monitor_bounds",
+            return_value=(2560, 0, 2560, 1440),
+        ):
+            positioned = BorderlessFullscreenPlayer._apply_windows_monitor_position(flags)
+
+        self.assertEqual(positioned, ["--kiosk", "--window-size=2560,1440", "--window-position=2560,0"])
     def test_build_widget_command_uses_windows_kiosk_browser_for_url(self):
         player = self._build_player()
 
