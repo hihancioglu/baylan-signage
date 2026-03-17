@@ -541,6 +541,22 @@ def _format_device_state(device) -> str:
     return device.last_state or ""
 
 
+def _resolve_media_display_name(raw_name: str | None, media_by_relative_path: dict[str, str], media_by_stored_name: dict[str, str]) -> str:
+    content_name = str(raw_name or "").strip()
+    if not content_name:
+        return ""
+
+    relative_path = _extract_relative_media_path(content_name)
+    if relative_path and relative_path in media_by_relative_path:
+        return media_by_relative_path[relative_path]
+
+    file_name = Path(content_name.split("?")[0]).name
+    if file_name and file_name in media_by_stored_name:
+        return media_by_stored_name[file_name]
+
+    return content_name
+
+
 def _idle_minutes_since_last_state(device):
     state = (device.last_state or "").upper()
     if state != "IDLE" or not device.last_state_at:
@@ -568,7 +584,9 @@ def _canonical_ad_username(username: str) -> str:
     return normalized
 
 
-def _serialize_device(db, device):
+def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_name=None):
+    media_by_relative_path = media_by_relative_path or {}
+    media_by_stored_name = media_by_stored_name or {}
     active_group = (
         db.query(Group.name)
         .join(DeviceGroup, DeviceGroup.group_id == Group.id)
@@ -589,6 +607,7 @@ def _serialize_device(db, device):
         "idle_minutes": _idle_minutes_since_last_state(device),
         "state_display": _format_device_state(device),
         "last_content_name": device.last_content_name,
+        "last_content_display_name": _resolve_media_display_name(device.last_content_name, media_by_relative_path, media_by_stored_name),
         "agent_version": device.agent_version,
         "updater_version": device.updater_version,
         "idle_mode_enabled": device.idle_mode_enabled,
@@ -1115,7 +1134,18 @@ def list_devices():
     db = db_session()
     try:
         devices = db.query(Device).all()
-        return jsonify([_serialize_device(db, d) for d in devices])
+        media_assets = db.query(MediaAsset.relative_path, MediaAsset.stored_name, MediaAsset.original_name).all()
+        media_by_relative_path = {media.relative_path: media.original_name for media in media_assets}
+        media_by_stored_name = {media.stored_name: media.original_name for media in media_assets}
+        return jsonify([
+            _serialize_device(
+                db,
+                d,
+                media_by_relative_path=media_by_relative_path,
+                media_by_stored_name=media_by_stored_name,
+            )
+            for d in devices
+        ])
     finally:
         db.close()
 

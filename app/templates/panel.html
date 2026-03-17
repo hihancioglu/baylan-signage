@@ -516,7 +516,7 @@ function getDeviceStateText(device){
 }
 
 function getDeviceContentText(device){
-  const lastContentName = (device.last_content_name || '').trim();
+  const lastContentName = (device.last_content_display_name || device.last_content_name || '').trim();
   if(lastContentName) return lastContentName;
 
   const stateDisplay = (device.state_display || '').trim();
