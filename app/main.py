@@ -535,12 +535,9 @@ def _normalize_ad_account_name(account_name: str) -> str:
 def _format_device_state(device) -> str:
     state = (device.last_state or "").upper()
     content_name = (device.last_content_name or "").strip()
-    os_name = (device.os_version or "").lower()
 
     if state in {"IDLE", "IDLE_PENDING", "PLAYING"} and content_name:
         return content_name
-    if "windows" in os_name:
-        return "Windows"
     return device.last_state or ""
 
 
@@ -839,6 +836,13 @@ def build_config(hostname):
         )
         widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
+        media_assets = db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
+        media_name_by_path = {
+            str(relative_path or "").strip(): str(original_name or "").strip()
+            for relative_path, original_name in media_assets
+            if str(relative_path or "").strip()
+        }
+
         videos = []
         for i in items:
             item_type = str(i.item_type or "media").strip().lower()
@@ -846,11 +850,13 @@ def build_config(hostname):
                 widget_def = widgets_by_id.get(i.widget_id) if i.widget_id else None
                 widget_payload = _decode_widget_payload(i.widget_payload)
                 widget_url = i.widget_url or i.source_url
+                widget_name = ""
 
                 if widget_def:
                     widget_type = str(widget_def.get("type") or "html").strip().lower()
+                    widget_name = str(widget_def.get("name") or "").strip()
                     widget_payload = {
-                        "name": widget_def.get("name") or "",
+                        "name": widget_name,
                         "type": widget_type,
                         "content": widget_def.get("content") or "",
                     }
@@ -868,6 +874,8 @@ def build_config(hostname):
                 videos.append(
                     {
                         "path": widget_url or i.path or i.widget_url or i.source_url,
+                        "display_name": widget_name
+                        or (str(widget_payload.get("name") or "").strip() if isinstance(widget_payload, dict) else ""),
                         "item_type": "widget",
                         "media_type": "widget",
                         "duration_sec": i.duration_sec,
@@ -885,6 +893,7 @@ def build_config(hostname):
             videos.append(
                 {
                     "path": i.path,
+                    "display_name": media_name_by_path.get(str(i.path).strip()) or Path(str(i.path)).name,
                     "item_type": "media",
                     "media_type": i.media_type or _media_kind_from_path(i.path),
                     "duration_sec": i.duration_sec,
@@ -901,6 +910,7 @@ def build_config(hostname):
                     {
                         "item_type": item.get("item_type") or "media",
                         "path": item.get("path"),
+                        "display_name": item.get("display_name"),
                         "media_type": item.get("media_type"),
                         "duration_sec": item.get("duration_sec") or 0,
                         "order_no": item.get("order_no") or 0,
@@ -919,6 +929,7 @@ def build_config(hostname):
                 {
                     "item_type": item.get("item_type") or "media",
                     "path": item.get("path"),
+                    "display_name": item.get("display_name"),
                     "media_type": item.get("media_type"),
                     "duration_sec": item.get("duration_sec") or 0,
                     "order_no": item.get("order_no") or 0,
