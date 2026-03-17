@@ -112,6 +112,24 @@ def _extract_relative_media_path(media_url: str) -> str | None:
     return unquote(parsed.path[len(media_prefix):]) or None
 
 
+def _build_media_display_name_lookup(media_assets: list[tuple[str, str, str]]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for relative_path, stored_name, original_name in media_assets:
+        original = str(original_name or "").strip()
+        if not original:
+            continue
+
+        for raw_key in (relative_path, stored_name):
+            key = str(raw_key or "").strip()
+            if not key:
+                continue
+            lookup.setdefault(key, original)
+            lookup.setdefault(unquote(key), original)
+            lookup.setdefault(Path(key.split("?")[0]).name, original)
+
+    return lookup
+
+
 def _safe_update_filename(original_name: str) -> str:
     ext = Path(original_name or "").suffix.lower() or ".bin"
     return f"{uuid.uuid4().hex}{ext}"
@@ -554,6 +572,13 @@ def _resolve_media_display_name(raw_name: str | None, media_by_relative_path: di
     if file_name and file_name in media_by_stored_name:
         return media_by_stored_name[file_name]
 
+    decoded_content_name = unquote(content_name)
+    decoded_file_name = Path(decoded_content_name.split("?")[0]).name
+    if decoded_content_name in media_by_relative_path:
+        return media_by_relative_path[decoded_content_name]
+    if decoded_file_name and decoded_file_name in media_by_stored_name:
+        return media_by_stored_name[decoded_file_name]
+
     return content_name
 
 
@@ -855,12 +880,8 @@ def build_config(hostname):
         )
         widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
 
-        media_assets = db.query(MediaAsset.relative_path, MediaAsset.original_name).all()
-        media_name_by_path = {
-            str(relative_path or "").strip(): str(original_name or "").strip()
-            for relative_path, original_name in media_assets
-            if str(relative_path or "").strip()
-        }
+        media_assets = db.query(MediaAsset.relative_path, MediaAsset.stored_name, MediaAsset.original_name).all()
+        media_name_by_path = _build_media_display_name_lookup(media_assets)
 
         videos = []
         for i in items:
@@ -909,10 +930,22 @@ def build_config(hostname):
             if not i.path:
                 continue
 
+            raw_item_path = str(i.path).strip()
+            decoded_item_path = unquote(raw_item_path)
+            item_file_name = Path(raw_item_path.split("?")[0]).name
+            decoded_item_file_name = Path(decoded_item_path.split("?")[0]).name
+
             videos.append(
                 {
                     "path": i.path,
-                    "display_name": media_name_by_path.get(str(i.path).strip()) or Path(str(i.path)).name,
+                    "display_name": (
+                        media_name_by_path.get(raw_item_path)
+                        or media_name_by_path.get(decoded_item_path)
+                        or media_name_by_path.get(item_file_name)
+                        or media_name_by_path.get(decoded_item_file_name)
+                        or decoded_item_file_name
+                        or item_file_name
+                    ),
                     "item_type": "media",
                     "media_type": i.media_type or _media_kind_from_path(i.path),
                     "duration_sec": i.duration_sec,
@@ -1135,14 +1168,13 @@ def list_devices():
     try:
         devices = db.query(Device).all()
         media_assets = db.query(MediaAsset.relative_path, MediaAsset.stored_name, MediaAsset.original_name).all()
-        media_by_relative_path = {media.relative_path: media.original_name for media in media_assets}
-        media_by_stored_name = {media.stored_name: media.original_name for media in media_assets}
+        media_name_lookup = _build_media_display_name_lookup(media_assets)
         return jsonify([
             _serialize_device(
                 db,
                 d,
-                media_by_relative_path=media_by_relative_path,
-                media_by_stored_name=media_by_stored_name,
+                media_by_relative_path=media_name_lookup,
+                media_by_stored_name=media_name_lookup,
             )
             for d in devices
         ])
