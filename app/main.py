@@ -1,6 +1,7 @@
 import eventlet
 eventlet.monkey_patch()
 
+import base64
 import hashlib
 import itertools
 import json
@@ -14,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, session, redirect
+from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, url_for, session, redirect
 from flask_socketio import SocketIO, emit, join_room
 from sqlalchemy import func
 
@@ -64,6 +65,9 @@ ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 UPDATE_ROOT.mkdir(parents=True, exist_ok=True)
+SCREENSHOT_ROOT = Path(os.getenv("SCREENSHOT_ROOT", "data/screenshots")).resolve()
+SCREENSHOT_ROOT.mkdir(parents=True, exist_ok=True)
+LATEST_SCREENSHOTS = {}  # hostname -> metadata
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
@@ -75,6 +79,7 @@ COMMAND_TYPES = {
     "EMERGENCY_STOP",
     "RESTART_AGENT",
     "PING",
+    "CAPTURE_SCREEN",
 }
 
 WORK_ORDER_ALERT_ACTIVE_KEY = "work_order_alert_active"
@@ -1149,13 +1154,43 @@ def handle_command_ack(data):
     db = db_session()
     try:
         status = (data or {}).get("status") or "ok"
-        error_detail = (data or {}).get("error")
+        error_detail = (data or {}).get("detail") or (data or {}).get("error")
         exists = db.query(CommandAck).filter_by(command_id=command_id, hostname=hostname).first()
         if not exists:
             db.add(CommandAck(command_id=command_id, hostname=hostname, status=status, error_detail=error_detail))
             db.commit()
     finally:
         db.close()
+
+
+@socketio.on("device_screenshot")
+def handle_device_screenshot(data):
+    hostname = sid_to_host.get(request.sid) or (data or {}).get("hostname")
+    image_base64 = (data or {}).get("image_base64") or ""
+    if not hostname or not image_base64:
+        return
+
+    try:
+        image_bytes = base64.b64decode(image_base64, validate=True)
+    except Exception:
+        return
+
+    file_name = f"{hostname}.jpg"
+    file_path = SCREENSHOT_ROOT / file_name
+    try:
+        file_path.write_bytes(image_bytes)
+    except OSError:
+        return
+
+    LATEST_SCREENSHOTS[hostname] = {
+        "hostname": hostname,
+        "captured_at": (data or {}).get("captured_at") or _utc_now_iso(),
+        "command_id": (data or {}).get("command_id"),
+        "state": (data or {}).get("state") or "",
+        "content_name": (data or {}).get("content_name") or "",
+        "file_name": file_name,
+        "updated_at": _utc_now_iso(),
+    }
 
 
 def offline_checker():
@@ -2581,6 +2616,68 @@ def set_work_order_alert_state():
         db.close()
 
 
+@app.post("/api/devices/<hostname>/screenshot/capture")
+def request_device_screenshot(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    ttl_sec = int(payload.get("ttl_sec") or 20)
+    cmd = build_command_contract(
+        command_type="CAPTURE_SCREEN",
+        payload={},
+        ttl_sec=max(10, ttl_sec),
+        priority=8,
+    )
+
+    db = db_session()
+    try:
+        _emit_command(db, cmd, "device", hostname)
+    finally:
+        db.close()
+
+    return jsonify({"ok": True, "command_id": cmd["command_id"]})
+
+
+@app.get("/api/devices/<hostname>/screenshot")
+def get_device_screenshot(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    meta = LATEST_SCREENSHOTS.get(hostname)
+    if not meta:
+        return jsonify({"ok": False, "error": "screenshot_not_found"}), 404
+
+    image_url = url_for("get_device_screenshot_image", hostname=hostname)
+    return jsonify(
+        {
+            "ok": True,
+            "hostname": hostname,
+            "captured_at": meta.get("captured_at"),
+            "command_id": meta.get("command_id"),
+            "state": meta.get("state") or "-",
+            "content_name": meta.get("content_name") or "-",
+            "image_url": f"{image_url}?ts={int(time.time())}",
+        }
+    )
+
+
+@app.get("/api/devices/<hostname>/screenshot/image")
+def get_device_screenshot_image(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    meta = LATEST_SCREENSHOTS.get(hostname)
+    if not meta:
+        return jsonify({"error": "screenshot_not_found"}), 404
+
+    file_path = SCREENSHOT_ROOT / str(meta.get("file_name") or "")
+    if not file_path.exists():
+        return jsonify({"error": "screenshot_not_found"}), 404
+
+    return send_file(file_path, mimetype="image/jpeg")
+
+
 @app.get("/api/commands/logs")
 def command_logs():
     if _auth_failed():
@@ -2620,6 +2717,7 @@ def push_device_command(hostname):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
+    body = request.get_json(silent=True) or {}
     command_type = body.get("type")
     if command_type not in COMMAND_TYPES:
         return jsonify({"error": "unsupported command type"}), 400
@@ -2644,6 +2742,7 @@ def push_group_command(group_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
+    body = request.get_json(silent=True) or {}
     command_type = body.get("type")
     if command_type not in COMMAND_TYPES:
         return jsonify({"error": "unsupported command type"}), 400
