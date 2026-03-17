@@ -564,20 +564,42 @@ def _resolve_media_display_name(raw_name: str | None, media_by_relative_path: di
     if not content_name:
         return ""
 
-    relative_path = _extract_relative_media_path(content_name)
-    if relative_path and relative_path in media_by_relative_path:
-        return media_by_relative_path[relative_path]
+    lookup_candidates: list[str] = []
 
-    file_name = Path(content_name.split("?")[0]).name
-    if file_name and file_name in media_by_stored_name:
-        return media_by_stored_name[file_name]
+    def _add_candidate(value: str | None):
+        key = str(value or "").strip()
+        if key and key not in lookup_candidates:
+            lookup_candidates.append(key)
 
     decoded_content_name = unquote(content_name)
-    decoded_file_name = Path(decoded_content_name.split("?")[0]).name
-    if decoded_content_name in media_by_relative_path:
-        return media_by_relative_path[decoded_content_name]
-    if decoded_file_name and decoded_file_name in media_by_stored_name:
-        return media_by_stored_name[decoded_file_name]
+    relative_path = _extract_relative_media_path(content_name)
+    decoded_relative_path = _extract_relative_media_path(decoded_content_name)
+    parsed_path = urlparse(content_name).path
+    decoded_parsed_path = unquote(parsed_path)
+
+    for candidate in (
+        content_name,
+        decoded_content_name,
+        relative_path,
+        decoded_relative_path,
+        parsed_path,
+        decoded_parsed_path,
+    ):
+        _add_candidate(candidate)
+
+    for candidate in list(lookup_candidates):
+        normalized = candidate.split("?", 1)[0]
+        _add_candidate(normalized)
+        _add_candidate(normalized.replace("\\", "/"))
+
+    for candidate in lookup_candidates:
+        if candidate in media_by_relative_path:
+            return media_by_relative_path[candidate]
+
+    for candidate in lookup_candidates:
+        filename = candidate.split("/")[-1].split("\\")[-1]
+        if filename and filename in media_by_stored_name:
+            return media_by_stored_name[filename]
 
     return content_name
 
