@@ -708,6 +708,68 @@ class TestConfigPush(unittest.TestCase):
         self.assertFalse(mock_emit_command.called)
         mock_emit_config.assert_called_once_with(["pc-ann-unpub"])
 
+    def test_list_devices_resolves_url_encoded_content_name_to_original_name(self):
+        db = self.main.db_session()
+        try:
+            device = self.main.Device(
+                hostname="pc-encoded",
+                is_online=True,
+                last_state="IDLE",
+                last_content_name="http://panel.local/media/Kampanya%20Videosu%20Final.mp4",
+            )
+            asset = self.main.MediaAsset(
+                original_name="Kampanya Videosu Final.mp4",
+                stored_name="abc123.mp4",
+                relative_path="Kampanya Videosu Final.mp4",
+                content_type="video/mp4",
+            )
+            db.add_all([device, asset])
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().get("/api/devices")
+
+        self.assertEqual(resp.status_code, 200)
+        devices = {row.get("hostname"): row for row in (resp.get_json() or [])}
+        self.assertEqual(devices["pc-encoded"].get("last_content_display_name"), "Kampanya Videosu Final.mp4")
+
+    def test_build_config_resolves_encoded_playlist_path_display_name(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Encoded Path Group")
+            playlist = self.main.Playlist(name="Encoded Path Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-encoded-path")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.MediaAsset(
+                    original_name="Ağır Sanayi Sunumu.mp4",
+                    stored_name="stored-video.mp4",
+                    relative_path="media/Ağır Sanayi Sunumu.mp4",
+                    content_type="video/mp4",
+                )
+            )
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="media",
+                    media_type="video",
+                    path="media/A%C4%9F%C4%B1r%20Sanayi%20Sunumu.mp4",
+                    order_no=0,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-encoded-path")
+        self.assertEqual(cfg["videos"][0]["display_name"], "Ağır Sanayi Sunumu.mp4")
+
 
 if __name__ == "__main__":
     unittest.main()
