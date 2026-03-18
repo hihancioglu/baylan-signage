@@ -101,7 +101,7 @@
                 <h3 class="h5 mt-4">Sistemdeki Medyalar</h3>
                 <div class="table-responsive mb-4">
                   <table class="table table-striped align-middle">
-                    <thead class="table-light"><tr><th>Ad</th><th>Boyut</th><th>Eklenme</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>Ad</th><th>Boyut</th><th>Eklenme (UTC+3)</th><th>İşlem</th></tr></thead>
                     <tbody id="media-body"></tbody>
                   </table>
                 </div>
@@ -337,7 +337,7 @@
                 <h3 class="h5">Aktif Duyurular</h3>
                 <div class="table-responsive">
                   <table class="table table-sm align-middle mb-0">
-                    <thead class="table-light"><tr><th>ID</th><th>Başlık</th><th>Mesaj</th><th>Hedef</th><th>Yayına Alınma</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>ID</th><th>Başlık</th><th>Mesaj</th><th>Hedef</th><th>Yayına Alınma (UTC+3)</th><th>İşlem</th></tr></thead>
                     <tbody id="active-announcements-body"><tr><td colspan="6" class="text-secondary small">Aktif duyuru yok</td></tr></tbody>
                   </table>
                 </div>
@@ -532,7 +532,7 @@ async function jdelete(url){
   return r.json();
 }
 
-function formatHeartbeatUtc3(value){
+function formatUtc3DateTime(value){
   if(!value) return '-';
   const date = new Date(value);
   if(Number.isNaN(date.getTime())) return value;
@@ -545,6 +545,10 @@ function formatHeartbeatUtc3(value){
     minute: '2-digit',
     second: '2-digit'
   }).format(date);
+}
+
+function formatHeartbeatUtc3(value){
+  return formatUtc3DateTime(value);
 }
 
 function getDeviceStateText(device){
@@ -768,7 +772,7 @@ async function loadMedia(){
   (assets || []).forEach(a => {
     const tr = document.createElement('tr');
     const mb = a.file_size ? `${(a.file_size / (1024*1024)).toFixed(1)} MB` : '-';
-    tr.innerHTML = `<td>${escapeHtml(a.name)}</td><td>${mb}</td><td>${a.created_at || ''}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="previewMedia(${a.id})">Preview</button><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></div></td>`;
+    tr.innerHTML = `<td>${escapeHtml(a.name)}</td><td>${mb}</td><td>${escapeHtml(formatUtc3DateTime(a.created_at))}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="previewMedia(${a.id})">Preview</button><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></div></td>`;
     body.appendChild(tr);
   });
 }
@@ -1725,7 +1729,7 @@ async function loadAnnouncements(){
   activeBody.innerHTML = '';
   (activeRows || []).forEach(item=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${item.published_at || '-'}</td><td><div class="d-flex gap-1 flex-wrap"><button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button><button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
+    tr.innerHTML = `<td>${item.id}</td><td>${item.title || '-'}</td><td>${item.message || '-'}</td><td>${formatAnnouncementTarget(item)}</td><td>${escapeHtml(formatUtc3DateTime(item.published_at))}</td><td><div class="d-flex gap-1 flex-wrap"><button class="btn btn-sm btn-outline-danger" onclick="unpublishAnnouncement(${item.id})">Yayından Kaldır</button><button class="btn btn-sm btn-outline-secondary" onclick="deleteAnnouncement(${item.id})">Sil</button></div></td>`;
     activeBody.appendChild(tr);
   });
   if(!activeBody.innerHTML){
