@@ -1463,11 +1463,14 @@ class PlaybackController:
                     loop_mode = self._loop_mode
 
                 if sync_in_progress:
-                    if not self.overlay.is_active():
-                        self.player.stop()
-                        self.overlay.show(self._overlay_text())
-                    else:
-                        self.overlay.update(self._overlay_text())
+                    if not playlist_entries:
+                        if not self.overlay.is_active():
+                            self.player.stop()
+                            self.overlay.show(self._overlay_text())
+                        else:
+                            self.overlay.update(self._overlay_text())
+                    elif self.overlay.is_active():
+                        self.overlay.hide()
                 elif self.overlay.is_active():
                     self.overlay.hide()
 
