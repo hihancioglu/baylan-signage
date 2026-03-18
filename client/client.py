@@ -884,18 +884,18 @@ class GuiRuntime:
 
             close_btn = tk.Button(
                 container,
-                text="Kapat",
+                text="Kapat / Geri",
                 command=_close_call_menu,
-                font=("Arial", 22, "bold"),
+                font=("Arial", 30, "bold"),
                 bg="#334155",
                 fg="white",
                 activebackground="#1E293B",
                 activeforeground="white",
                 relief="flat",
-                padx=16,
-                pady=10,
+                padx=24,
+                pady=16,
             )
-            close_btn.pack(pady=(18, 20))
+            close_btn.pack(fill="x", padx=28, pady=(18, 20))
 
         def _emit_call_cancel():
             try:
