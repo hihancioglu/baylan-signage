@@ -1329,6 +1329,63 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertGreaterEqual(player.play_blocking.call_count, 1)
         sleep_mock.assert_any_call(0.25)
 
+    def test_sync_in_background_keeps_playback_running_when_media_exists(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_image.return_value = False
+        player._is_video.return_value = True
+        player.last_play_was_interrupted.return_value = False
+
+        def _single_playback(*args, **kwargs):
+            controller._running = False
+            return True
+
+        player.play_blocking.side_effect = _single_playback
+        controller.player = player
+        controller.overlay = unittest.mock.Mock()
+        controller.overlay.is_active.return_value = False
+        controller._sync_in_progress = True
+
+        with patch.object(
+            controller,
+            "_effective_playlist",
+            return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}],
+        ), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        player.stop.assert_not_called()
+        controller.overlay.show.assert_not_called()
+
+    def test_sync_overlay_shown_when_no_media_available(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.player = unittest.mock.Mock()
+        controller.overlay = unittest.mock.Mock()
+        controller.overlay.is_active.return_value = False
+        controller._sync_in_progress = True
+
+        def _stop_wait(_seconds):
+            controller._running = False
+            return None
+
+        with patch.object(controller, "_effective_playlist", return_value=[]), patch(
+            "time.sleep", side_effect=_stop_wait
+        ):
+            controller._running = True
+            controller._run()
+
+        controller.player.stop.assert_called_once()
+        controller.overlay.show.assert_called_once()
+
 
     def test_is_newer_version_handles_build_prefix_and_unknown_marker(self):
         from client.client import _is_newer_version
