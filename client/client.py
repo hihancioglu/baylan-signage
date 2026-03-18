@@ -886,16 +886,16 @@ class GuiRuntime:
                 container,
                 text="Kapat / Geri",
                 command=_close_call_menu,
-                font=("Arial", 30, "bold"),
+                font=("Arial", 24, "bold"),
                 bg="#334155",
                 fg="white",
                 activebackground="#1E293B",
                 activeforeground="white",
                 relief="flat",
-                padx=24,
-                pady=16,
+                padx=18,
+                pady=22,
             )
-            close_btn.pack(fill="x", padx=28, pady=(18, 20))
+            close_btn.pack(padx=28, pady=(18, 20), ipadx=56)
 
         def _emit_call_cancel():
             try:
