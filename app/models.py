@@ -146,3 +146,14 @@ class Announcement(Base):
     published_at = Column(DateTime(timezone=True))
     unpublished_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CallRequest(Base):
+    __tablename__ = "call_requests"
+
+    id = Column(Integer, primary_key=True)
+    hostname = Column(String(128), nullable=False, index=True)
+    requested_role = Column(String(64), nullable=False)
+    status = Column(String(32), default="active", nullable=False)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    closed_at = Column(DateTime(timezone=True))
