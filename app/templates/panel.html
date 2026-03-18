@@ -60,6 +60,7 @@
           <button class="nav-link text-start" data-section="section-playlists" type="button">Playlist Yönetimi</button>
           <button class="nav-link text-start" data-section="section-widgets" type="button">Widget Yönetimi</button>
           <button class="nav-link text-start" data-section="section-announcement" type="button">Acil Duyuru</button>
+          <button class="nav-link text-start" data-section="section-call-management" type="button">Çağrı Yönetimi</button>
           <button class="nav-link text-start" data-section="section-logs" type="button">Operasyon Logları</button>
           <button class="nav-link text-start" data-section="section-updater" type="button">Updater</button>
         </div>
@@ -356,7 +357,36 @@
             </div>
           </div>
 
-          
+          <div class="tab-section d-none" id="section-call-management">
+            <div class="card panel-card mb-3">
+              <div class="card-body">
+                <h2 class="h4 mb-3">Çağrı Yönetimi</h2>
+                <p class="text-secondary small mb-3">Çağır özelliğini sadece seçili ekranlarda aktif edin. Aktif moddaki cihazlarda sağ üstte "Çağır" butonu görünür.</p>
+                <div class="row g-2 align-items-center mb-3">
+                  <div class="col-12 col-md-8">
+                    <label class="form-label">Çağrı özelliği aktif cihazlar</label>
+                    <select id="call-feature-hostnames" class="form-select" multiple size="8"></select>
+                    <div class="form-text">Birden fazla cihaz seçmek için Ctrl/Cmd + tıklayın.</div>
+                  </div>
+                  <div class="col-12 col-md-4 d-flex flex-column gap-2">
+                    <button class="btn btn-primary" onclick="saveCallFeatureSettings()">Kaydet</button>
+                    <button class="btn btn-outline-secondary" onclick="loadCallManagement()">Listeyi Yenile</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card panel-card">
+              <div class="card-body">
+                <h3 class="h5 mb-3">Aktif Çağrılar</h3>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>ID</th><th>Ekran</th><th>Kime</th><th>Çağrı Zamanı (UTC+3)</th><th>İşlem</th></tr></thead>
+                    <tbody id="call-active-body"><tr><td colspan="5" class="text-secondary small">Aktif çağrı yok</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div class="tab-section d-none" id="section-updater">
             <div class="card panel-card mb-3">
@@ -499,6 +529,7 @@ let cachedDevices = [];
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
 let cachedWidgets = [];
+let cachedCallManagement = { enabled_hostnames: [], active_calls: [] };
 let deviceSortField = 'is_online';
 let deviceSortDirection = 'desc';
 
@@ -706,6 +737,7 @@ async function loadDevices(){
   if(deviceSelect){
     deviceSelect.innerHTML = (devices||[]).map(d=>`<option value="${d.hostname}">${d.hostname}</option>`).join('');
   }
+  renderCallManagement();
 }
 
 async function saveDeviceAlias(encodedHostname){
@@ -1737,6 +1769,78 @@ async function loadAnnouncements(){
   }
 }
 
+function selectedCallFeatureHostnames(){
+  const select = document.getElementById('call-feature-hostnames');
+  if(!select) return [];
+  return Array.from(select.selectedOptions || []).map(opt => String(opt.value || '').trim()).filter(Boolean);
+}
+
+function renderCallManagement(){
+  const select = document.getElementById('call-feature-hostnames');
+  if(select){
+    const enabledSet = new Set(cachedCallManagement.enabled_hostnames || []);
+    const allDevices = [...(cachedDevices || [])].sort((a, b) => String(a.hostname || '').localeCompare(String(b.hostname || ''), 'tr-TR'));
+    select.innerHTML = allDevices.map(device => {
+      const host = String(device.hostname || '').trim();
+      if(!host) return '';
+      const alias = String(device.alias || '').trim();
+      const label = alias ? `${alias} (${host})` : host;
+      return `<option value="${escapeHtml(host)}" ${enabledSet.has(host) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+  }
+
+  const body = document.getElementById('call-active-body');
+  if(!body) return;
+  body.innerHTML = '';
+  (cachedCallManagement.active_calls || []).forEach(call => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${call.id}</td><td>${escapeHtml(call.hostname || '-')}</td><td>${escapeHtml(call.requested_role || '-')}</td><td>${escapeHtml(formatUtc3DateTime(call.requested_at))}</td><td><button class="btn btn-sm btn-outline-danger" onclick="cancelActiveCall(${Number(call.id)})">İptal Et</button></td>`;
+    body.appendChild(tr);
+  });
+  if(!body.innerHTML){
+    body.innerHTML = '<tr><td colspan="5" class="text-secondary small">Aktif çağrı yok</td></tr>';
+  }
+}
+
+async function loadCallManagement(){
+  const resp = await jget('/api/call-management');
+  if(!resp?.ok){
+    alert(resp?.error || 'Çağrı yönetimi bilgisi alınamadı');
+    return;
+  }
+  cachedCallManagement = {
+    enabled_hostnames: resp.enabled_hostnames || [],
+    active_calls: resp.active_calls || []
+  };
+  renderCallManagement();
+}
+
+async function saveCallFeatureSettings(){
+  const enabledHostnames = selectedCallFeatureHostnames();
+  const resp = await jpatch('/api/call-management', {enabled_hostnames: enabledHostnames});
+  if(!resp?.ok){
+    alert(resp?.error || 'Çağrı ayarları kaydedilemedi');
+    return;
+  }
+  cachedCallManagement.enabled_hostnames = resp.enabled_hostnames || [];
+  alert('Çağrı özelliği ayarları kaydedildi.');
+  renderCallManagement();
+}
+
+async function cancelActiveCall(callId){
+  if(!callId){
+    alert('Geçersiz çağrı');
+    return;
+  }
+  if(!confirm('Aktif çağrı kapatılsın mı?')) return;
+  const resp = await jpost(`/api/call-management/calls/${callId}/cancel`, {});
+  if(!resp?.ok){
+    alert(resp?.error || 'Çağrı kapatılamadı');
+    return;
+  }
+  await loadCallManagement();
+}
+
 function formatRolloutWait(seconds){
   if(seconds === null || seconds === undefined) return '-';
   const total = Math.max(0, Number(seconds) || 0);
@@ -1935,6 +2039,7 @@ async function init(){
   updateWidgetPreview();
   await loadLogs();
   await loadAnnouncements();
+  await loadCallManagement();
   onTargetChange();
 onAnnouncementModeChange();
 document.getElementById('announce-mode').addEventListener('change', onAnnouncementModeChange);
@@ -1943,6 +2048,7 @@ document.getElementById('announce-mode').addEventListener('change', onAnnounceme
   await loadClientUpdater();
   setInterval(loadDevices, 15000);
   setInterval(loadLogs, 15000);
+  setInterval(loadCallManagement, 10000);
 }
 init();
 </script>

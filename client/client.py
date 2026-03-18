@@ -520,6 +520,8 @@ work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
 announcement_active = False
 announcement_message = ""
 announcement_display_mode = "normal"
+call_feature_enabled = False
+active_call = None
 playing_started_at = 0.0
 
 SUPPORTED_COMMANDS = {
@@ -597,6 +599,7 @@ class GuiRuntime:
         self._shutdown = False
         self._download_overlay_visible = False
         self._work_order_overlay_visible = False
+        self._call_overlay_visible = False
         self._state_lock = threading.Lock()
 
     def start(self):
@@ -633,6 +636,14 @@ class GuiRuntime:
         with self._state_lock:
             self._work_order_overlay_visible = visible
 
+    def call_overlay_active(self) -> bool:
+        with self._state_lock:
+            return self._call_overlay_visible
+
+    def _set_call_overlay_state(self, visible: bool):
+        with self._state_lock:
+            self._call_overlay_visible = visible
+
     def _run(self):
         try:
             import tkinter as tk
@@ -651,6 +662,12 @@ class GuiRuntime:
         work_order_window = None
         work_order_label = None
         work_order_container = None
+        call_window = None
+        call_menu_window = None
+        call_cancel_button = None
+        call_status_label = None
+        call_feature_active = False
+        call_has_active_request = False
 
         def _work_order_geometry(screen_w: int, screen_h: int) -> str:
             panel_w = max(640, int(screen_w * 0.7))
@@ -795,6 +812,177 @@ class GuiRuntime:
             work_order_container = None
             self._set_work_order_overlay_state(False)
 
+        def _close_call_menu():
+            nonlocal call_menu_window
+            if call_menu_window is not None and call_menu_window.winfo_exists():
+                call_menu_window.destroy()
+            call_menu_window = None
+
+        def _emit_call_request(role: str):
+            role_value = str(role or "").strip()
+            if not role_value:
+                return
+            try:
+                sio.emit("call_request_create", {"hostname": hostname, "requested_role": role_value})
+            except Exception as exc:
+                log_warning(f"call_request_create emit failed | error={exc}")
+            finally:
+                _close_call_menu()
+
+        def _open_call_menu():
+            nonlocal call_menu_window
+            if call_menu_window is not None and call_menu_window.winfo_exists():
+                try:
+                    call_menu_window.lift()
+                except tk.TclError:
+                    pass
+                return
+
+            parent = call_window if call_window is not None and call_window.winfo_exists() else root
+            call_menu_window = tk.Toplevel(parent)
+            call_menu_window.configure(bg="#0F172A")
+            call_menu_window.attributes("-topmost", True)
+            call_menu_window.overrideredirect(True)
+            call_menu_window.title("Baylan Çağrı Menüsü")
+
+            screen_w = call_menu_window.winfo_screenwidth()
+            screen_h = call_menu_window.winfo_screenheight()
+            panel_w = min(900, max(640, int(screen_w * 0.58)))
+            panel_h = min(760, max(520, int(screen_h * 0.56)))
+            x = max(20, (screen_w - panel_w) // 2)
+            y = max(20, (screen_h - panel_h) // 2)
+            call_menu_window.geometry(f"{panel_w}x{panel_h}+{x}+{y}")
+
+            container = tk.Frame(call_menu_window, bg="#0F172A", bd=8, relief="ridge")
+            container.pack(fill="both", expand=True)
+
+            title = tk.Label(
+                container,
+                text="Kime çağrı açılacak?",
+                fg="white",
+                bg="#0F172A",
+                font=("Arial", 38, "bold"),
+            )
+            title.pack(pady=(24, 16))
+
+            for role in ("Vardiya Amiri", "Bilgi İşlem", "Bakımcı"):
+                role_btn = tk.Button(
+                    container,
+                    text=role,
+                    command=lambda value=role: _emit_call_request(value),
+                    font=("Arial", 34, "bold"),
+                    bg="#0284C7",
+                    fg="white",
+                    activebackground="#0369A1",
+                    activeforeground="white",
+                    relief="flat",
+                    padx=24,
+                    pady=18,
+                )
+                role_btn.pack(fill="x", padx=28, pady=10)
+
+            close_btn = tk.Button(
+                container,
+                text="Kapat",
+                command=_close_call_menu,
+                font=("Arial", 22, "bold"),
+                bg="#334155",
+                fg="white",
+                activebackground="#1E293B",
+                activeforeground="white",
+                relief="flat",
+                padx=16,
+                pady=10,
+            )
+            close_btn.pack(pady=(18, 20))
+
+        def _emit_call_cancel():
+            try:
+                sio.emit("call_request_cancel", {"hostname": hostname})
+            except Exception as exc:
+                log_warning(f"call_request_cancel emit failed | error={exc}")
+
+        def _show_call_overlay(enabled: bool, has_active: bool, active_role: str = ""):
+            nonlocal call_window, call_cancel_button, call_status_label, call_feature_active, call_has_active_request
+            call_feature_active = bool(enabled)
+            call_has_active_request = bool(has_active)
+
+            if not call_feature_active:
+                _hide_call_overlay()
+                return
+
+            if call_window is None or not call_window.winfo_exists():
+                call_window = tk.Toplevel(root)
+                call_window.configure(bg="#000000")
+                call_window.attributes("-topmost", True)
+                call_window.overrideredirect(True)
+                call_window.title("Baylan Çağır Paneli")
+                screen_w = call_window.winfo_screenwidth()
+                panel_w = 340
+                panel_h = 132
+                x = max(16, screen_w - panel_w - 16)
+                y = 16
+                call_window.geometry(f"{panel_w}x{panel_h}+{x}+{y}")
+
+                call_button = tk.Canvas(
+                    call_window,
+                    width=104,
+                    height=104,
+                    bg="#000000",
+                    highlightthickness=0,
+                    bd=0,
+                )
+                circle = call_button.create_oval(2, 2, 102, 102, fill="#2563EB", outline="#1D4ED8", width=3)
+                label = call_button.create_text(52, 52, text="Çağır", fill="white", font=("Arial", 20, "bold"))
+                call_button.tag_bind(circle, "<Button-1>", lambda _e: _open_call_menu())
+                call_button.tag_bind(label, "<Button-1>", lambda _e: _open_call_menu())
+                call_button.place(x=14, y=14)
+
+                call_cancel_button = tk.Button(
+                    call_window,
+                    text="İptal",
+                    command=_emit_call_cancel,
+                    font=("Arial", 24, "bold"),
+                    bg="#DC2626",
+                    fg="white",
+                    activebackground="#B91C1C",
+                    activeforeground="white",
+                    relief="flat",
+                    borderwidth=0,
+                )
+                call_status_label = tk.Label(
+                    call_window,
+                    text="",
+                    fg="#F8FAFC",
+                    bg="#000000",
+                    font=("Arial", 15, "bold"),
+                    justify="left",
+                    wraplength=190,
+                )
+                call_status_label.place(x=130, y=20, width=196, height=92)
+
+            if call_cancel_button is not None:
+                if has_active:
+                    call_cancel_button.place(x=132, y=12, width=94, height=94)
+                else:
+                    call_cancel_button.place_forget()
+
+            if call_status_label is not None:
+                status_text = f"Aktif çağrı:\n{active_role}" if has_active and active_role else "Aktif çağrı yok"
+                call_status_label.config(text=status_text)
+
+            self._set_call_overlay_state(True)
+
+        def _hide_call_overlay():
+            nonlocal call_window, call_menu_window, call_cancel_button, call_status_label
+            _close_call_menu()
+            if call_window is not None and call_window.winfo_exists():
+                call_window.destroy()
+            call_window = None
+            call_cancel_button = None
+            call_status_label = None
+            self._set_call_overlay_state(False)
+
         _next_tick = None
 
         def process_events():
@@ -808,6 +996,7 @@ class GuiRuntime:
                 _hide_download_overlay()
                 _hide_work_order_overlay()
                 _hide_idle_overlay()
+                _hide_call_overlay()
                 root.destroy()
                 return
 
@@ -839,6 +1028,15 @@ class GuiRuntime:
                         _show_work_order_overlay(message, flash)
                 elif event_name == "work_order_alert_hide":
                     _hide_work_order_overlay()
+                elif event_name == "call_overlay_update":
+                    payload = payload if isinstance(payload, dict) else {}
+                    _show_call_overlay(
+                        bool(payload.get("enabled")),
+                        bool(payload.get("active")),
+                        str(payload.get("role") or "").strip(),
+                    )
+                elif event_name == "call_overlay_hide":
+                    _hide_call_overlay()
                 elif event_name == "shutdown":
                     self._shutdown = True
                     break
@@ -847,6 +1045,18 @@ class GuiRuntime:
                 try:
                     work_order_window.attributes("-topmost", True)
                     work_order_window.lift()
+                except tk.TclError:
+                    pass
+            if call_window is not None and call_window.winfo_exists():
+                try:
+                    call_window.attributes("-topmost", True)
+                    call_window.lift()
+                except tk.TclError:
+                    pass
+            if call_menu_window is not None and call_menu_window.winfo_exists():
+                try:
+                    call_menu_window.attributes("-topmost", True)
+                    call_menu_window.lift()
                 except tk.TclError:
                     pass
 
@@ -899,6 +1109,23 @@ class WorkOrderAlertOverlay:
 
     def is_active(self) -> bool:
         return self._gui_runtime.work_order_overlay_active()
+
+
+class CallRequestOverlay:
+    def __init__(self, gui_runtime: GuiRuntime):
+        self._gui_runtime = gui_runtime
+
+    def update(self, enabled: bool, active: bool, role: str = ""):
+        self._gui_runtime.post(
+            "call_overlay_update",
+            {"enabled": bool(enabled), "active": bool(active), "role": str(role or "").strip()},
+        )
+
+    def hide(self):
+        self._gui_runtime.post("call_overlay_hide")
+
+    def is_active(self) -> bool:
+        return self._gui_runtime.call_overlay_active()
 
 
 class PlaybackController:
@@ -1698,6 +1925,7 @@ gui_runtime = GuiRuntime()
 playback = PlaybackController(gui_runtime)
 idle_background = IdleBackgroundOverlay(gui_runtime)
 work_order_alert_overlay = WorkOrderAlertOverlay(gui_runtime)
+call_request_overlay = CallRequestOverlay(gui_runtime)
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
@@ -2200,6 +2428,17 @@ def log_state_transition(from_state: ClientState, to_state: ClientState, reason:
         )
 
 
+def _refresh_call_overlay():
+    if call_feature_enabled and current_state == ClientState.ACTIVE:
+        call_request_overlay.update(
+            True,
+            bool(active_call),
+            str((active_call or {}).get("requested_role") or ""),
+        )
+    else:
+        call_request_overlay.hide()
+
+
 def set_state(next_state: ClientState, reason: str):
     global current_state
     global playing_started_at
@@ -2215,6 +2454,7 @@ def set_state(next_state: ClientState, reason: str):
     log_state_transition(prev, next_state, reason)
     print(f"🔁 STATE {prev.value} -> {next_state.value} | {reason}")
     log_debug(f"state transition committed | from={prev.value} to={next_state.value} reason={reason}")
+    _refresh_call_overlay()
 
 
 def return_to_erp_window():
@@ -2279,6 +2519,7 @@ def on_config(data):
     global idle_timeout_sec, idle_mode_enabled, content_enabled
     global work_order_alert_active, work_order_alert_message
     global announcement_active, announcement_message, announcement_display_mode
+    global call_feature_enabled, active_call
 
     print("📥 CONFIG RECEIVED:")
     print(data)
@@ -2305,12 +2546,16 @@ def on_config(data):
         announcement_active = bool(data.get("announcement_active", False))
         announcement_message = str(data.get("announcement_message") or "").strip()
         announcement_display_mode = str(data.get("announcement_display_mode") or "normal").strip().lower()
+        call_feature_enabled = bool(data.get("call_feature_enabled", False))
+        active_call = data.get("active_call") if isinstance(data.get("active_call"), dict) else None
     else:
         work_order_alert_active = False
         work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
         announcement_active = False
         announcement_message = ""
         announcement_display_mode = "normal"
+        call_feature_enabled = False
+        active_call = None
 
     effective_work_order_alert_active = work_order_alert_active
     effective_work_order_alert_message = work_order_alert_message
@@ -2338,6 +2583,15 @@ def on_config(data):
         playback.update_from_config(data)
         _maybe_run_client_updater_update(data)
         _maybe_run_auto_update(data)
+
+    if call_feature_enabled and current_state == ClientState.ACTIVE:
+        call_request_overlay.update(
+            True,
+            bool(active_call),
+            str((active_call or {}).get("requested_role") or ""),
+        )
+    else:
+        call_request_overlay.hide()
 
     print(f"🕒 idle_timeout_sec = {idle_timeout_sec} | idle_mode_enabled={idle_mode_enabled} | content_enabled={content_enabled}")
 
@@ -2376,6 +2630,30 @@ def on_command(data):
         _ack_command(data, "processed", result)
     except Exception as exc:
         _ack_command(data, "failed", str(exc))
+
+
+@sio.on("call_request_result")
+def on_call_request_result(data):
+    global active_call
+    if not isinstance(data, dict):
+        return
+    if data.get("ok") and isinstance(data.get("call"), dict):
+        active_call = data.get("call")
+        print(f"📞 çağrı açıldı | role={active_call.get('requested_role')} id={active_call.get('id')}")
+    else:
+        print(f"⚠️ çağrı açma başarısız | reason={data.get('error')}")
+    _refresh_call_overlay()
+
+
+@sio.on("call_request_cancel_result")
+def on_call_request_cancel_result(data):
+    global active_call
+    if isinstance(data, dict) and data.get("ok"):
+        active_call = None
+        print("📞 çağrı kapatıldı")
+    else:
+        print(f"⚠️ çağrı kapatma başarısız | reason={(data or {}).get('error')}")
+    _refresh_call_overlay()
 
 
 def run_state_cycle():

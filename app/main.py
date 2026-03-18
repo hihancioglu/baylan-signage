@@ -31,6 +31,7 @@ from .models import (
     MediaAsset,
     AppSetting,
     Announcement,
+    CallRequest,
 )
 from .config import (
     SHARED_SECRET,
@@ -81,6 +82,8 @@ COMMAND_TYPES = {
 
 WORK_ORDER_ALERT_ACTIVE_KEY = "work_order_alert_active"
 WORK_ORDER_ALERT_MESSAGE_KEY = "work_order_alert_message"
+CALL_FEATURE_ENABLED_HOSTNAMES_KEY = "call_feature_enabled_hostnames"
+CALL_ROLES = ("Vardiya Amiri", "Bilgi İşlem", "Bakımcı")
 
 
 def _is_allowed_media(filename: str) -> bool:
@@ -738,6 +741,42 @@ def _active_announcement_for_device(db, hostname: str, group_id: int | None):
     return None
 
 
+def _parse_enabled_call_hostnames(db) -> set[str]:
+    raw_value = _get_setting(db, CALL_FEATURE_ENABLED_HOSTNAMES_KEY, "[]") or "[]"
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return set()
+    if not isinstance(parsed, list):
+        return set()
+    return {str(item).strip() for item in parsed if str(item).strip()}
+
+
+def _get_active_call_for_hostname(db, hostname: str):
+    if not hostname:
+        return None
+    return (
+        db.query(CallRequest)
+        .filter(
+            CallRequest.hostname == str(hostname).strip(),
+            CallRequest.status == "active",
+        )
+        .order_by(CallRequest.requested_at.desc(), CallRequest.id.desc())
+        .first()
+    )
+
+
+def _serialize_call_request(row):
+    return {
+        "id": row.id,
+        "hostname": row.hostname,
+        "requested_role": row.requested_role,
+        "status": row.status,
+        "requested_at": row.requested_at.isoformat() if row.requested_at else None,
+        "closed_at": row.closed_at.isoformat() if row.closed_at else None,
+    }
+
+
 def _hostnames_for_group(db, group_id):
     rows = (
         db.query(Device.hostname)
@@ -854,11 +893,20 @@ def build_config(hostname):
             "announcement_active": False,
             "announcement_message": "",
             "announcement_display_mode": "normal",
+            "call_feature_enabled": False,
+            "active_call": None,
         }
 
         device = db.query(Device).filter_by(hostname=hostname).first()
         if not device:
             return base_config
+
+        enabled_call_hostnames = _parse_enabled_call_hostnames(db)
+        if hostname in enabled_call_hostnames:
+            base_config["call_feature_enabled"] = True
+            active_call = _get_active_call_for_hostname(db, hostname)
+            if active_call:
+                base_config["active_call"] = _serialize_call_request(active_call)
 
         dg = db.query(DeviceGroup).filter_by(device_id=device.id, is_active=True).first()
         group_id = dg.group_id if dg else None
@@ -1139,6 +1187,61 @@ def handle_pull_config(data):
         return
 
     emit("config", build_config(hostname), room=request.sid)
+
+
+@socketio.on("call_request_create")
+def handle_call_request_create(data):
+    hostname = sid_to_host.get(request.sid) or (data or {}).get("hostname")
+    requested_role = str((data or {}).get("requested_role") or "").strip()
+    if not hostname or requested_role not in CALL_ROLES:
+        emit("call_request_result", {"ok": False, "error": "invalid_payload"}, room=request.sid)
+        return
+
+    db = db_session()
+    try:
+        enabled_hostnames = _parse_enabled_call_hostnames(db)
+        if hostname not in enabled_hostnames:
+            emit("call_request_result", {"ok": False, "error": "feature_disabled"}, room=request.sid)
+            return
+
+        active_call = _get_active_call_for_hostname(db, hostname)
+        if active_call:
+            emit("call_request_result", {"ok": True, "call": _serialize_call_request(active_call)}, room=request.sid)
+            return
+
+        row = CallRequest(hostname=hostname, requested_role=requested_role, status="active")
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        emit("call_request_result", {"ok": True, "call": _serialize_call_request(row)}, room=request.sid)
+    finally:
+        db.close()
+
+    _emit_config_update([hostname])
+
+
+@socketio.on("call_request_cancel")
+def handle_call_request_cancel(data):
+    hostname = sid_to_host.get(request.sid) or (data or {}).get("hostname")
+    if not hostname:
+        emit("call_request_cancel_result", {"ok": False, "error": "invalid_payload"}, room=request.sid)
+        return
+
+    db = db_session()
+    try:
+        active_call = _get_active_call_for_hostname(db, hostname)
+        if not active_call:
+            emit("call_request_cancel_result", {"ok": True, "cancelled": False}, room=request.sid)
+            return
+
+        active_call.status = "cancelled"
+        active_call.closed_at = datetime.now(timezone.utc)
+        db.commit()
+        emit("call_request_cancel_result", {"ok": True, "cancelled": True}, room=request.sid)
+    finally:
+        db.close()
+
+    _emit_config_update([hostname])
 
 
 @socketio.on("command_ack")
@@ -2615,6 +2718,80 @@ def set_work_order_alert_state():
         return jsonify({"ok": True, "scope": "global", "active": active, "message": message})
     finally:
         db.close()
+
+
+@app.get("/api/call-management")
+def get_call_management():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        enabled_hostnames = sorted(_parse_enabled_call_hostnames(db))
+        active_rows = (
+            db.query(CallRequest)
+            .filter(CallRequest.status == "active")
+            .order_by(CallRequest.requested_at.desc(), CallRequest.id.desc())
+            .all()
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "roles": list(CALL_ROLES),
+                "enabled_hostnames": enabled_hostnames,
+                "active_calls": [_serialize_call_request(row) for row in active_rows],
+            }
+        )
+    finally:
+        db.close()
+
+
+@app.patch("/api/call-management")
+def update_call_management():
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    raw_hostnames = body.get("enabled_hostnames")
+    if not isinstance(raw_hostnames, list):
+        return jsonify({"error": "enabled_hostnames must be an array"}), 400
+
+    normalized_hostnames = sorted({str(item).strip() for item in raw_hostnames if str(item).strip()})
+    db = db_session()
+    try:
+        previous_hostnames = _parse_enabled_call_hostnames(db)
+        _set_setting(db, CALL_FEATURE_ENABLED_HOSTNAMES_KEY, json.dumps(normalized_hostnames, ensure_ascii=False))
+        db.commit()
+        affected_hostnames = sorted(previous_hostnames.union(set(normalized_hostnames)))
+    finally:
+        db.close()
+
+    _emit_config_update(affected_hostnames)
+    return jsonify({"ok": True, "enabled_hostnames": normalized_hostnames})
+
+
+@app.post("/api/call-management/calls/<int:call_id>/cancel")
+def cancel_call_management_call(call_id):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    hostname = None
+    db = db_session()
+    try:
+        row = db.query(CallRequest).filter_by(id=call_id).first()
+        if not row:
+            return jsonify({"error": "call not found"}), 404
+
+        hostname = row.hostname
+        if row.status == "active":
+            row.status = "cancelled"
+            row.closed_at = datetime.now(timezone.utc)
+            db.commit()
+        return jsonify({"ok": True, "call": _serialize_call_request(row)})
+    finally:
+        db.close()
+        if hostname:
+            _emit_config_update([hostname])
 
 
 @app.post("/api/devices/<hostname>/screenshot/capture")
