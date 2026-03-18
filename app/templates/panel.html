@@ -29,6 +29,23 @@
         grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(0, 1fr));
       }
     }
+    .widget-preview-stage {
+      width: 100%;
+      max-width: 960px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 0 auto;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, .35);
+    }
+    .widget-preview-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #000;
+    }
   </style>
 </head>
 <body>
@@ -214,7 +231,10 @@
                 </div>
                 <div class="mt-3">
                   <h3 class="h6">Widget Önizleme</h3>
-                  <div id="widget-preview" class="border rounded p-3 bg-light small text-break">Önizleme için içerik girin.</div>
+                  <div id="widget-preview" class="widget-preview-stage">
+                    <iframe id="widget-preview-frame" class="widget-preview-frame" title="Widget önizleme" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin allow-presentation"></iframe>
+                  </div>
+                  <div class="form-text mt-2">Bu alan canlı içeriği, cihaz ekranındaki görünümü taklit ederek 16:9 formatında gösterir.</div>
                 </div>
                 <div class="d-flex gap-2 mt-3 flex-wrap">
                   <button class="btn btn-primary" onclick="createWidget()">Widget Ekle</button>
@@ -928,24 +948,50 @@ function updateWidgetPreview(){
   const type = document.getElementById('widget-type').value;
   const content = document.getElementById('widget-content').value.trim();
   const preview = document.getElementById('widget-preview');
+  const previewFrame = document.getElementById('widget-preview-frame');
   const dashboardBuilder = document.getElementById('widget-dashboard-builder');
   dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
   if(type === 'dashboard' && !document.querySelector('.dashboard-iframe-url')) reflowDashboardIframeRows();
 
+  if(!preview || !previewFrame) return;
+
+  const renderPreviewDoc = (body) => {
+    previewFrame.srcdoc = `<!doctype html><html lang="tr"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><style>
+      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:Arial,sans-serif;}
+      .root{width:100%;height:100%;}
+      .empty{display:flex;align-items:center;justify-content:center;color:#94a3b8;background:#020617;font-size:18px;text-align:center;padding:20px;box-sizing:border-box;}
+      .url-wrap,.html-wrap,.dashboard-wrap{width:100%;height:100%;}
+      .live-frame{width:100%;height:100%;border:0;background:#000;display:block;}
+      .dashboard-wrap{display:grid;gap:10px;padding:10px;box-sizing:border-box;grid-template-columns:repeat(var(--cols,1), minmax(0,1fr));grid-auto-rows:minmax(0,1fr);}
+      .dashboard-cell{background:#0f172a;border-radius:8px;overflow:hidden;min-height:0;min-width:0;}
+      .dashboard-cell-empty{display:flex;align-items:center;justify-content:center;color:#64748b;font-size:15px;border:1px dashed rgba(148,163,184,.35);background:rgba(15,23,42,.7);}
+      .warning{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box;color:#fecaca;background:#450a0a;text-align:center;}
+    </style></head><body>${body}</body></html>`;
+  };
+
+  const normalizeUrl = (rawValue) => {
+    const value = String(rawValue || '').trim();
+    if(!value) return '';
+    if(/^https?:\/\//i.test(value) || /^file:\/\//i.test(value)) return value;
+    if(value.startsWith('//')) return `https:${value}`;
+    return `https://${value}`;
+  };
+
   if(!content){
-    preview.textContent = 'Önizleme için içerik girin.';
+    renderPreviewDoc('<div class="empty root">Önizleme için içerik girin.</div>');
     return;
   }
 
   if(type === 'url'){
-    preview.innerHTML = `<a href="${escapeHtml(content)}" target="_blank" rel="noopener">${escapeHtml(content)}</a>`;
+    const normalizedUrl = normalizeUrl(content);
+    renderPreviewDoc(`<div class="url-wrap root"><iframe class="live-frame" src="${escapeHtml(normalizedUrl)}" referrerpolicy="no-referrer"></iframe></div>`);
     return;
   }
 
   if(type === 'dashboard'){
     const config = extractDashboardConfig(content);
     if(!config){
-      preview.innerHTML = '<span class="text-danger">Dashboard JSON formatı geçersiz.</span>';
+      renderPreviewDoc('<div class="warning root">Dashboard JSON formatı geçersiz.</div>');
       return;
     }
     const cols = Math.max(1, Number(config.columns) || 1);
@@ -957,24 +1003,20 @@ function updateWidgetPreview(){
     const rows = Math.max(1, Number(config.rows) || Math.ceil(Math.max(cells.length, 1) / cols));
     const normalizedCells = normalizeDashboardRowItems(cells, cols, rows);
     if(!normalizedCells.some(Boolean)){
-      preview.innerHTML = '<span class="text-secondary">Dashboard için en az bir iframe URL ekleyin.</span>';
+      renderPreviewDoc('<div class="empty root">Dashboard için en az bir iframe URL ekleyin.</div>');
       return;
     }
-    const previewRows = [];
-    for(let row = 0; row < rows; row += 1){
-      const cellsInRow = [];
-      for(let col = 0; col < cols; col += 1){
-        const idx = (row * cols) + col;
-        const value = normalizedCells[idx] || '';
-        cellsInRow.push(`<div class="border rounded p-2 bg-white"><div class="fw-semibold mb-1">${row + 1}. Satır ${dashboardColumnLabel(col, cols)}</div><div class="small text-break ${value ? '' : 'text-secondary'}">${value ? escapeHtml(value) : 'Boş'}</div></div>`);
-      }
-      previewRows.push(`<div class="dashboard-iframe-row" style="--dashboard-columns:${cols}">${cellsInRow.join('')}</div>`);
-    }
-    preview.innerHTML = `<div class="d-flex flex-column gap-2">${previewRows.join('')}</div>`;
+    const cellsHtml = normalizedCells.map((rawUrl) => {
+      const url = normalizeUrl(rawUrl);
+      if(!url) return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
+      return `<div class="dashboard-cell"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
+    }).join('');
+    renderPreviewDoc(`<div class="dashboard-wrap root" style="--cols:${cols};grid-template-rows:repeat(${rows}, minmax(0,1fr));">${cellsHtml}</div>`);
     return;
   }
 
-  preview.innerHTML = content;
+  const htmlDoc = `<!doctype html><html lang="tr"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /></head><body style="margin:0;width:100%;height:100%;overflow:hidden;background:#000;">${content}</body></html>`;
+  renderPreviewDoc(`<div class="html-wrap root"><iframe class="live-frame" srcdoc="${escapeHtml(htmlDoc)}"></iframe></div>`);
 }
 
 function togglePlaylistItemInputs(){
