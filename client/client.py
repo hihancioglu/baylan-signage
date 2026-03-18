@@ -893,7 +893,7 @@ class GuiRuntime:
                 activeforeground="white",
                 relief="flat",
                 padx=18,
-                pady=22,
+                pady=28,
             )
             close_btn.pack(padx=28, pady=(18, 20), ipadx=56)
 
