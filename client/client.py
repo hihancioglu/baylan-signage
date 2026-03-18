@@ -2800,7 +2800,7 @@ def main():
                 pass
 
         def ensure_socket_connected(now: float) -> bool:
-            global next_connect_attempt_at
+            global next_connect_attempt_at, connection_outage_active
             if sio.connected:
                 return True
             if now < next_connect_attempt_at:
