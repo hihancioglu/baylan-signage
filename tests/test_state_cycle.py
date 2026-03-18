@@ -15,6 +15,7 @@ class TestRunStateCycle(unittest.TestCase):
         self.orig_last_observed_idle_sec = main._last_observed_idle_sec
         self.orig_activity_drop_streak = main._activity_drop_streak
         self.orig_low_idle_streak = main._low_idle_streak
+        self.orig_connection_outage_active = main.connection_outage_active
 
     def tearDown(self):
         main.current_state = self.orig_state
@@ -26,6 +27,7 @@ class TestRunStateCycle(unittest.TestCase):
         main._last_observed_idle_sec = self.orig_last_observed_idle_sec
         main._activity_drop_streak = self.orig_activity_drop_streak
         main._low_idle_streak = self.orig_low_idle_streak
+        main.connection_outage_active = self.orig_connection_outage_active
 
     def _configure_common(self):
         main.idle_mode_enabled = True
@@ -35,6 +37,7 @@ class TestRunStateCycle(unittest.TestCase):
         main._last_observed_idle_sec = None
         main._activity_drop_streak = 0
         main._low_idle_streak = 0
+        main.connection_outage_active = False
 
     def test_idle_pending_waits_for_selected_content_before_playing_state(self):
         self._configure_common()
@@ -192,6 +195,44 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
 
         fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+
+    def test_outage_caps_idle_threshold_and_transitions_to_idle_pending(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+        main.idle_timeout_sec = 120
+        main.connection_outage_active = True
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", fake_idle_background), patch.object(
+            main, "get_idle_seconds", return_value=12.0
+        ):
+            main.run_state_cycle()
+
+        self.assertEqual(main.current_state, main.ClientState.IDLE_PENDING)
+        fake_idle_background.show.assert_called_once()
+
+    def test_without_outage_uses_full_idle_threshold(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+        main.idle_timeout_sec = 120
+        main.connection_outage_active = False
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", fake_idle_background), patch.object(
+            main, "get_idle_seconds", return_value=12.0
+        ):
+            main.run_state_cycle()
+
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+        fake_idle_background.show.assert_not_called()
 
 
 if __name__ == "__main__":
