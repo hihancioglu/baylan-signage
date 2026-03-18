@@ -664,8 +664,9 @@ class GuiRuntime:
         work_order_container = None
         call_window = None
         call_menu_window = None
-        call_cancel_button = None
-        call_status_label = None
+        call_button = None
+        call_button_circle = None
+        call_button_label = None
         call_feature_active = False
         call_has_active_request = False
 
@@ -903,7 +904,7 @@ class GuiRuntime:
                 log_warning(f"call_request_cancel emit failed | error={exc}")
 
         def _show_call_overlay(enabled: bool, has_active: bool, active_role: str = ""):
-            nonlocal call_window, call_cancel_button, call_status_label, call_feature_active, call_has_active_request
+            nonlocal call_window, call_button, call_button_circle, call_button_label, call_feature_active, call_has_active_request
             call_feature_active = bool(enabled)
             call_has_active_request = bool(has_active)
 
@@ -932,55 +933,40 @@ class GuiRuntime:
                     highlightthickness=0,
                     bd=0,
                 )
-                circle = call_button.create_oval(2, 2, 102, 102, fill="#2563EB", outline="#1D4ED8", width=3)
-                label = call_button.create_text(52, 52, text="Çağır", fill="white", font=("Arial", 20, "bold"))
-                call_button.tag_bind(circle, "<Button-1>", lambda _e: _open_call_menu())
-                call_button.tag_bind(label, "<Button-1>", lambda _e: _open_call_menu())
+                call_button_circle = call_button.create_oval(2, 2, 102, 102, fill="#2563EB", outline="#1D4ED8", width=3)
+                call_button_label = call_button.create_text(52, 52, text="Çağır", fill="white", font=("Arial", 20, "bold"))
+                call_button.tag_bind(call_button_circle, "<Button-1>", lambda _e: _on_call_button_click())
+                call_button.tag_bind(call_button_label, "<Button-1>", lambda _e: _on_call_button_click())
                 call_button.place(x=14, y=14)
 
-                call_cancel_button = tk.Button(
-                    call_window,
-                    text="İptal",
-                    command=_emit_call_cancel,
-                    font=("Arial", 24, "bold"),
-                    bg="#DC2626",
-                    fg="white",
-                    activebackground="#B91C1C",
-                    activeforeground="white",
-                    relief="flat",
-                    borderwidth=0,
-                )
-                call_status_label = tk.Label(
-                    call_window,
-                    text="",
-                    fg="#F8FAFC",
-                    bg="#000000",
-                    font=("Arial", 15, "bold"),
-                    justify="left",
-                    wraplength=190,
-                )
-                call_status_label.place(x=130, y=20, width=196, height=92)
-
-            if call_cancel_button is not None:
+            if call_button is not None and call_button_circle is not None and call_button_label is not None:
                 if has_active:
-                    call_cancel_button.place(x=132, y=12, width=94, height=94)
+                    role_text = str(active_role or "").strip()
+                    button_text = role_text if role_text else "Çağrı Aktif"
+                    call_button.itemconfig(call_button_circle, fill="#DC2626", outline="#B91C1C")
+                    call_button.itemconfig(call_button_label, text=button_text, font=("Arial", 11, "bold"))
+                    _close_call_menu()
                 else:
-                    call_cancel_button.place_forget()
-
-            if call_status_label is not None:
-                status_text = f"Aktif çağrı:\n{active_role}" if has_active and active_role else "Aktif çağrı yok"
-                call_status_label.config(text=status_text)
+                    call_button.itemconfig(call_button_circle, fill="#2563EB", outline="#1D4ED8")
+                    call_button.itemconfig(call_button_label, text="Çağır", font=("Arial", 20, "bold"))
 
             self._set_call_overlay_state(True)
 
+        def _on_call_button_click():
+            if call_has_active_request:
+                _emit_call_cancel()
+                return
+            _open_call_menu()
+
         def _hide_call_overlay():
-            nonlocal call_window, call_menu_window, call_cancel_button, call_status_label
+            nonlocal call_window, call_menu_window, call_button, call_button_circle, call_button_label
             _close_call_menu()
             if call_window is not None and call_window.winfo_exists():
                 call_window.destroy()
             call_window = None
-            call_cancel_button = None
-            call_status_label = None
+            call_button = None
+            call_button_circle = None
+            call_button_label = None
             self._set_call_overlay_state(False)
 
         _next_tick = None
