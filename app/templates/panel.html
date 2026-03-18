@@ -972,9 +972,25 @@ function updateWidgetPreview(){
   const normalizeUrl = (rawValue) => {
     const value = String(rawValue || '').trim();
     if(!value) return '';
-    if(/^https?:\/\//i.test(value) || /^file:\/\//i.test(value)) return value;
-    if(value.startsWith('//')) return `https:${value}`;
-    return `https://${value}`;
+    const extractIframeSrc = (input) => {
+      const source = String(input || '').trim();
+      if(!source) return '';
+      const decoded = source
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&amp;/gi, '&');
+      const iframeSrcMatch = decoded.match(/<iframe[\s\S]*?\bsrc\s*=\s*(['"])(.*?)\1/i);
+      if(iframeSrcMatch?.[2]) return iframeSrcMatch[2].trim();
+      const rawSrcMatch = decoded.match(/\bsrc\s*=\s*(['"])(.*?)\1/i);
+      if(rawSrcMatch?.[2]) return rawSrcMatch[2].trim();
+      return source;
+    };
+    const normalizedValue = extractIframeSrc(value);
+    if(/^https?:\/\//i.test(normalizedValue) || /^file:\/\//i.test(normalizedValue)) return normalizedValue;
+    if(normalizedValue.startsWith('//')) return `https:${normalizedValue}`;
+    return `https://${normalizedValue}`;
   };
 
   if(!content){
