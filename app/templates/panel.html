@@ -483,7 +483,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body text-center bg-dark-subtle">
-          <img id="device-screenshot-image" class="img-fluid rounded mb-2" alt="Cihaz ekran görüntüsü" />
+          <img id="device-screenshot-image" class="img-fluid rounded mb-2 d-none" alt="Cihaz ekran görüntüsü" />
           <div id="device-screenshot-meta" class="small text-start text-dark"></div>
         </div>
       </div>
@@ -639,7 +639,10 @@ async function showDeviceScreenshot(encodedHostname, triggerButton){
   const image = document.getElementById('device-screenshot-image');
   const title = document.getElementById('device-screenshot-title');
   const meta = document.getElementById('device-screenshot-meta');
-  if(image) image.src = '';
+  if(image){
+    image.src = '';
+    image.classList.add('d-none');
+  }
   if(title) title.textContent = `${hostname} - ScreenShot`; 
   if(meta) meta.innerHTML = '<span class="text-secondary">Cihazdan Windows ekran görüntüsü isteniyor...</span>';
 
@@ -670,7 +673,10 @@ async function showDeviceScreenshot(encodedHostname, triggerButton){
       return;
     }
 
-    if(image) image.src = screenshotResp.image_url;
+    if(image){
+      image.src = screenshotResp.image_url;
+      image.classList.remove('d-none');
+    }
     if(meta){
       meta.innerHTML = `
         <div><strong>Durum:</strong> ${escapeHtml(screenshotResp.state || '-')}</div>
