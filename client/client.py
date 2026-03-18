@@ -849,7 +849,7 @@ class GuiRuntime:
             screen_w = call_menu_window.winfo_screenwidth()
             screen_h = call_menu_window.winfo_screenheight()
             panel_w = min(900, max(640, int(screen_w * 0.58)))
-            panel_h = min(760, max(520, int(screen_h * 0.56)))
+            panel_h = min(760, max(580, int(screen_h * 0.62)))
             x = max(20, (screen_w - panel_w) // 2)
             y = max(20, (screen_h - panel_h) // 2)
             call_menu_window.geometry(f"{panel_w}x{panel_h}+{x}+{y}")
@@ -862,40 +862,43 @@ class GuiRuntime:
                 text="Kime çağrı açılacak?",
                 fg="white",
                 bg="#0F172A",
-                font=("Arial", 38, "bold"),
+                font=("Arial", 34, "bold"),
             )
             title.pack(pady=(24, 16))
 
+            role_frame = tk.Frame(container, bg="#0F172A")
+            role_frame.pack(fill="x", padx=28, pady=(0, 8))
+
             for role in ("Vardiya Amiri", "Bilgi İşlem", "Bakımcı"):
                 role_btn = tk.Button(
-                    container,
+                    role_frame,
                     text=role,
                     command=lambda value=role: _emit_call_request(value),
-                    font=("Arial", 34, "bold"),
+                    font=("Arial", 30, "bold"),
                     bg="#0284C7",
                     fg="white",
                     activebackground="#0369A1",
                     activeforeground="white",
                     relief="flat",
                     padx=24,
-                    pady=18,
+                    pady=14,
                 )
-                role_btn.pack(fill="x", padx=28, pady=10)
+                role_btn.pack(fill="x", pady=9)
 
             close_btn = tk.Button(
                 container,
                 text="Kapat / Geri",
                 command=_close_call_menu,
-                font=("Arial", 24, "bold"),
+                font=("Arial", 22, "bold"),
                 bg="#334155",
                 fg="white",
                 activebackground="#1E293B",
                 activeforeground="white",
                 relief="flat",
                 padx=18,
-                pady=28,
+                pady=12,
             )
-            close_btn.pack(padx=28, pady=(18, 20), ipadx=56)
+            close_btn.pack(fill="x", padx=28, pady=(12, 20))
 
         def _emit_call_cancel():
             try:
