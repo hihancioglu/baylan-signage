@@ -914,22 +914,28 @@ class GuiRuntime:
 
             if call_window is None or not call_window.winfo_exists():
                 call_window = tk.Toplevel(root)
-                call_window.configure(bg="#000000")
+                transparent_bg = "#FF00FF"
+                call_window.configure(bg=transparent_bg)
                 call_window.attributes("-topmost", True)
                 call_window.overrideredirect(True)
                 call_window.title("Baylan Çağır Paneli")
+                try:
+                    call_window.wm_attributes("-transparentcolor", transparent_bg)
+                except tk.TclError:
+                    pass
                 screen_w = call_window.winfo_screenwidth()
-                panel_w = 340
-                panel_h = 132
-                x = max(16, screen_w - panel_w - 16)
-                y = 16
+                screen_h = call_window.winfo_screenheight()
+                panel_w = 120
+                panel_h = 120
+                x = 20
+                y = max(20, screen_h - panel_h - 90)
                 call_window.geometry(f"{panel_w}x{panel_h}+{x}+{y}")
 
                 call_button = tk.Canvas(
                     call_window,
                     width=104,
                     height=104,
-                    bg="#000000",
+                    bg=transparent_bg,
                     highlightthickness=0,
                     bd=0,
                 )
@@ -937,7 +943,7 @@ class GuiRuntime:
                 call_button_label = call_button.create_text(52, 52, text="Çağır", fill="white", font=("Arial", 20, "bold"))
                 call_button.tag_bind(call_button_circle, "<Button-1>", lambda _e: _on_call_button_click())
                 call_button.tag_bind(call_button_label, "<Button-1>", lambda _e: _on_call_button_click())
-                call_button.place(x=14, y=14)
+                call_button.place(x=8, y=8)
 
             if call_button is not None and call_button_circle is not None and call_button_label is not None:
                 if has_active:
