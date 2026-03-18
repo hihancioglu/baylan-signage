@@ -164,6 +164,7 @@ PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
 ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
+OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
@@ -2711,9 +2712,17 @@ def run_state_cycle():
             set_state(ClientState.ACTIVE, "idle_mode_disabled")
         return idle_sec
 
-    if current_state == ClientState.ACTIVE and idle_sec >= idle_timeout_sec:
+    effective_idle_timeout_sec = idle_timeout_sec
+    if connection_outage_active:
+        effective_idle_timeout_sec = max(1.0, min(float(idle_timeout_sec), OFFLINE_IDLE_TIMEOUT_CAP_SEC))
+        log_debug(
+            f"state_cycle outage mode | idle_timeout_sec={idle_timeout_sec} "
+            f"effective_idle_timeout_sec={effective_idle_timeout_sec}"
+        )
+
+    if current_state == ClientState.ACTIVE and idle_sec >= effective_idle_timeout_sec:
         idle_background.show()
-        set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={idle_timeout_sec}s")
+        set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s")
 
     if current_state == ClientState.IDLE_PENDING:
         log_debug("state_cycle IDLE_PENDING | ensuring playback.start")
