@@ -1,4 +1,8 @@
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import os
+import tempfile
 from unittest.mock import Mock, patch
 
 import client.client as main
@@ -233,6 +237,53 @@ class TestRunStateCycle(unittest.TestCase):
 
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
         fake_idle_background.show.assert_not_called()
+
+
+class TestRuntimeTmpCleanup(unittest.TestCase):
+    def test_cleanup_runtime_tmp_dir_removes_only_stale_entries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            stale_dir = root / "stale-dir"
+            stale_dir.mkdir()
+            stale_file = root / "stale-file.tmp"
+            stale_file.write_text("x", encoding="utf-8")
+            fresh_dir = root / "fresh-dir"
+            fresh_dir.mkdir()
+
+            now = datetime(2026, 3, 23, 12, 0, tzinfo=timezone.utc)
+            stale_ts = (now - timedelta(hours=30)).timestamp()
+            fresh_ts = (now - timedelta(hours=2)).timestamp()
+            for entry in (stale_dir, stale_file):
+                os.utime(entry, (stale_ts, stale_ts))
+            os.utime(fresh_dir, (fresh_ts, fresh_ts))
+
+            with patch.object(main, "log_info"), patch.object(main, "log_warning"):
+                main.cleanup_runtime_tmp_dir(runtime_tmp_dir=root, max_age_hours=24, now_utc=now)
+
+            self.assertFalse(stale_dir.exists())
+            self.assertFalse(stale_file.exists())
+            self.assertTrue(fresh_dir.exists())
+
+    def test_cleanup_runtime_tmp_dir_keeps_active_runtime_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            active_dir = root / "active"
+            active_dir.mkdir()
+            stale_dir = root / "stale"
+            stale_dir.mkdir()
+
+            now = datetime(2026, 3, 23, 12, 0, tzinfo=timezone.utc)
+            stale_ts = (now - timedelta(hours=48)).timestamp()
+            os.utime(active_dir, (stale_ts, stale_ts))
+            os.utime(stale_dir, (stale_ts, stale_ts))
+
+            with patch.object(main, "log_info"), patch.object(main, "log_warning"), patch.object(
+                main.sys, "frozen", True, create=True
+            ), patch.object(main.sys, "_MEIPASS", str(active_dir), create=True):
+                main.cleanup_runtime_tmp_dir(runtime_tmp_dir=root, max_age_hours=24, now_utc=now)
+
+            self.assertTrue(active_dir.exists())
+            self.assertFalse(stale_dir.exists())
 
 
 if __name__ == "__main__":

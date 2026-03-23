@@ -148,6 +148,13 @@ def _resolve_windows_writable_path(path_value: str | None, default_relative_path
     return _resolve_runtime_path(default_relative_path)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
     args = argv if argv is not None else sys.argv[1:]
     normalized = {str(arg).strip().lower() for arg in args if isinstance(arg, str)}
@@ -223,6 +230,9 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
     if part.strip()
 ]
+RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
+RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
+RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS", "24")))
 CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT = max(1, int(os.getenv("CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT", "30")))
 AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 _rollout_waited_versions: set[str] = set()
@@ -491,6 +501,78 @@ def release_instance_lock() -> None:
         INSTANCE_LOCK_PATH.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _is_same_or_child_path(path: Path, maybe_parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(maybe_parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def cleanup_runtime_tmp_dir(
+    runtime_tmp_dir: Path | None = None,
+    max_age_hours: int | None = None,
+    now_utc: datetime | None = None,
+) -> None:
+    target_root = (runtime_tmp_dir or RUNTIME_TMP_DIR).expanduser()
+    if not target_root.exists():
+        return
+
+    age_hours = max_age_hours if max_age_hours is not None else RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS
+    age_hours = max(1, int(age_hours))
+    current_time = now_utc or datetime.now(timezone.utc)
+    cutoff_timestamp = (current_time - timedelta(hours=age_hours)).timestamp()
+
+    active_runtime_dir: Path | None = None
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            active_runtime_dir = Path(meipass).resolve()
+
+    cleaned_count = 0
+    skipped_active_count = 0
+    skipped_recent_count = 0
+    error_count = 0
+
+    try:
+        entries = list(target_root.iterdir())
+    except OSError as exc:
+        log_warning(f"⚠️ RuntimeTmp okunamadı: path={target_root} err={exc}")
+        return
+
+    for entry in entries:
+        if active_runtime_dir and (
+            _is_same_or_child_path(entry, active_runtime_dir) or _is_same_or_child_path(active_runtime_dir, entry)
+        ):
+            skipped_active_count += 1
+            continue
+
+        try:
+            stat_info = entry.stat()
+        except OSError:
+            continue
+
+        if stat_info.st_mtime >= cutoff_timestamp:
+            skipped_recent_count += 1
+            continue
+
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink(missing_ok=True)
+            cleaned_count += 1
+        except OSError as exc:
+            error_count += 1
+            log_warning(f"⚠️ RuntimeTmp silinemedi: path={entry} err={exc}")
+
+    log_info(
+        "🧹 RuntimeTmp cleanup tamamlandı | "
+        f"path={target_root} cleaned={cleaned_count} "
+        f"skipped_recent={skipped_recent_count} skipped_active={skipped_active_count} errors={error_count}"
+    )
 
 
 setup_debug_logging()
@@ -2794,6 +2876,8 @@ def main():
         return
 
     try:
+        if RUNTIME_TMP_CLEANUP_ENABLED:
+            cleanup_runtime_tmp_dir()
         hide_console_window()
         start_console_hider()
         gui_runtime.start()

@@ -94,6 +94,27 @@ Aktivasyon için:
 - `pywebview` kuruluysa build script gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım hataya düşmeden atlanır.
 - Build script PyInstaller onefile extraction için sabit runtime dizini (`--runtime-tmpdir`) kullanır. Varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp` (opsiyonel override: `-RuntimeTmpDir`).
 
+### RuntimeTmp temizliği (uygulanan strateji)
+Client açılışında (`main()` başlangıcı) `RuntimeTmp` için otomatik bakım çalışır:
+
+- Çalışan süreç kapanırken (exit) silmeye çalışmak, uygulama çökmesi/güç kesintisi durumlarında güvenilir değildir.
+- Her açılışta, aktif süreç tarafından kullanılan klasör dışındaki eski alt klasörleri yaş eşiğiyle (ör. 24 saat) temizlemek daha güvenlidir.
+- Her çalıştırmada tamamen yeni bir root klasöre geçmek yerine tek bir root (`C:\ProgramData\BaylanSignage\RuntimeTmp`) altında eski içerikleri temizlemek operasyonel olarak daha stabildir.
+
+Uygulanan politika:
+
+1. Uygulama başlangıcında `RuntimeTmp` içindeki eski klasörleri tara.
+2. Son yazılma zamanı belirli eşiği geçenleri sil.
+3. Silme sırasında `access denied / file in use` alınırsa klasörü atla; bir sonraki açılışta tekrar dene.
+
+Bu model, hem disk birikimini kontrol eder hem de çalışan instance ile çakışma riskini azaltır.
+
+İsteğe bağlı ortam değişkenleri:
+
+- `RUNTIME_TMP_DIR` (varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp`)
+- `RUNTIME_TMP_CLEANUP_ENABLED` (`true` varsayılan)
+- `RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS` (`24` varsayılan)
+
 `WIDGET_SINGLE_ENGINE=1` paketleme notu:
 - Agent build `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.
 - Bu nedenle dağıtımda `widget_engine.html` dosyasını ayrıca kopyalamanız gerekmez (build script kullanıldığı sürece).
