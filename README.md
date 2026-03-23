@@ -92,6 +92,7 @@ Aktivasyon için:
 - CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa agent PyInstaller çağrısına `--collect-all cefpython3` ekler.
 - `-EnableCefCollect` verilse bile build hard-fail olmaz: `cefpython3` bulunamazsa CEF collect adımı uyarı ile atlanır.
 - `pywebview` kuruluysa build script gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım hataya düşmeden atlanır.
+- Build script PyInstaller onefile extraction için sabit runtime dizini (`--runtime-tmpdir`) kullanır. Varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp` (opsiyonel override: `-RuntimeTmpDir`).
 
 `WIDGET_SINGLE_ENGINE=1` paketleme notu:
 - Agent build `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.

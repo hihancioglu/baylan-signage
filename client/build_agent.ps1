@@ -3,6 +3,7 @@ param(
     [string]$ClientScript = "client/client.py",
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
+    [string]$RuntimeTmpDir = "$env:ProgramData\BaylanSignage\RuntimeTmp",
     [switch]$EnableCefCollect,
     [switch]$SkipInstallPyInstaller,
     [switch]$ForceUpgradePyInstaller
@@ -35,6 +36,16 @@ Write-Host "[2/5] Building client executable..."
 $clientScriptDir = Split-Path -Parent $ClientScript
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
+if ([string]::IsNullOrWhiteSpace($RuntimeTmpDir)) {
+    throw "Runtime tmp directory cannot be empty."
+}
+
+if (!(Test-Path $RuntimeTmpDir)) {
+    New-Item -ItemType Directory -Path $RuntimeTmpDir -Force | Out-Null
+}
+
+Write-Host "[agent] Using fixed runtime tmp dir: $RuntimeTmpDir"
+
 # Keep both package-qualified (client.*) and bare module names for compatibility:
 # runtime imports can resolve either style depending on launch context/PYTHONPATH.
 $clientPyInstallerArgs = @(
@@ -42,6 +53,8 @@ $clientPyInstallerArgs = @(
     "--clean"
     "--onefile"
     "--noconsole"
+    "--runtime-tmpdir"
+    $RuntimeTmpDir
     "--name"
     $Name
     "--add-data"
