@@ -331,6 +331,19 @@ powershell -ExecutionPolicy Bypass -File client\build_agent.ps1 `
   -Name "BaylanSignageAgent"
 ```
 
+Onefile extraction kaynaklı `%TEMP%\_MEIxxxxx` sorunlarını azaltmak için build script,
+runtime extraction klasörünü sabit bir dizine yönlendirir (`--runtime-tmpdir`).
+Varsayılan dizin:
+
+- `C:\ProgramData\BaylanSignage\RuntimeTmp`
+
+Gerekirse override edebilirsiniz:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File client\build_agent.ps1 `
+  -RuntimeTmpDir "D:\BaylanSignage\RuntimeTmp"
+```
+
 Script'in yaptığı işlemler:
 
 1. `pyinstaller` bağımlılığını kurar/günceller.
