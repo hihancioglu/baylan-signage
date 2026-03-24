@@ -27,6 +27,7 @@ def ensure_sqlite_schema():
             "agent_version": "VARCHAR(64)",
             "updater_version": "VARCHAR(64)",
             "alias": "VARCHAR(128)",
+            "inventory_id": "VARCHAR(128)",
             "os_version": "VARCHAR(128)",
             "last_error": "VARCHAR(512)",
             "last_state": "VARCHAR(64)",

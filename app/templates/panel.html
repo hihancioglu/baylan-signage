@@ -80,7 +80,7 @@
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('is_online')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('last_seen')">Son Heartbeat (UTC+3)</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('inventory_id')">InventoryID</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('is_online')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('last_seen')">Son Heartbeat (UTC+3)</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
                     <tbody id="devices-body"></tbody>
                   </table>
                 </div>
@@ -656,7 +656,7 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
     body.appendChild(tr);
   });
 }
@@ -745,9 +745,13 @@ async function saveDeviceAlias(encodedHostname){
   if(!hostname) return;
 
   const input = document.getElementById(`device-alias-${encodeURIComponent(hostname)}`);
-  if(!input) return;
+  const inventoryInput = document.getElementById(`device-inventory-${encodeURIComponent(hostname)}`);
+  if(!input || !inventoryInput) return;
 
-  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias`, { alias: input.value || '' });
+  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias`, {
+    alias: input.value || '',
+    inventory_id: inventoryInput.value || '',
+  });
   if(!resp.ok){
     alert(resp.error || 'Alias kaydedilemedi');
     return;
