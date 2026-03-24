@@ -9,6 +9,7 @@ class Device(Base):
     id = Column(Integer, primary_key=True)
     hostname = Column(String(128), unique=True, nullable=False)
     alias = Column(String(128))
+    inventory_id = Column(String(128))
     ip = Column(String(64))
     username = Column(String(128))
     department = Column(String(128))

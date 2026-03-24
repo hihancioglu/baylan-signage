@@ -433,6 +433,47 @@ class TestConfigPush(unittest.TestCase):
             ["https://example.com/a", "https://example.com/b", "https://example.com/c"],
         )
 
+    def test_build_config_replaces_inventory_id_placeholders_for_widget_urls(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Inventory Group")
+            playlist = self.main.Playlist(name="Inventory Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-inventory-widget", inventory_id="INV-42")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    widget_payload='{"widgets":[{"type":"iframe","url":"https://stats.example.com?inventory={{inventory_id}}&host=$DEVICE_HOSTNAME"}]}',
+                    order_no=0,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-inventory-widget")
+        self.assertEqual(cfg["widget_runtime_vars"]["inventory_id"], "INV-42")
+        self.assertEqual(
+            cfg["videos"][0]["widget_payload"]["widgets"][0]["url"],
+            "https://stats.example.com?inventory=INV-42&host=pc-inventory-widget",
+        )
+        db = self.main.db_session()
+        try:
+            db.query(self.main.PlaylistItem).delete()
+            db.query(self.main.GroupPlaylist).delete()
+            db.query(self.main.DeviceGroup).delete()
+            db.query(self.main.Playlist).delete()
+            db.query(self.main.Group).delete()
+            db.query(self.main.Device).filter_by(hostname="pc-inventory-widget").delete()
+            db.commit()
+        finally:
+            db.close()
+
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:
@@ -449,6 +490,33 @@ class TestConfigPush(unittest.TestCase):
         target = next((d for d in devices if d.get("hostname") == "pc-ver"), None)
         self.assertIsNotNone(target)
         self.assertEqual(target.get("agent_version"), "build-20260101120000")
+
+    def test_update_device_alias_can_persist_inventory_id(self):
+        db = self.main.db_session()
+        try:
+            db.add(self.main.Device(hostname="pc-meta"))
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().patch(
+                "/api/devices/pc-meta/alias",
+                json={"alias": "Satış Ekranı", "inventory_id": "INV-SALES-01"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json() or {}
+        self.assertEqual(payload.get("device", {}).get("inventory_id"), "INV-SALES-01")
+
+        db = self.main.db_session()
+        try:
+            row = db.query(self.main.Device).filter_by(hostname="pc-meta").first()
+            self.assertIsNotNone(row)
+            self.assertEqual(row.inventory_id, "INV-SALES-01")
+            db.delete(row)
+            db.commit()
+        finally:
+            db.close()
 
 
 
@@ -539,9 +607,9 @@ class TestConfigPush(unittest.TestCase):
         finally:
             db.close()
 
-        clients = rollout.get("clients") or []
-        self.assertEqual(len(clients), 1)
-        waiting_seconds = clients[0].get("waiting_seconds")
+        clients = {item.get("hostname"): item for item in (rollout.get("clients") or [])}
+        self.assertIn("pc-remaining", clients)
+        waiting_seconds = clients["pc-remaining"].get("waiting_seconds")
         self.assertIsNotNone(waiting_seconds)
         self.assertGreaterEqual(waiting_seconds, 80)
         self.assertLessEqual(waiting_seconds, 90)

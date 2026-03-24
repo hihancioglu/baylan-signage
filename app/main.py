@@ -636,6 +636,35 @@ def _canonical_ad_username(username: str) -> str:
     return normalized
 
 
+def _widget_runtime_vars(device) -> dict[str, str]:
+    inventory_id = str(getattr(device, "inventory_id", "") or "").strip()
+    hostname = str(getattr(device, "hostname", "") or "").strip()
+    return {
+        "inventory_id": inventory_id,
+        "INVENTORY_ID": inventory_id,
+        "device_hostname": hostname,
+        "DEVICE_HOSTNAME": hostname,
+    }
+
+
+def _apply_widget_runtime_vars(value, runtime_vars: dict[str, str]):
+    if isinstance(value, str):
+        text = value
+        for key, replacement in (runtime_vars or {}).items():
+            text = text.replace(f"{{{{{key}}}}}", replacement)
+            text = text.replace(f"${{{key}}}", replacement)
+            text = text.replace(f"${key}", replacement)
+        return text
+
+    if isinstance(value, list):
+        return [_apply_widget_runtime_vars(item, runtime_vars) for item in value]
+
+    if isinstance(value, dict):
+        return {k: _apply_widget_runtime_vars(v, runtime_vars) for k, v in value.items()}
+
+    return value
+
+
 def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_name=None):
     media_by_relative_path = media_by_relative_path or {}
     media_by_stored_name = media_by_stored_name or {}
@@ -649,6 +678,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
     return {
         "hostname": device.hostname,
         "alias": device.alias,
+        "inventory_id": device.inventory_id,
         "ip": device.ip,
         "department": device.department,
         "username": device.username,
@@ -900,6 +930,8 @@ def build_config(hostname):
         device = db.query(Device).filter_by(hostname=hostname).first()
         if not device:
             return base_config
+        runtime_vars = _widget_runtime_vars(device)
+        base_config["widget_runtime_vars"] = runtime_vars
 
         enabled_call_hostnames = _parse_enabled_call_hostnames(db)
         if hostname in enabled_call_hostnames:
@@ -962,6 +994,7 @@ def build_config(hostname):
                 widget_def = widgets_by_id.get(i.widget_id) if i.widget_id else None
                 widget_payload = _decode_widget_payload(i.widget_payload)
                 widget_url = i.widget_url or i.source_url
+                widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
                 widget_name = ""
 
                 if widget_def:
@@ -974,6 +1007,7 @@ def build_config(hostname):
                     }
                     if widget_type == "url":
                         widget_url = str(widget_def.get("content") or "").strip() or None
+                        widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
                     elif widget_type == "dashboard":
                         parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
                         if parsed_dashboard_payload:
@@ -982,6 +1016,9 @@ def build_config(hostname):
                         widget_url = None
                     else:
                         widget_url = None
+
+                if isinstance(widget_payload, (dict, list, str)):
+                    widget_payload = _apply_widget_runtime_vars(widget_payload, runtime_vars)
 
                 videos.append(
                     {
@@ -1350,8 +1387,11 @@ def update_device_alias(hostname):
 
     payload = request.get_json(silent=True) or {}
     alias = (payload.get("alias") or "").strip()
+    inventory_id = (payload.get("inventory_id") or "").strip()
     if len(alias) > 128:
         return jsonify({"error": "alias too long (max 128)"}), 400
+    if len(inventory_id) > 128:
+        return jsonify({"error": "inventory_id too long (max 128)"}), 400
 
     db = db_session()
     try:
@@ -1360,6 +1400,7 @@ def update_device_alias(hostname):
             return jsonify({"error": "device not found"}), 404
 
         device.alias = alias or None
+        device.inventory_id = inventory_id or None
         db.commit()
         return jsonify({"ok": True, "device": _serialize_device(db, device)})
     finally:
