@@ -1238,17 +1238,22 @@ class BorderlessFullscreenPlayer:
             self._last_interrupted = False
             return False
         unique_processes = list(dict.fromkeys(processes))
+        pid_list = [getattr(process, "pid", None) for process in unique_processes]
 
         deadline = None
         if max_duration_sec is not None:
             deadline = time.monotonic() + max(1, int(max_duration_sec))
 
+        wait_exit_reason = "unknown"
         while True:
             if self._stop_requested:
+                wait_exit_reason = "stop_requested"
                 break
             if all(process.poll() is not None for process in unique_processes):
+                wait_exit_reason = "all_processes_exited"
                 break
             if deadline is not None and time.monotonic() >= deadline:
+                wait_exit_reason = "duration_deadline_reached"
                 break
             time.sleep(0.2)
 
@@ -1258,7 +1263,14 @@ class BorderlessFullscreenPlayer:
 
         interrupted = self._stop_requested
         self._last_interrupted = interrupted
-        return all(process.returncode in (0, None) for process in unique_processes) or interrupted
+        return_codes = [process.returncode for process in unique_processes]
+        ok = all(process.returncode in (0, None) for process in unique_processes) or interrupted
+        _debug_log(
+            "_wait_widget_processes_until_stop finished | "
+            f"reason={wait_exit_reason} interrupted={interrupted} max_duration_sec={max_duration_sec} "
+            f"pids={pid_list} returncodes={return_codes} ok={ok}"
+        )
+        return ok
 
     def _hold_widget_slot_for_duration(self, duration_sec: int, already_elapsed_sec: float = 0.0) -> bool:
         remaining_sec = max(0.0, max(1, int(duration_sec)) - max(0.0, float(already_elapsed_sec)))
@@ -1450,12 +1462,21 @@ class BorderlessFullscreenPlayer:
                 for command in commands:
                     process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
                     processes.append(process)
-                    _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
+                    _debug_log(
+                        "widget process started | "
+                        f"pid={getattr(process, 'pid', None)} command={command}"
+                    )
                 self._widget_process = processes[0]
                 self._extra_processes = processes[1:]
             wait_started_at = time.monotonic()
             result = self._wait_widget_processes_until_stop(processes, max_duration_sec=duration_sec)
             wait_elapsed_sec = max(0.0, time.monotonic() - wait_started_at)
+            _debug_log(
+                "play_widget_blocking wait result | "
+                f"duration_sec={duration_sec} elapsed_sec={wait_elapsed_sec:.3f} "
+                f"stop_requested={self._stop_requested} result={result} "
+                f"returncodes={[process.returncode for process in processes]}"
+            )
             if (
                 result
                 and not self._stop_requested
