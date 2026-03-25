@@ -271,9 +271,11 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
 
 
 def _runtime_message_reader(dispatch):
+    _debug_log("runtime reader started")
     while True:
         line = sys.stdin.readline()
         if not line:
+            _debug_log("runtime reader exiting | reason=stdin_eof")
             break
         try:
             message = json.loads(line.strip())
@@ -583,9 +585,11 @@ def main() -> int:
                 )
             return 0
         except Exception as exc:
+            _debug_log(f"backend failed | backend={backend} error={exc}")
             errors.append(f"{backend}: {exc}")
 
     _safe_print(f"Widget viewer başlatılamadı: {'; '.join(errors)}")
+    _debug_log(f"main exit failure | errors={errors}")
     return 1
 
 
