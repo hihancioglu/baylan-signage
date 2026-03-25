@@ -29,6 +29,11 @@ from logging.handlers import TimedRotatingFileHandler, WatchedFileHandler
 
 import socketio
 
+if platform.system().lower().startswith("win"):
+    import msvcrt
+else:
+    import fcntl
+
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
@@ -456,37 +461,41 @@ def _pid_is_running(pid: int) -> bool:
 
 
 def already_running() -> bool:
-    """Ensure only one client process is active by acquiring a pid lock file."""
+    """Ensure only one client process is active via a non-blocking file lock."""
     global instance_lock_fd
 
-    for _ in range(2):
+    try:
+        instance_lock_fd = os.open(str(INSTANCE_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as open_err:
+        print(f"⚠️ lock dosyası açılamadı: {open_err}")
+        return True
+
+    try:
+        if platform.system().lower().startswith("win"):
+            os.lseek(instance_lock_fd, 0, os.SEEK_SET)
+            os.write(instance_lock_fd, b" ")
+            os.lseek(instance_lock_fd, 0, os.SEEK_SET)
+            msvcrt.locking(instance_lock_fd, msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(instance_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
         try:
-            instance_lock_fd = os.open(str(INSTANCE_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-            os.write(instance_lock_fd, str(os.getpid()).encode("utf-8"))
-            return False
-        except FileExistsError:
-            try:
-                try:
-                    raw_pid = INSTANCE_LOCK_PATH.read_text(encoding="utf-8").strip()
-                    existing_pid = int(raw_pid)
-                except (OSError, ValueError):
-                    existing_pid = 0
+            os.lseek(instance_lock_fd, 0, os.SEEK_SET)
+            raw_pid = os.read(instance_lock_fd, 64).decode("utf-8", errors="ignore").strip()
+        except OSError:
+            raw_pid = ""
+        log_info(f"⚠️ client zaten çalışıyor (pid={raw_pid or 'unknown'}), çıkılıyor.")
+        try:
+            os.close(instance_lock_fd)
+        except OSError:
+            pass
+        instance_lock_fd = None
+        return True
 
-                if not _pid_is_running(existing_pid):
-                    try:
-                        INSTANCE_LOCK_PATH.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-                    continue
-
-                log_info(f"⚠️ client zaten çalışıyor (pid={existing_pid}), çıkılıyor.")
-                return True
-            except Exception as lock_err:
-                # Tekrarlı başlatma kontrolü çökerse istemciyi düşürmeyelim.
-                # Bu durumda güvenli davranış: ikinci süreç devam etmesin.
-                print(f"⚠️ lock doğrulama hatası: {lock_err}")
-                return True
-
+    os.ftruncate(instance_lock_fd, 0)
+    os.lseek(instance_lock_fd, 0, os.SEEK_SET)
+    os.write(instance_lock_fd, str(os.getpid()).encode("utf-8"))
+    os.fsync(instance_lock_fd)
     return False
 
 
@@ -494,14 +503,18 @@ def release_instance_lock() -> None:
     global instance_lock_fd
     if instance_lock_fd is not None:
         try:
+            if platform.system().lower().startswith("win"):
+                os.lseek(instance_lock_fd, 0, os.SEEK_SET)
+                msvcrt.locking(instance_lock_fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(instance_lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
             os.close(instance_lock_fd)
         except OSError:
             pass
         instance_lock_fd = None
-    try:
-        INSTANCE_LOCK_PATH.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _is_same_or_child_path(path: Path, maybe_parent: Path) -> bool:
