@@ -1,4 +1,5 @@
 import base64
+import ctypes
 import ipaddress
 import json
 import os
@@ -340,19 +341,69 @@ def _set_cef_window_visible(browser, visible: bool) -> None:
         pass
 
 
-def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> None:
+def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | None:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    parts = [part.strip() for part in text.split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        x, y, width, height = (int(part) for part in parts)
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return x, y, width, height
+
+
+def _apply_cef_monitor_bounds(browser, monitor_bounds: tuple[int, int, int, int] | None) -> None:
+    if monitor_bounds is None:
+        return
+    try:
+        handle = int(browser.GetOuterWindowHandle())
+    except Exception:
+        return
+    if handle <= 0:
+        return
+
+    x, y, width, height = monitor_bounds
+    try:
+        SWP_NOZORDER = 0x0004
+        SWP_SHOWWINDOW = 0x0040
+        ctypes.windll.user32.SetWindowPos(handle, 0, x, y, width, height, SWP_NOZORDER | SWP_SHOWWINDOW)
+    except Exception:
+        pass
+
+
+def _start_with_pywebview(
+    widget_url: str,
+    runtime_ipc: bool = False,
+    start_hidden: bool = False,
+    monitor_bounds: tuple[int, int, int, int] | None = None,
+) -> None:
     import webview
 
-    window = webview.create_window(
-        title="Baylan Widget",
-        url=widget_url,
-        fullscreen=True,
-        frameless=True,
-        on_top=True,
-        hidden=start_hidden,
-        background_color="#000000",
-        text_select=False,
-    )
+    window_kwargs: dict = {
+        "title": "Baylan Widget",
+        "url": widget_url,
+        "frameless": True,
+        "on_top": True,
+        "hidden": start_hidden,
+        "background_color": "#000000",
+        "text_select": False,
+    }
+    if monitor_bounds is None:
+        window_kwargs["fullscreen"] = True
+    else:
+        x, y, width, height = monitor_bounds
+        window_kwargs["x"] = x
+        window_kwargs["y"] = y
+        window_kwargs["width"] = width
+        window_kwargs["height"] = height
+        window_kwargs["fullscreen"] = False
+
+    window = webview.create_window(**window_kwargs)
 
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
@@ -406,7 +457,12 @@ def _start_with_pywebview(widget_url: str, runtime_ipc: bool = False, start_hidd
     _start_with_fallback(webview)
 
 
-def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> None:
+def _start_with_cef(
+    widget_url: str,
+    runtime_ipc: bool = False,
+    start_hidden: bool = False,
+    monitor_bounds: tuple[int, int, int, int] | None = None,
+) -> None:
     from cefpython3 import cefpython as cef
 
     switches = dict(CHROME_KIOSK_SWITCHES)
@@ -431,6 +487,7 @@ def _start_with_cef(widget_url: str, runtime_ipc: bool = False, start_hidden: bo
         window_title="Baylan Widget",
         settings={"background_color": CEF_BLACK_BACKGROUND},
     )
+    _apply_cef_monitor_bounds(browser, monitor_bounds)
     if start_hidden:
         _set_cef_window_visible(browser, False)
 
@@ -491,6 +548,13 @@ def main() -> int:
     runtime_ipc = "--runtime-ipc" in sys.argv[2:]
     _debug_log(f"main start | argv={sys.argv} runtime_ipc={runtime_ipc}")
     start_hidden = "--start-hidden" in sys.argv[2:]
+    monitor_bounds = None
+    if "--monitor-bounds" in sys.argv[2:]:
+        try:
+            monitor_bounds_arg = sys.argv[sys.argv.index("--monitor-bounds") + 1]
+        except (ValueError, IndexError):
+            monitor_bounds_arg = ""
+        monitor_bounds = _parse_monitor_bounds(monitor_bounds_arg)
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
@@ -504,9 +568,19 @@ def main() -> int:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
             _debug_log(f"backend try={backend} widget_url={widget_url}")
             if backend == "cef":
-                _start_with_cef(widget_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+                _start_with_cef(
+                    widget_url,
+                    runtime_ipc=runtime_ipc,
+                    start_hidden=start_hidden,
+                    monitor_bounds=monitor_bounds,
+                )
             else:
-                _start_with_pywebview(widget_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+                _start_with_pywebview(
+                    widget_url,
+                    runtime_ipc=runtime_ipc,
+                    start_hidden=start_hidden,
+                    monitor_bounds=monitor_bounds,
+                )
             return 0
         except Exception as exc:
             errors.append(f"{backend}: {exc}")

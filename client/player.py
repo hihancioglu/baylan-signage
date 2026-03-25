@@ -1164,13 +1164,18 @@ class BorderlessFullscreenPlayer:
             return [command]
 
         monitor_bounds_list = self._windows_connected_monitor_bounds()
-        if len(monitor_bounds_list) <= 1 or self._is_python_widget_command(command):
+        if len(monitor_bounds_list) <= 1:
             return [command]
 
-        return [
-            [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
-            for monitor_bounds in monitor_bounds_list
-        ]
+        commands: list[list[str]] = []
+        for monitor_bounds in monitor_bounds_list:
+            monitor_command = [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
+            if self._is_python_widget_command(command):
+                x, y, width, height = monitor_bounds
+                monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
+            commands.append(monitor_command)
+
+        return commands
 
     def _build_widget_commands(
         self,
@@ -1202,7 +1207,11 @@ class BorderlessFullscreenPlayer:
             monitor_bounds_list = self._windows_connected_monitor_bounds()
             if target_monitor_index < len(monitor_bounds_list):
                 monitor_bounds = monitor_bounds_list[target_monitor_index]
-                return [[command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]]
+                monitor_command = [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
+                if self._is_python_widget_command(command):
+                    x, y, width, height = monitor_bounds
+                    monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
+                return [monitor_command]
 
         if not clone_enabled:
             return [command]
