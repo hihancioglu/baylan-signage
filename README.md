@@ -22,6 +22,14 @@ docker compose up -d --build
 
 İsterseniz `STATE_LOG_PATH` ile özel bir dosya yolu verebilirsiniz.
 
+## Client ENV Config Dosyası
+
+Client açılırken `client/client.env.json` dosyasını otomatik okur ve içindeki anahtar/değerleri ortam değişkeni gibi yükler.
+
+- Dosyadaki değerler yalnızca ilgili ENV dışarıdan verilmemişse uygulanır (`os.environ.setdefault` davranışı).
+- Böylece deployment tarafında yine gerçek sistem ENV ile override edebilirsiniz.
+- Örnek dosya: `client/client.env.json` (`SERVER_URL`, `CLIENT_DEBUG_MODE`, timeout vb. değerler).
+
 ## Panel Active Directory Girişi
 Panel erişimi için AD tabanlı oturum açma eklendi. Aşağıdaki ortam değişkenlerini ayarlayın:
 
