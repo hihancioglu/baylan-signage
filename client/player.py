@@ -249,6 +249,7 @@ class BorderlessFullscreenPlayer:
             os.getenv("WIDGET_KEEP_RUNTIME_WARM", "1").strip().lower() in {"1", "true", "yes"}
         )
         self._last_interrupted = False
+        self._last_widget_source = ""
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
 
     def _apply_pending_stop_to_media_processes(self, processes: list[subprocess.Popen]) -> bool:
@@ -1058,6 +1059,34 @@ class BorderlessFullscreenPlayer:
             self._terminate_process(process, timeout_sec=2, force_tree=True)
             self._widget_process = None
 
+    def _stop_detached_widget_browser_processes(self) -> None:
+        if os.name != "nt":
+            return
+
+        marker = str(self._last_widget_source or "").lower()
+        # Sadece runtime fallback browser süreçlerini hedefle.
+        if "widget_engine.html" not in marker:
+            return
+
+        script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$procs=Get-CimInstance Win32_Process | "
+            "Where-Object {($_.Name -in @('msedge.exe','chrome.exe')) -and $_.CommandLine -and "
+            "($_.CommandLine -like '*widget_engine.html*') -and ($_.CommandLine -like '*config_b64=*')};"
+            "foreach($p in $procs){ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "check": False,
+        }
+        kwargs.update(self._windows_hidden_process_kwargs())
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], **kwargs)
+            _debug_log("stop detached widget browser processes requested")
+        except Exception:
+            pass
+
     def background_widget_engine(self) -> bool:
         with self._widget_process_lock:
             process = self._widget_process
@@ -1319,6 +1348,7 @@ class BorderlessFullscreenPlayer:
         using_python_widget_viewer = self._is_python_widget_command(commands[0])
         try:
             self._stop_requested = False
+            self._last_widget_source = source
             with self._widget_process_lock:
                 for command in commands:
                     process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
@@ -1673,6 +1703,8 @@ class BorderlessFullscreenPlayer:
         with self._widget_process_lock:
             if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
                 self.stop_widget_engine()
+            elif stop_widget_runtime:
+                self._stop_detached_widget_browser_processes()
             elif not stop_widget_runtime:
                 backgrounded = self.background_widget_engine()
                 # Idle modundan ACTIVE'e dönerken pencere gizlenemezse (ör. runtime

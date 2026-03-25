@@ -931,6 +931,22 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         stop_widget_engine.assert_called_once_with()
 
+    def test_stop_widget_runtime_cleans_detached_widget_browser_when_runtime_not_running(self):
+        player = self._build_player()
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = 0
+        player._widget_process = widget_process
+        player._last_widget_source = "file:///C:/ProgramData/BaylanSignage/RuntimeTmp/client/widget_engine.html?config_b64=abc"
+
+        with patch("client.player.os.name", "nt"), patch("subprocess.run") as run_mock:
+            player.stop(stop_widget_runtime=True)
+
+        run_mock.assert_called_once()
+        args = run_mock.call_args.args[0]
+        self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
+        self.assertIn("widget_engine.html", args[3])
+        self.assertIn("config_b64", args[3])
+
     def test_background_widget_engine_returns_false_when_not_running(self):
         player = self._build_player()
         self.assertFalse(player.background_widget_engine())
