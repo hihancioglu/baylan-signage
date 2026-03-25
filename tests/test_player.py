@@ -381,6 +381,32 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(build_widget_command.call_args.kwargs.get("allow_python_viewer"), False)
         build_for_monitors.assert_called_once_with("https://example.com")
 
+    def test_build_widget_commands_keeps_python_viewer_enabled_for_target_monitor(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["python", "widget_viewer.py", "https://example.com"],
+        ) as build_widget_command, patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_apply_windows_monitor_position",
+            side_effect=lambda parts, monitor_bounds=None: parts,
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=True,
+        ):
+            commands = player._build_widget_commands("https://example.com", target_monitor_index=1, clone_to_all_monitors=False)
+
+        self.assertEqual(build_widget_command.call_args.kwargs.get("allow_python_viewer"), True)
+        self.assertIn("--monitor-bounds", commands[0])
+        self.assertIn("1920,0,1920,1080", commands[0])
+
     def test_launch_media_processes_clones_mpv_per_monitor(self):
         player = self._build_player()
         fake_process = unittest.mock.Mock()
