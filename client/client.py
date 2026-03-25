@@ -3296,11 +3296,11 @@ def run_state_cycle():
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
         return_to_erp_window()
-        # Widget içerikten kullanıcı aktivitesi ile çıkışta ikinci monitörde
-        # kalan detached viewer sürecini engellemek için runtime'ı kapat.
-        # Medya içeriklerinde warm runtime davranışını koruyoruz.
-        stop_widget_runtime_on_return = active_item_type == "widget"
-        playback.stop(stop_widget_runtime=stop_widget_runtime_on_return)
+        # Kullanıcı aktivitesi ile ACTIVE'e dönerken widget runtime'ı sıcak tut.
+        # Böylece bir sonraki idle girişinde runtime yeniden açılıp siyah/masaüstü
+        # flash'i oluşturmaz; stop() içinde gerekirse gizleme başarısızlığında
+        # runtime otomatik kapatılır.
+        playback.stop(stop_widget_runtime=False)
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
