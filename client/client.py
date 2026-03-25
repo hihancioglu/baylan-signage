@@ -1215,15 +1215,27 @@ class MultiMonitorPlayback:
         self._running_monitors: dict[int, bool] = {}
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _connected_monitor_count() -> int | None:
+        if os.name != "nt":
+            return None
+        bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
+        if not bounds:
+            return None
+        return max(1, len(bounds))
+
     def update_from_config(self, monitor_playlists_payload: dict | None):
         monitor_states: dict[int, dict] = {}
         monitor_playlists = monitor_playlists_payload if isinstance(monitor_playlists_payload, dict) else {}
+        connected_monitor_count = self._connected_monitor_count()
         for monitor_no_text, payload in monitor_playlists.items():
             try:
                 monitor_no = int(monitor_no_text)
             except (TypeError, ValueError):
                 continue
             if monitor_no < 2:
+                continue
+            if connected_monitor_count is not None and monitor_no > connected_monitor_count:
                 continue
             if not isinstance(payload, dict):
                 continue
