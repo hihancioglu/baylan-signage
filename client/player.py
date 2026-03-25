@@ -634,6 +634,9 @@ class BorderlessFullscreenPlayer:
             if not python_widget_command:
                 self._python_widget_viewer_runtime_enabled = False
 
+        if python_widget_command:
+            return python_widget_command
+
         if self._is_widget_url(widget_source):
             windows_browser = self._resolve_windows_kiosk_browser()
             if windows_browser:
@@ -651,9 +654,6 @@ class BorderlessFullscreenPlayer:
                 if not widget_arg_included:
                     command.append(widget_source)
                 return command
-
-        if python_widget_command:
-            return python_widget_command
 
         if not str(widget_source or "").strip():
             return []
