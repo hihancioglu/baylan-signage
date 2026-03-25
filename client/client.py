@@ -1249,10 +1249,20 @@ class MultiMonitorPlayback:
                 loop_mode = "sequential"
 
             normalized_items = []
+            widget_items = []
             for item in videos:
                 if not isinstance(item, dict):
                     continue
-                if str(item.get("item_type") or "media").strip().lower() == "widget":
+                item_type = str(item.get("item_type") or "media").strip().lower()
+                if item_type == "widget":
+                    widget_items.append(
+                        {
+                            "item_type": "widget",
+                            "widget_url": str(item.get("widget_url") or item.get("path") or "").strip(),
+                            "widget_payload": item.get("widget_payload"),
+                            "duration_sec": item.get("duration_sec"),
+                        }
+                    )
                     continue
                 normalized_items.append(
                     {
@@ -1273,9 +1283,10 @@ class MultiMonitorPlayback:
             else:
                 local_entries = []
 
+            entries = list(local_entries or []) + widget_items
             monitor_states[monitor_no] = {
-                "enabled": bool(enabled and local_entries),
-                "entries": list(local_entries or []),
+                "enabled": bool(enabled and entries),
+                "entries": entries,
                 "loop_mode": loop_mode,
             }
 
@@ -1346,23 +1357,42 @@ class MultiMonitorPlayback:
                 index = (index + 1) % len(entries)
 
             media_path = str(item.get("local_path") or "")
-            if not media_path:
-                time.sleep(0.2)
-                continue
 
             with self._lock:
                 player = self._players.get(monitor_no)
                 if player is None:
                     player = BorderlessFullscreenPlayer()
                     self._players[monitor_no] = player
-            duration_sec = item.get("duration_sec")
-            media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
-            player.play_blocking(
-                media_path,
-                image_duration_sec=media_duration_sec,
-                target_monitor_index=monitor_no - 1,
-                clone_to_all_monitors=False,
-            )
+            item_type = str(item.get("item_type") or "media").strip().lower()
+            if item_type == "widget":
+                widget_url = str(item.get("widget_url") or item.get("path") or "").strip()
+                widget_payload = item.get("widget_payload")
+                widget_config = widget_payload if isinstance(widget_payload, dict) else None
+                widget_duration_sec = item.get("duration_sec")
+                if not isinstance(widget_duration_sec, int) or widget_duration_sec <= 0:
+                    widget_duration_sec = 15
+                if not widget_url and not widget_config:
+                    time.sleep(0.2)
+                    continue
+                player.play_widget_blocking(
+                    widget_url,
+                    int(widget_duration_sec),
+                    widget_config=widget_config,
+                    target_monitor_index=monitor_no - 1,
+                    clone_to_all_monitors=False,
+                )
+            else:
+                if not media_path:
+                    time.sleep(0.2)
+                    continue
+                duration_sec = item.get("duration_sec")
+                media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
+                player.play_blocking(
+                    media_path,
+                    image_duration_sec=media_duration_sec,
+                    target_monitor_index=monitor_no - 1,
+                    clone_to_all_monitors=False,
+                )
 
 
 class PlaybackController:

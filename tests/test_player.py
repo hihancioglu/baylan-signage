@@ -1767,6 +1767,72 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         media_manager.sync_playlist_entries.assert_called_once()
         self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor2-v2")
 
+    def test_multi_monitor_playback_accepts_widget_only_playlist(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = []
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        multi_monitor.update_from_config(
+            {
+                "2": {
+                    "enabled": True,
+                    "videos": [
+                        {
+                            "item_type": "widget",
+                            "widget_url": "https://example.com/widget",
+                            "duration_sec": 20,
+                        }
+                    ],
+                    "playlist_version": "widget-v2",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                }
+            }
+        )
+
+        self.assertTrue(multi_monitor.has_active_playlist())
+        state = multi_monitor._monitor_states[2]
+        self.assertEqual(len(state["entries"]), 1)
+        self.assertEqual(state["entries"][0]["item_type"], "widget")
+
+    def test_multi_monitor_worker_plays_widget_on_target_monitor(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        mock_player = unittest.mock.Mock()
+        multi_monitor._players[2] = mock_player
+        multi_monitor._running_monitors[2] = True
+        multi_monitor._monitor_states[2] = {
+            "enabled": True,
+            "entries": [
+                {
+                    "item_type": "widget",
+                    "widget_url": "https://example.com/widget",
+                    "duration_sec": 12,
+                }
+            ],
+            "loop_mode": "sequential",
+        }
+
+        def _stop_after_first_play(*_args, **_kwargs):
+            multi_monitor._running_monitors[2] = False
+            return True
+
+        mock_player.play_widget_blocking.side_effect = _stop_after_first_play
+        with patch("time.sleep", return_value=None):
+            multi_monitor._run(2)
+
+        mock_player.play_widget_blocking.assert_called_once_with(
+            "https://example.com/widget",
+            12,
+            widget_config=None,
+            target_monitor_index=1,
+            clone_to_all_monitors=False,
+        )
+
     def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
         from client.client import PlaybackController
 
