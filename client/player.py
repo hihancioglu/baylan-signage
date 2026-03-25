@@ -1203,6 +1203,7 @@ class BorderlessFullscreenPlayer:
         if not processes:
             self._last_interrupted = False
             return False
+        unique_processes = list(dict.fromkeys(processes))
 
         deadline = None
         if max_duration_sec is not None:
@@ -1211,19 +1212,19 @@ class BorderlessFullscreenPlayer:
         while True:
             if self._stop_requested:
                 break
-            if all(process.poll() is not None for process in processes):
+            if all(process.poll() is not None for process in unique_processes):
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
             time.sleep(0.2)
 
-        for process in processes:
+        for process in unique_processes:
             if process.poll() is None:
                 self._terminate_process(process, timeout_sec=2, force_tree=True)
 
         interrupted = self._stop_requested
         self._last_interrupted = interrupted
-        return all(process.returncode in (0, None) for process in processes) or interrupted
+        return all(process.returncode in (0, None) for process in unique_processes) or interrupted
 
     def _hold_widget_slot_for_duration(self, duration_sec: int, already_elapsed_sec: float = 0.0) -> bool:
         remaining_sec = max(0.0, max(1, int(duration_sec)) - max(0.0, float(already_elapsed_sec)))
