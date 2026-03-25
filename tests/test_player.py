@@ -896,12 +896,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=1)
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
-        run_mock.assert_called_once_with(
-            ["taskkill", "/PID", "4242", "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        run_mock.assert_called_once()
+        self.assertEqual(run_mock.call_args.args[0], ["taskkill", "/PID", "4242", "/T", "/F"])
+        self.assertEqual(run_mock.call_args.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(run_mock.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertFalse(run_mock.call_args.kwargs["check"])
 
     def test_stop_keeps_widget_runtime_alive_by_default(self):
         player = self._build_player()
@@ -1041,12 +1040,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=1)
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
-        run_mock.assert_called_once_with(
-            ["taskkill", "/PID", "31337", "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        run_mock.assert_called_once()
+        self.assertEqual(run_mock.call_args.args[0], ["taskkill", "/PID", "31337", "/T", "/F"])
+        self.assertEqual(run_mock.call_args.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(run_mock.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertFalse(run_mock.call_args.kwargs["check"])
 
 
 

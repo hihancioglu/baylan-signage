@@ -287,6 +287,16 @@ class BorderlessFullscreenPlayer:
 
         return kwargs
 
+    @classmethod
+    def _run_taskkill_tree(cls, pid: int) -> None:
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "check": False,
+        }
+        kwargs.update(cls._windows_hidden_process_kwargs())
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], **kwargs)
+
     @staticmethod
     def _python_widget_viewer_enabled() -> bool:
         return os.getenv("PYTHON_WIDGET_VIEWER_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
@@ -1686,12 +1696,7 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
-                    subprocess.run(
-                        ["taskkill", "/PID", str(pid), "/T", "/F"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                    )
+                    BorderlessFullscreenPlayer._run_taskkill_tree(pid)
                     process.wait(timeout=1)
                     return
                 except Exception:
@@ -1716,12 +1721,7 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
-                    subprocess.run(
-                        ["taskkill", "/PID", str(pid), "/T", "/F"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                    )
+                    BorderlessFullscreenPlayer._run_taskkill_tree(pid)
                 except Exception:
                     pass
 
