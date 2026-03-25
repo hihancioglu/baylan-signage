@@ -361,7 +361,8 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch("client.player.os.name", "nt"), patch.object(player, "_is_python_widget_command", return_value=True), patch("client.player.subprocess.CREATE_NO_WINDOW", 134217728, create=True):
             kwargs = player._widget_popen_kwargs(["widget_viewer.exe", "https://example.com"])
 
-        self.assertEqual(kwargs, {"creationflags": 134217728})
+        self.assertEqual(kwargs.get("creationflags"), 134217728)
+        self.assertEqual(kwargs.get("env", {}).get("PYINSTALLER_RESET_ENVIRONMENT"), "1")
 
     def test_widget_popen_kwargs_empty_for_non_python_widget_command(self):
         player = self._build_player()
