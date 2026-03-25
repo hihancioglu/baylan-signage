@@ -336,7 +336,16 @@ class BorderlessFullscreenPlayer:
             return []
 
         monitor_rects.sort(key=lambda item: (item[1], item[0]))
-        return monitor_rects
+
+        unique_monitor_rects: list[tuple[int, int, int, int]] = []
+        seen_rects: set[tuple[int, int, int, int]] = set()
+        for rect in monitor_rects:
+            if rect in seen_rects:
+                continue
+            seen_rects.add(rect)
+            unique_monitor_rects.append(rect)
+
+        return unique_monitor_rects
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
