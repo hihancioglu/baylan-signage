@@ -1701,6 +1701,72 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         cache_key = media_manager.sync_playlist_entries.call_args.args[1]
         self.assertEqual(cache_key, "monitor3-v3")
 
+    def test_multi_monitor_playback_ignores_unplugged_monitor_playlists_on_windows(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m3.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_connected_monitor_count",
+            return_value=2,
+        ):
+            multi_monitor.update_from_config(
+                {
+                    "3": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m3.mp4", "media_type": "video"}],
+                        "playlist_version": "v3",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+        self.assertFalse(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_not_called()
+
+    def test_multi_monitor_playback_keeps_second_monitor_when_two_monitors_connected(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m2.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_connected_monitor_count",
+            return_value=2,
+        ):
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
+                        "playlist_version": "v2",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                    "3": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m3.mp4", "media_type": "video"}],
+                        "playlist_version": "v3",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+        self.assertTrue(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_called_once()
+        self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor2-v2")
+
     def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
         from client.client import PlaybackController
 
