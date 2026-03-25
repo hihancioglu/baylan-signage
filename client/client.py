@@ -61,6 +61,62 @@ builtins.print(
     f"added_path={BASE_DIR}"
 )
 
+
+def _load_env_from_client_config() -> Path | None:
+    config_candidates: list[Path] = []
+
+    if FROZEN_EXECUTABLE_DIR:
+        config_candidates.extend(
+            [
+                FROZEN_EXECUTABLE_DIR / "client.env.json",
+                FROZEN_EXECUTABLE_DIR / "client" / "client.env.json",
+            ]
+        )
+
+    config_candidates.extend(
+        [
+            BASE_DIR / "client.env.json",
+            BASE_DIR / "client" / "client.env.json",
+        ]
+    )
+
+    for candidate in config_candidates:
+        if not candidate.is_file():
+            continue
+
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            builtins.print(f"[startup] config-load-failed path={candidate} error={exc}")
+            continue
+
+        if not isinstance(payload, dict):
+            builtins.print(f"[startup] config-invalid-format path={candidate} expected=object")
+            continue
+
+        for key, value in payload.items():
+            if not isinstance(key, str):
+                continue
+
+            if isinstance(value, bool):
+                normalized = "true" if value else "false"
+            elif value is None:
+                normalized = ""
+            else:
+                normalized = str(value)
+
+            os.environ.setdefault(key, normalized)
+
+        builtins.print(f"[startup] config-loaded path={candidate}")
+        return candidate
+
+    builtins.print("[startup] config-loaded path=none")
+    return None
+
+
+_load_env_from_client_config()
+
+
 def _import_client_modules():
     def _load_by_name(module_name: str):
         return importlib.import_module(module_name)
