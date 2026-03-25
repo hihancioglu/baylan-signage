@@ -1489,6 +1489,18 @@ class BorderlessFullscreenPlayer:
                     f"python_viewer={using_python_widget_viewer}"
                 )
                 return self._hold_widget_slot_for_duration(duration_sec, already_elapsed_sec=wait_elapsed_sec)
+            if (
+                not result
+                and not self._stop_requested
+                and int(duration_sec) > 1
+                and wait_elapsed_sec < float(duration_sec)
+            ):
+                _debug_log(
+                    "widget launcher exited early with failure; holding playback slot | "
+                    f"duration_sec={duration_sec} elapsed_sec={wait_elapsed_sec:.3f} "
+                    f"python_viewer={using_python_widget_viewer}"
+                )
+                self._hold_widget_slot_for_duration(duration_sec, already_elapsed_sec=wait_elapsed_sec)
             return result
         except Exception as exc:
             self._last_interrupted = False

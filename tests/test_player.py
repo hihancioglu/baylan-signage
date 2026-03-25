@@ -1035,6 +1035,39 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         self.assertGreaterEqual(sleep_mock.call_count, 1)
 
+    def test_play_widget_blocking_holds_duration_when_launcher_exits_early_with_failure(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = 2
+        process.returncode = 2
+
+        monotonic_values = iter([400.0, 400.1, 401.6, 401.7])
+
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["BaylanSignageAgent.exe", "--widget", "https://example.com"],
+        ), patch("subprocess.Popen", return_value=process), patch.object(
+            player,
+            "_wait_widget_processes_until_stop",
+            return_value=False,
+        ), patch.object(
+            player,
+            "_hold_widget_slot_for_duration",
+            return_value=True,
+        ) as hold_slot_mock, patch(
+            "time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ):
+            result = player.play_widget_blocking("https://example.com", duration_sec=5)
+
+        self.assertFalse(result)
+        hold_slot_mock.assert_called_once()
+        hold_call = hold_slot_mock.call_args
+        self.assertEqual(hold_call.args[0], 5)
+        self.assertIsInstance(hold_call.kwargs.get("already_elapsed_sec"), float)
+        self.assertGreaterEqual(hold_call.kwargs["already_elapsed_sec"], 0.0)
+
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
         with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):
             player = self._build_player()
