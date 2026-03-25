@@ -216,6 +216,28 @@ class TestRunStateCycle(unittest.TestCase):
         self.assertIn(True, [c.kwargs.get("stop_widget_runtime") for c in fake_playback.stop.call_args_list])
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
+    def test_playing_widget_does_not_return_during_activity_grace_window(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        main._last_observed_idle_sec = 20.0
+        main._activity_drop_streak = max(main.ACTIVITY_DROP_CONFIRM_COUNT - 1, 0)
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=0.0
+        ), patch.object(main.time, "monotonic", return_value=100.5), patch.object(
+            main.window_manager, "is_window_foreground", return_value=False
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_not_called()
+        fake_playback.stop.assert_not_called()
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING

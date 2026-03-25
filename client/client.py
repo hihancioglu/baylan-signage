@@ -238,6 +238,7 @@ ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
 OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
+WIDGET_ACTIVITY_GRACE_SEC = float(os.getenv("WIDGET_ACTIVITY_GRACE_SEC", "1.5"))
 WIDGET_RETURN_REQUIRES_ERP_FOREGROUND = _env_bool("WIDGET_RETURN_REQUIRES_ERP_FOREGROUND", True)
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
@@ -3274,7 +3275,7 @@ def run_state_cycle():
         if active_item_type != "widget" or played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
-    minimum_playing_before_return = 0.0 if active_item_type == "widget" else MIN_PLAYING_SECONDS
+    minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
     if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
         # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
         # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
