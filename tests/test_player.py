@@ -3,6 +3,7 @@ import json
 import os
 from urllib.parse import parse_qs, unquote, urlparse
 import threading
+import time
 import unittest
 import tempfile
 import subprocess
@@ -820,6 +821,35 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_background_widget_engine_returns_false_when_not_running(self):
         player = self._build_player()
         self.assertFalse(player.background_widget_engine())
+
+    def test_start_widget_engine_if_needed_is_single_flight(self):
+        player = self._build_player()
+        started = []
+
+        def _popen_side_effect(*_args, **_kwargs):
+            time.sleep(0.05)
+            process = unittest.mock.Mock()
+            process.poll.return_value = None
+            process.stdin = unittest.mock.Mock()
+            started.append(process)
+            return process
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=["widget_viewer"],
+        ), patch.object(player, "_widget_popen_kwargs", return_value={}), patch(
+            "subprocess.Popen",
+            side_effect=_popen_side_effect,
+        ) as popen_mock:
+            threads = [threading.Thread(target=player.start_widget_engine_if_needed) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=1)
+
+        self.assertEqual(popen_mock.call_count, 1)
+        self.assertEqual(len(started), 1)
 
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
