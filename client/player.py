@@ -1422,7 +1422,7 @@ class BorderlessFullscreenPlayer:
                 result
                 and not self._stop_requested
                 and int(duration_sec) > 1
-                and wait_elapsed_sec < 1.0
+                and wait_elapsed_sec < float(duration_sec)
             ):
                 _debug_log(
                     "widget launcher detached quickly; holding playback slot | "
