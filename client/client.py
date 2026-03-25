@@ -221,6 +221,9 @@ def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
     normalized = {str(arg).strip().lower() for arg in args if isinstance(arg, str)}
     return "--widget" in normalized or "--runtime-ipc" in normalized
 
+
+IS_WIDGET_VIEWER_PROCESS = _is_widget_viewer_process()
+
 SERVER_URL = os.getenv("SERVER_URL", "http://baylan-portainer:5080")
 SECRET = os.getenv("SHARED_SECRET", "change_me_super_secret")
 DEFAULT_IDLE_TIMEOUT_SEC = int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60"))
@@ -682,10 +685,11 @@ def cleanup_runtime_tmp_dir(
     )
 
 
-setup_debug_logging()
-log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
-log_info(f"🏷️ client version: {CLIENT_VERSION}")
-log_info(f"🐞 client debug mode: {CLIENT_DEBUG_MODE}")
+if not IS_WIDGET_VIEWER_PROCESS:
+    setup_debug_logging()
+    log_info(f"🧾 debug logs: {ACTIVE_DEBUG_LOG_PATH}")
+    log_info(f"🏷️ client version: {CLIENT_VERSION}")
+    log_info(f"🐞 client debug mode: {CLIENT_DEBUG_MODE}")
 
 sio = socketio.Client(
     reconnection=False,
@@ -2391,11 +2395,18 @@ class PlaybackController:
 
 
 window_manager = _WindowManager()
-gui_runtime = GuiRuntime()
-playback = PlaybackController(gui_runtime)
-idle_background = IdleBackgroundOverlay(gui_runtime)
-work_order_alert_overlay = WorkOrderAlertOverlay(gui_runtime)
-call_request_overlay = CallRequestOverlay(gui_runtime)
+if IS_WIDGET_VIEWER_PROCESS:
+    gui_runtime = None
+    playback = None
+    idle_background = None
+    work_order_alert_overlay = None
+    call_request_overlay = None
+else:
+    gui_runtime = GuiRuntime()
+    playback = PlaybackController(gui_runtime)
+    idle_background = IdleBackgroundOverlay(gui_runtime)
+    work_order_alert_overlay = WorkOrderAlertOverlay(gui_runtime)
+    call_request_overlay = CallRequestOverlay(gui_runtime)
 processed_command_ids = set()
 processed_lock = threading.Lock()
 shutdown_event = threading.Event()
