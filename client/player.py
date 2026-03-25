@@ -243,6 +243,7 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = False
         self._widget_process = None
         self._widget_process_stdin_lock = threading.Lock()
+        self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
         self._keep_widget_runtime_warm = (
@@ -963,8 +964,16 @@ class BorderlessFullscreenPlayer:
         if not self._widget_runtime_controller_enabled():
             return False
         with self._widget_process_lock:
+            previous_returncode = None
             if self._widget_process and self._widget_process.poll() is None:
                 return True
+            if self._widget_process and self._widget_process.poll() is not None:
+                previous_returncode = self._widget_process.returncode
+                _debug_log(
+                    "widget runtime restart detected | "
+                    f"prev_pid={getattr(self._widget_process, 'pid', None)} "
+                    f"prev_returncode={previous_returncode}"
+                )
 
             source = self._widget_runtime_engine_source()
             command = self._build_python_widget_command(source)
@@ -983,6 +992,13 @@ class BorderlessFullscreenPlayer:
                     text=True,
                     **popen_kwargs,
                 )
+                self._widget_runtime_restart_count += 1
+                _debug_log(
+                    "widget runtime started | "
+                    f"pid={getattr(self._widget_process, 'pid', None)} "
+                    f"restart_count={self._widget_runtime_restart_count} "
+                    f"previous_returncode={previous_returncode}"
+                )
                 return True
             except Exception as exc:
                 _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
@@ -997,14 +1013,24 @@ class BorderlessFullscreenPlayer:
         return bool(self._single_iframe_widget_url(normalized_payload))
 
     def _send_widget_runtime_message(self, message: dict) -> bool:
+        message_type = str(message.get("type") or "").strip().lower()
         if not self.start_widget_engine_if_needed():
+            _debug_log(f"widget runtime message dropped | type={message_type} reason=start_failed")
             return False
 
         process = self._widget_process
         if not process or process.poll() is not None or not process.stdin:
+            _debug_log(
+                "widget runtime message dropped | "
+                f"type={message_type} pid={getattr(process, 'pid', None) if process else None} "
+                f"returncode={process.poll() if process else None} reason=process_not_running"
+            )
             return False
 
-        _debug_log("background_widget_engine requested")
+        _debug_log(
+            "widget runtime message send | "
+            f"type={message_type} pid={getattr(process, 'pid', None)}"
+        )
         try:
             with self._widget_process_stdin_lock:
                 process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
@@ -1158,7 +1184,15 @@ class BorderlessFullscreenPlayer:
             if self._stop_requested:
                 self._last_interrupted = True
                 return True
-            if not self._widget_process or self._widget_process.poll() is not None:
+            process = self._widget_process
+            returncode = None
+            if process is not None:
+                returncode = process.poll()
+            if not process or returncode is not None:
+                _debug_log(
+                    "wait_widget_duration aborted | "
+                    f"reason=widget_process_stopped returncode={returncode}"
+                )
                 self._last_interrupted = False
                 return False
             if time.monotonic() >= deadline:
