@@ -319,6 +319,24 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         unique_positions = {tuple(command[1:]) for command in commands}
         self.assertEqual(len(unique_positions), 2)
 
+    def test_build_widget_commands_disables_python_viewer_when_cloning_on_windows(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"],
+        ) as build_widget_command, patch.object(
+            player,
+            "_build_widget_commands_for_monitors",
+            return_value=[["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"]],
+        ) as build_for_monitors:
+            commands = player._build_widget_commands("https://example.com", clone_to_all_monitors=True)
+
+        self.assertEqual(commands, [["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"]])
+        self.assertEqual(build_widget_command.call_args.kwargs.get("allow_python_viewer"), False)
+        build_for_monitors.assert_called_once_with("https://example.com")
+
     def test_launch_media_processes_clones_mpv_per_monitor(self):
         player = self._build_player()
         fake_process = unittest.mock.Mock()

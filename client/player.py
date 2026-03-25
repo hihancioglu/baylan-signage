@@ -1162,11 +1162,17 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> list[list[str]]:
+        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         allow_python_viewer = not (
             os.name == "nt"
             and isinstance(target_monitor_index, int)
             and target_monitor_index >= 0
         )
+        if os.name == "nt" and clone_enabled and target_monitor_index is None:
+            # Python widget viewer tek pencere başlattığı için çoklu monitör
+            # klonlamada sadece tek ekranda açılabilir ve döngüde tekrar tekrar
+            # başlatılıyormuş gibi görünür. Klon modunda browser komutunu zorla.
+            allow_python_viewer = False
         command = self._build_widget_command(source, allow_python_viewer=allow_python_viewer)
         if not command:
             return []
@@ -1181,7 +1187,6 @@ class BorderlessFullscreenPlayer:
                 monitor_bounds = monitor_bounds_list[target_monitor_index]
                 return [[command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]]
 
-        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         if not clone_enabled:
             return [command]
         return self._build_widget_commands_for_monitors(source)
