@@ -628,11 +628,11 @@ class BorderlessFullscreenPlayer:
             if command:
                 return command
 
+        python_widget_command: list[str] | None = None
         if allow_python_viewer and self._should_use_python_widget_viewer(widget_source):
             python_widget_command = self._build_python_widget_command(widget_source)
-            if python_widget_command:
-                return python_widget_command
-            self._python_widget_viewer_runtime_enabled = False
+            if not python_widget_command:
+                self._python_widget_viewer_runtime_enabled = False
 
         if self._is_widget_url(widget_source):
             windows_browser = self._resolve_windows_kiosk_browser()
@@ -651,6 +651,9 @@ class BorderlessFullscreenPlayer:
                 if not widget_arg_included:
                     command.append(widget_source)
                 return command
+
+        if python_widget_command:
+            return python_widget_command
 
         if not str(widget_source or "").strip():
             return []
@@ -1267,7 +1270,7 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> list[list[str]]:
-        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         allow_python_viewer = True
         if os.name == "nt" and clone_enabled and target_monitor_index is None:
             # Python widget viewer tek pencere başlattığı için çoklu monitör

@@ -2227,7 +2227,18 @@ class PlaybackController:
                         widget_url, widget_config, widget_signature = widget_spec
                         log_debug(f"widget spec | direct_url_candidate={self.player.is_direct_url_widget(widget_config)} signature={widget_signature}")
                         direct_url_widget = self.player.is_direct_url_widget(widget_config)
-                        clone_widget_to_all_monitors = self._clone_to_all_monitors and os.name == "nt"
+                        has_multiple_monitors = False
+                        monitor_bounds_reader = getattr(self.player, "_windows_connected_monitor_bounds", None)
+                        if callable(monitor_bounds_reader):
+                            try:
+                                has_multiple_monitors = len(monitor_bounds_reader()) > 1
+                            except Exception:
+                                has_multiple_monitors = False
+                        clone_widget_to_all_monitors = (
+                            self._clone_to_all_monitors
+                            and os.name == "nt"
+                            and has_multiple_monitors
+                        )
                         primary_target_monitor_index = self._primary_target_monitor_index()
                         if direct_url_widget or clone_widget_to_all_monitors:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
