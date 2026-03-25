@@ -564,7 +564,7 @@ class BorderlessFullscreenPlayer:
         return ext in self.VIDEO_EXTENSIONS or ext in self.IMAGE_EXTENSIONS
 
 
-    def _build_widget_command(self, widget_source: str) -> list[str]:
+    def _build_widget_command(self, widget_source: str, *, allow_python_viewer: bool = True) -> list[str]:
         command_template = os.getenv("WIDGET_PLAYER_COMMAND", "")
         if command_template.strip():
             parts = self._split_command_text(command_template)
@@ -573,7 +573,7 @@ class BorderlessFullscreenPlayer:
             if command:
                 return command
 
-        if self._should_use_python_widget_viewer(widget_source):
+        if allow_python_viewer and self._should_use_python_widget_viewer(widget_source):
             python_widget_command = self._build_python_widget_command(widget_source)
             if python_widget_command:
                 return python_widget_command
@@ -1129,6 +1129,37 @@ class BorderlessFullscreenPlayer:
             for monitor_bounds in monitor_bounds_list
         ]
 
+    def _build_widget_commands(
+        self,
+        source: str,
+        *,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> list[list[str]]:
+        allow_python_viewer = not (
+            os.name == "nt"
+            and isinstance(target_monitor_index, int)
+            and target_monitor_index >= 0
+        )
+        command = self._build_widget_command(source, allow_python_viewer=allow_python_viewer)
+        if not command:
+            return []
+
+        if (
+            os.name == "nt"
+            and isinstance(target_monitor_index, int)
+            and target_monitor_index >= 0
+        ):
+            monitor_bounds_list = self._windows_connected_monitor_bounds()
+            if target_monitor_index < len(monitor_bounds_list):
+                monitor_bounds = monitor_bounds_list[target_monitor_index]
+                return [[command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]]
+
+        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        if not clone_enabled:
+            return [command]
+        return self._build_widget_commands_for_monitors(source)
+
     def _launch_media_processes(
         self,
         command: list[str],
@@ -1166,6 +1197,8 @@ class BorderlessFullscreenPlayer:
         widget_source: str,
         duration_sec: int,
         widget_config: dict | None = None,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
     ) -> bool:
         source = self._build_widget_source(widget_source, widget_config=widget_config)
         _debug_log(f"play_widget_blocking start | duration_sec={duration_sec} source={source[:140] if source else ''}")
@@ -1174,8 +1207,10 @@ class BorderlessFullscreenPlayer:
             _safe_print("⚠️ widget kaynağı boş")
             return False
 
+        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         multi_monitor_widget_mode = (
-            self._should_clone_to_all_monitors()
+            clone_enabled
+            and target_monitor_index is None
             and os.name == "nt"
             and len(self._windows_connected_monitor_bounds()) > 1
         )
@@ -1194,7 +1229,11 @@ class BorderlessFullscreenPlayer:
 
         self.stop()
 
-        commands = self._build_widget_commands_for_monitors(source)
+        commands = self._build_widget_commands(
+            source,
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        )
         _debug_log(f"play_widget_blocking fallback process commands={commands}")
         if not commands:
             self._last_interrupted = False
