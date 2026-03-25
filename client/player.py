@@ -16,6 +16,7 @@ import logging
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 
 def _safe_print(message: str) -> None:
@@ -704,11 +705,40 @@ class BorderlessFullscreenPlayer:
                 pass
 
         if BorderlessFullscreenPlayer._is_widget_url(source):
-            return source
+            return BorderlessFullscreenPlayer._maybe_remap_stale_engine_uri(source)
         if "://" not in source and not source.startswith(("/", "\\")):
             scheme = BorderlessFullscreenPlayer._default_widget_scheme(source)
             return f"{scheme}://{source}"
         return source
+
+    @staticmethod
+    def _maybe_remap_stale_engine_uri(widget_source: str) -> str:
+        """Remap stale _MEI widget_engine file:// URLs to current runtime path."""
+        try:
+            parsed = urlsplit(widget_source)
+        except Exception:
+            return widget_source
+
+        if parsed.scheme.lower() != "file":
+            return widget_source
+
+        decoded_path = unquote(parsed.path or "")
+        candidate = Path(decoded_path)
+        if os.name == "nt" and decoded_path.startswith("/") and len(decoded_path) > 3 and decoded_path[2] == ":":
+            candidate = Path(decoded_path.lstrip("/"))
+
+        if candidate.name.lower() != "widget_engine.html":
+            return widget_source
+        if candidate.is_file():
+            return widget_source
+
+        local_engine = _resolve_runtime_resource("widget_engine.html")
+        if not local_engine.is_file():
+            return widget_source
+
+        remapped = local_engine.resolve().as_uri()
+        local_parsed = urlsplit(remapped)
+        return urlunsplit((local_parsed.scheme, local_parsed.netloc, local_parsed.path, parsed.query, parsed.fragment))
 
     @staticmethod
     def _default_widget_scheme(raw_source: str) -> str:
