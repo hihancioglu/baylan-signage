@@ -1674,6 +1674,62 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         player.stop.assert_called_once()
 
+    def test_multi_monitor_playback_detects_active_playlist_on_third_monitor(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m3.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        multi_monitor.update_from_config(
+            {
+                "1": {"enabled": True, "videos": []},
+                "3": {
+                    "enabled": True,
+                    "videos": [{"path": "https://example.com/m3.mp4", "media_type": "video"}],
+                    "playlist_version": "v3",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                },
+            }
+        )
+
+        self.assertTrue(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_called_once()
+        cache_key = media_manager.sync_playlist_entries.call_args.args[1]
+        self.assertEqual(cache_key, "monitor3-v3")
+
+    def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        controller.media_manager.sync_playlist_entries.return_value = []
+        controller.media_manager.load_last_successful_playlist_entries.return_value = []
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = True
+
+        controller.update_from_config(
+            {
+                "enabled": True,
+                "videos": [],
+                "playlist_version": "v1",
+                "monitor_playlists": {
+                    "1": {"enabled": True, "videos": []},
+                    "4": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m4.mp4", "media_type": "video"}],
+                        "playlist_version": "v4",
+                    },
+                },
+            }
+        )
+
+        controller.multi_monitor_playback.update_from_config.assert_called_once()
+        self.assertFalse(controller._clone_to_all_monitors)
+
 
 if __name__ == "__main__":
     unittest.main()
