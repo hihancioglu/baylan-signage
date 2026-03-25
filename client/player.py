@@ -71,8 +71,10 @@ def _resolve_runtime_resource(*relative_parts: str) -> Path:
 
     for candidate in candidates:
         if candidate.is_file():
+            _debug_log(f"_resolve_runtime_resource hit | relative={relative_parts} candidate={candidate}")
             return candidate
 
+    _debug_log(f"_resolve_runtime_resource miss | relative={relative_parts} fallback={primary}")
     return primary
 
 
@@ -435,6 +437,11 @@ class BorderlessFullscreenPlayer:
     def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
         viewer_path = _resolve_runtime_resource("widget_viewer.py")
         parent_pid = str(os.getpid())
+        _debug_log(
+            "_build_python_widget_command | "
+            f"frozen={getattr(sys, 'frozen', False)} viewer_path={viewer_path} "
+            f"viewer_exists={viewer_path.is_file()} widget_source={widget_source[:120]}"
+        )
         if getattr(sys, "frozen", False):
             return [sys.executable, "--widget", widget_source, "--parent-pid", parent_pid]
         if not viewer_path.is_file():
@@ -1037,6 +1044,10 @@ class BorderlessFullscreenPlayer:
             try:
                 self._stop_requested = False
                 popen_kwargs = self._widget_popen_kwargs(command)
+                _debug_log(
+                    "widget runtime spawn attempt | "
+                    f"cwd={Path.cwd()} command={command} popen_kwargs_keys={list(popen_kwargs.keys())}"
+                )
                 self._widget_process = subprocess.Popen(
                     command,
                     stdin=subprocess.PIPE,
@@ -1051,6 +1062,14 @@ class BorderlessFullscreenPlayer:
                     f"previous_returncode={previous_returncode}"
                 )
                 return True
+            except FileNotFoundError as exc:
+                _debug_log(
+                    "widget runtime spawn FileNotFoundError | "
+                    f"filename={exc.filename} strerror={exc.strerror} cwd={Path.cwd()} command={command}"
+                )
+                _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
+                self._widget_process = None
+                return False
             except Exception as exc:
                 _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
                 self._widget_process = None

@@ -43,6 +43,7 @@ def _safe_print(message: str) -> None:
 
 def _normalize_url(source: str) -> str:
     url = str(source or "").strip()
+    _debug_log(f"_normalize_url input={url}")
     if not url:
         raise ValueError("Widget URL boş")
 
@@ -67,10 +68,17 @@ def _normalize_url(source: str) -> str:
             pass
 
     if url.lower().startswith(("http://", "https://", "file://")):
-        return _maybe_remap_stale_engine_uri(url)
+        remapped = _maybe_remap_stale_engine_uri(url)
+        if remapped != url:
+            _debug_log(f"_normalize_url remapped_stale_engine_uri from={url} to={remapped}")
+        if remapped.lower().startswith("file://"):
+            _debug_log(f"_normalize_url file_uri={remapped}")
+        return remapped
 
     scheme = _default_widget_scheme(url)
-    return f"{scheme}://{url}"
+    normalized = f"{scheme}://{url}"
+    _debug_log(f"_normalize_url normalized_with_scheme={normalized}")
+    return normalized
 
 
 
@@ -162,8 +170,10 @@ def _resolve_runtime_resource(*relative_parts: str) -> Path:
 
     for candidate in candidates:
         if candidate.is_file():
+            _debug_log(f"_resolve_runtime_resource hit | relative={relative_parts} candidate={candidate}")
             return candidate
 
+    _debug_log(f"_resolve_runtime_resource miss | relative={relative_parts} fallback={primary}")
     return primary
 
 
@@ -309,14 +319,17 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
     source = _normalize_url(widget_url) if str(widget_url or "").strip() else ""
     has_layout_config = isinstance(widget_config, dict) and isinstance(widget_config.get("widgets"), list)
     if not single_engine_enabled:
+        _debug_log(f"_build_engine_url single_engine_disabled source={source}")
         return source
 
     if not has_layout_config:
+        _debug_log(f"_build_engine_url no_layout_config source={source}")
         return source
 
     payload = _normalize_widget_payload(widget_config if isinstance(widget_config, dict) else {}, fallback_url=source)
 
     engine_uri = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
+    _debug_log(f"_build_engine_url engine_uri={engine_uri} widget_count={len(payload.get('widgets') or [])}")
     encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
     return f"{engine_uri}?config_b64={encoded}"
 
@@ -611,6 +624,12 @@ def main() -> int:
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
+        if widget_url.lower().startswith("file://"):
+            parsed_widget_url = urlsplit(widget_url)
+            decoded_widget_path = unquote(parsed_widget_url.path or "")
+            _debug_log(
+                f"main normalized file widget path={decoded_widget_path} exists={Path(decoded_widget_path).exists()}"
+            )
     except Exception as exc:
         _safe_print(f"Geçersiz widget URL: {exc}")
         return 2
