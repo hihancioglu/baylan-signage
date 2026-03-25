@@ -125,7 +125,7 @@
                 <div class="row g-2 mb-3 align-items-center">
                   <div class="col-12 col-md-4"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
                   <div class="col-12 col-md-3"><input id="new-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Idle Timeout (sn)" /></div>
-                  <div class="col-12 col-md-2"><select id="new-group-monitor-count" class="form-select"><option value="1">1 Monitor</option><option value="2">2 Monitor</option></select></div>
+                  <div class="col-12 col-md-2"><select id="new-group-monitor-count" class="form-select"><option value="1">1 Monitor</option><option value="2">2 Monitor</option><option value="3">3 Monitor</option><option value="4">4 Monitor</option></select></div>
                   <div class="col-auto"><div class="form-check"><input class="form-check-input" type="checkbox" id="new-group-idle-enabled" checked><label class="form-check-label" for="new-group-idle-enabled">IDLE aktif</label></div><div class="form-check"><input class="form-check-input" type="checkbox" id="new-group-content-enabled" checked><label class="form-check-label" for="new-group-content-enabled">İçerik aktif</label></div></div><div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
                 </div>
                 <div class="table-responsive">
@@ -270,11 +270,13 @@
                   <input type="hidden" id="modal-group-id" />
                   <div class="mb-3"><label class="form-label">Grup Adı</label><input id="modal-group-name" class="form-control" /></div>
                   <div class="mb-3"><label class="form-label">Idle Timeout (sn)</label><input id="modal-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Boş bırak: client varsayılanı" /></div>
-                  <div class="mb-3"><label class="form-label">Monitor Sayısı</label><select id="modal-group-monitor-count" class="form-select" onchange="toggleGroupMonitorPlaylistFields()"><option value="1">1 Monitor</option><option value="2">2 Monitor</option></select></div>
+                  <div class="mb-3"><label class="form-label">Monitor Sayısı</label><select id="modal-group-monitor-count" class="form-select" onchange="toggleGroupMonitorPlaylistFields()"><option value="1">1 Monitor</option><option value="2">2 Monitor</option><option value="3">3 Monitor</option><option value="4">4 Monitor</option></select></div>
                   <div class="form-check mb-2"><input id="modal-group-idle-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-group-idle-enabled">IDLE modu aktif</label></div>
                   <div class="form-check mb-3"><input id="modal-group-content-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-group-content-enabled">İçerik oynatma aktif</label></div>
                   <div class="mb-3"><label class="form-label">Monitor 1 Playlist</label><select id="modal-group-playlist-monitor-1" class="form-select"></select></div>
                   <div id="modal-group-monitor-2-wrapper"><label class="form-label">Monitor 2 Playlist</label><select id="modal-group-playlist-monitor-2" class="form-select"></select></div>
+                  <div id="modal-group-monitor-3-wrapper" class="d-none"><label class="form-label">Monitor 3 Playlist</label><select id="modal-group-playlist-monitor-3" class="form-select"></select></div>
+                  <div id="modal-group-monitor-4-wrapper" class="d-none"><label class="form-label">Monitor 4 Playlist</label><select id="modal-group-playlist-monitor-4" class="form-select"></select></div>
                 </div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
@@ -771,10 +773,12 @@ async function loadGroupsPlaylists(){
   cachedGroups = groups || [];
 
   const pOpts = '<option value="">Playlist yok</option>' + (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
-  const modalPlaylistSelect1 = document.getElementById('modal-group-playlist-monitor-1');
-  const modalPlaylistSelect2 = document.getElementById('modal-group-playlist-monitor-2');
-  modalPlaylistSelect1.innerHTML = pOpts;
-  modalPlaylistSelect2.innerHTML = pOpts;
+  [1,2,3,4].forEach((monitorNo) => {
+    const monitorSelect = document.getElementById(`modal-group-playlist-monitor-${monitorNo}`);
+    if(monitorSelect){
+      monitorSelect.innerHTML = pOpts;
+    }
+  });
 
   const pa = document.getElementById('playlist-add-select');
   const po = document.getElementById('playlist-order-select');
@@ -1384,7 +1388,12 @@ async function createGroup(){
 
 function toggleGroupMonitorPlaylistFields(){
   const monitorCount = Number(document.getElementById('modal-group-monitor-count').value || '1') || 1;
-  document.getElementById('modal-group-monitor-2-wrapper').classList.toggle('d-none', monitorCount < 2);
+  [2,3,4].forEach((monitorNo) => {
+    const wrapper = document.getElementById(`modal-group-monitor-${monitorNo}-wrapper`);
+    if(wrapper){
+      wrapper.classList.toggle('d-none', monitorCount < monitorNo);
+    }
+  });
 }
 
 function openGroupEditModal(groupId){
@@ -1395,8 +1404,12 @@ function openGroupEditModal(groupId){
   const monitorCount = Math.max(1, Number(group.monitor_count || 1));
   const playlistsByMonitor = group.playlists_by_monitor || {};
   document.getElementById('modal-group-monitor-count').value = String(monitorCount);
-  document.getElementById('modal-group-playlist-monitor-1').value = playlistsByMonitor['1']?.id ? String(playlistsByMonitor['1'].id) : '';
-  document.getElementById('modal-group-playlist-monitor-2').value = playlistsByMonitor['2']?.id ? String(playlistsByMonitor['2'].id) : '';
+  [1,2,3,4].forEach((monitorNo) => {
+    const select = document.getElementById(`modal-group-playlist-monitor-${monitorNo}`);
+    if(select){
+      select.value = playlistsByMonitor[String(monitorNo)]?.id ? String(playlistsByMonitor[String(monitorNo)].id) : '';
+    }
+  });
   document.getElementById('modal-group-idle-timeout').value = group.idle_timeout_sec ? String(group.idle_timeout_sec) : '';
   document.getElementById('modal-group-idle-enabled').checked = group.idle_mode_enabled !== false;
   document.getElementById('modal-group-content-enabled').checked = group.content_enabled !== false;
@@ -1407,8 +1420,11 @@ function openGroupEditModal(groupId){
 async function saveGroupModal(){
   const groupId = Number(document.getElementById('modal-group-id').value);
   const name = document.getElementById('modal-group-name').value.trim();
-  const playlistIdMonitor1 = Number(document.getElementById('modal-group-playlist-monitor-1').value);
-  const playlistIdMonitor2 = Number(document.getElementById('modal-group-playlist-monitor-2').value);
+  const selectedPlaylistByMonitor = {};
+  [1,2,3,4].forEach((monitorNo) => {
+    const select = document.getElementById(`modal-group-playlist-monitor-${monitorNo}`);
+    selectedPlaylistByMonitor[String(monitorNo)] = Number(select?.value || 0) || null;
+  });
   const monitorCount = Number(document.getElementById('modal-group-monitor-count').value || '1') || 1;
   const idleTimeoutRaw = document.getElementById('modal-group-idle-timeout').value.trim();
   if(!groupId || !name){
@@ -1435,35 +1451,23 @@ async function saveGroupModal(){
 
   const group = cachedGroups.find(x => x.id === groupId);
   const playlistsByMonitor = group?.playlists_by_monitor || {};
-  const currentPlaylistIdMonitor1 = playlistsByMonitor['1']?.id || null;
-  const currentPlaylistIdMonitor2 = playlistsByMonitor['2']?.id || null;
-
-  if(playlistIdMonitor1 && playlistIdMonitor1 !== currentPlaylistIdMonitor1){
-    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistIdMonitor1}?monitor_no=1`, {});
-    if(!assignResp.ok){
-      alert(assignResp.error || 'Playlist atanamadı');
-      return;
+  for(const monitorNo of [1,2,3,4]){
+    const key = String(monitorNo);
+    const currentPlaylistId = playlistsByMonitor[key]?.id || null;
+    const selectedPlaylistId = selectedPlaylistByMonitor[key];
+    if(monitorNo <= monitorCount && selectedPlaylistId && selectedPlaylistId !== currentPlaylistId){
+      const assignResp = await jpost(`/api/groups/${groupId}/playlist/${selectedPlaylistId}?monitor_no=${monitorNo}`, {});
+      if(!assignResp.ok){
+        alert(assignResp.error || `Monitor ${monitorNo} playlist atanamadı`);
+        return;
+      }
     }
-  }
-  if(!playlistIdMonitor1 && currentPlaylistIdMonitor1){
-    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist?monitor_no=1`);
-    if(!unbindResp.ok){
-      alert(unbindResp.error || 'Playlist kaldırma hatası');
-      return;
-    }
-  }
-  if(monitorCount >= 2 && playlistIdMonitor2 && playlistIdMonitor2 !== currentPlaylistIdMonitor2){
-    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistIdMonitor2}?monitor_no=2`, {});
-    if(!assignResp.ok){
-      alert(assignResp.error || 'Monitor 2 playlist atanamadı');
-      return;
-    }
-  }
-  if((monitorCount < 2 || !playlistIdMonitor2) && currentPlaylistIdMonitor2){
-    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist?monitor_no=2`);
-    if(!unbindResp.ok){
-      alert(unbindResp.error || 'Monitor 2 playlist kaldırma hatası');
-      return;
+    if((monitorNo > monitorCount || !selectedPlaylistId) && currentPlaylistId){
+      const unbindResp = await jdelete(`/api/groups/${groupId}/playlist?monitor_no=${monitorNo}`);
+      if(!unbindResp.ok){
+        alert(unbindResp.error || `Monitor ${monitorNo} playlist kaldırma hatası`);
+        return;
+      }
     }
   }
 

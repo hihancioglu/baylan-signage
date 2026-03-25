@@ -1206,77 +1206,121 @@ class CallRequestOverlay:
         return self._gui_runtime.call_overlay_active()
 
 
-class SecondaryMonitorPlayback:
+class MultiMonitorPlayback:
     def __init__(self, media_manager: MediaManager):
-        self.player = BorderlessFullscreenPlayer()
         self.media_manager = media_manager
-        self._entries: list[dict] = []
-        self._loop_mode = "sequential"
-        self._enabled = False
+        self._monitor_states: dict[int, dict] = {}
+        self._players: dict[int, BorderlessFullscreenPlayer] = {}
+        self._workers: dict[int, threading.Thread] = {}
+        self._running_monitors: dict[int, bool] = {}
         self._lock = threading.Lock()
-        self._running = False
-        self._worker = None
 
-    def update_from_config(self, monitor_payload: dict | None):
-        payload = monitor_payload if isinstance(monitor_payload, dict) else {}
-        enabled = bool(payload.get("enabled"))
-        videos = payload.get("videos") or []
-        playlist_version = str(payload.get("playlist_version") or "monitor2-empty")
-        media_signatures = payload.get("media_signatures") or {}
-        loop_mode = str(payload.get("loop_mode") or "sequential").strip().lower()
-        if loop_mode not in {"sequential", "random"}:
-            loop_mode = "sequential"
-
-        normalized_items = []
-        for item in videos:
-            if not isinstance(item, dict):
+    def update_from_config(self, monitor_playlists_payload: dict | None):
+        monitor_states: dict[int, dict] = {}
+        monitor_playlists = monitor_playlists_payload if isinstance(monitor_playlists_payload, dict) else {}
+        for monitor_no_text, payload in monitor_playlists.items():
+            try:
+                monitor_no = int(monitor_no_text)
+            except (TypeError, ValueError):
                 continue
-            if str(item.get("item_type") or "media").strip().lower() == "widget":
+            if monitor_no < 2:
                 continue
-            normalized_items.append({"path": item.get("path"), "media_type": item.get("media_type"), "duration_sec": item.get("duration_sec"), "item_type": "media"})
+            if not isinstance(payload, dict):
+                continue
 
-        if enabled and normalized_items:
-            local_entries = self.media_manager.sync_playlist_entries(
-                normalized_items,
-                f"monitor2-{playlist_version}",
-                media_signatures,
-                progress_callback=None,
-            )
-        else:
-            local_entries = []
+            enabled = bool(payload.get("enabled"))
+            videos = payload.get("videos") or []
+            playlist_version = str(payload.get("playlist_version") or f"monitor{monitor_no}-empty")
+            media_signatures = payload.get("media_signatures") or {}
+            loop_mode = str(payload.get("loop_mode") or "sequential").strip().lower()
+            if loop_mode not in {"sequential", "random"}:
+                loop_mode = "sequential"
+
+            normalized_items = []
+            for item in videos:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("item_type") or "media").strip().lower() == "widget":
+                    continue
+                normalized_items.append(
+                    {
+                        "path": item.get("path"),
+                        "media_type": item.get("media_type"),
+                        "duration_sec": item.get("duration_sec"),
+                        "item_type": "media",
+                    }
+                )
+
+            if enabled and normalized_items:
+                local_entries = self.media_manager.sync_playlist_entries(
+                    normalized_items,
+                    f"monitor{monitor_no}-{playlist_version}",
+                    media_signatures,
+                    progress_callback=None,
+                )
+            else:
+                local_entries = []
+
+            monitor_states[monitor_no] = {
+                "enabled": bool(enabled and local_entries),
+                "entries": list(local_entries or []),
+                "loop_mode": loop_mode,
+            }
 
         with self._lock:
-            self._enabled = bool(enabled and local_entries)
-            self._entries = list(local_entries or [])
-            self._loop_mode = loop_mode
+            self._monitor_states = monitor_states
 
     def has_active_playlist(self) -> bool:
         with self._lock:
-            return bool(self._enabled and self._entries)
+            return any(state.get("enabled") and state.get("entries") for state in self._monitor_states.values())
 
     def start(self):
-        if self._worker and self._worker.is_alive():
-            return
-        self._running = True
-        self._worker = threading.Thread(target=self._run, daemon=True)
-        self._worker.start()
+        with self._lock:
+            monitor_numbers = sorted(self._monitor_states.keys())
+        for monitor_no in monitor_numbers:
+            self._ensure_worker(monitor_no)
 
     def stop(self):
-        self._running = False
-        self.player.stop()
-        if self._worker and self._worker.is_alive():
-            self._worker.join(timeout=1)
+        workers: list[threading.Thread] = []
+        with self._lock:
+            monitor_numbers = set(self._workers.keys()) | set(self._players.keys()) | set(self._running_monitors.keys())
+            for monitor_no in monitor_numbers:
+                self._running_monitors[monitor_no] = False
+                player = self._players.get(monitor_no)
+                if player:
+                    player.stop()
+                worker = self._workers.get(monitor_no)
+                if worker and worker.is_alive():
+                    workers.append(worker)
+        for worker in workers:
+            worker.join(timeout=1)
 
     def pause(self):
-        self.player.stop()
+        with self._lock:
+            players = list(self._players.values())
+        for player in players:
+            player.stop()
 
-    def _run(self):
+    def _ensure_worker(self, monitor_no: int):
+        with self._lock:
+            existing = self._workers.get(monitor_no)
+            if existing and existing.is_alive():
+                return
+            self._running_monitors[monitor_no] = True
+            worker = threading.Thread(target=self._run, args=(monitor_no,), daemon=True)
+            self._workers[monitor_no] = worker
+        worker.start()
+
+    def _run(self, monitor_no: int):
         index = 0
-        while self._running:
+        while True:
             with self._lock:
-                enabled = self._enabled
-                entries = list(self._entries)
-                loop_mode = self._loop_mode
+                if not self._running_monitors.get(monitor_no, False):
+                    return
+                monitor_state = dict(self._monitor_states.get(monitor_no) or {})
+                enabled = bool(monitor_state.get("enabled"))
+                entries = list(monitor_state.get("entries") or [])
+                loop_mode = str(monitor_state.get("loop_mode") or "sequential")
 
             if not enabled or not entries:
                 time.sleep(0.5)
@@ -1294,12 +1338,17 @@ class SecondaryMonitorPlayback:
                 time.sleep(0.2)
                 continue
 
+            with self._lock:
+                player = self._players.get(monitor_no)
+                if player is None:
+                    player = BorderlessFullscreenPlayer()
+                    self._players[monitor_no] = player
             duration_sec = item.get("duration_sec")
             media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
-            self.player.play_blocking(
+            player.play_blocking(
                 media_path,
                 image_duration_sec=media_duration_sec,
-                target_monitor_index=1,
+                target_monitor_index=monitor_no - 1,
                 clone_to_all_monitors=False,
             )
 
@@ -1338,7 +1387,7 @@ class PlaybackController:
         self._active_widget_signature: str | None = None
         self._prewarmed_widget_signature: str | None = None
         self._clone_to_all_monitors = True
-        self.secondary_monitor_playback = SecondaryMonitorPlayback(self.media_manager)
+        self.multi_monitor_playback = MultiMonitorPlayback(self.media_manager)
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
@@ -1761,9 +1810,8 @@ class PlaybackController:
         loop_mode = str(selected_payload.get("loop_mode") or "sequential").strip().lower()
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
-        secondary_payload = monitor_playlists.get("2") if isinstance(monitor_playlists, dict) else None
-        self.secondary_monitor_playback.update_from_config(secondary_payload)
-        self._clone_to_all_monitors = not self.secondary_monitor_playback.has_active_playlist()
+        self.multi_monitor_playback.update_from_config(monitor_playlists)
+        self._clone_to_all_monitors = not self.multi_monitor_playback.has_active_playlist()
 
         normalized_items = []
         for item in videos:
@@ -1844,7 +1892,7 @@ class PlaybackController:
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
-        self.secondary_monitor_playback.start()
+        self.multi_monitor_playback.start()
         print("▶️ playback worker started")
 
     def stop(self, stop_widget_runtime: bool | None = None):
@@ -1852,7 +1900,7 @@ class PlaybackController:
         self.overlay.hide()
         self._background_overlay.hide()
         self.player.stop(stop_widget_runtime=stop_widget_runtime)
-        self.secondary_monitor_playback.stop()
+        self.multi_monitor_playback.stop()
 
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=1)
@@ -1867,7 +1915,7 @@ class PlaybackController:
                     self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
                 self._persist_playback_state()
         self.player.stop()
-        self.secondary_monitor_playback.pause()
+        self.multi_monitor_playback.pause()
 
     def _run(self):
         try:
