@@ -190,7 +190,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertIn(True, [c.kwargs.get("stop_widget_runtime") for c in fake_playback.stop.call_args_list])
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
@@ -213,7 +213,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertIn(True, [c.kwargs.get("stop_widget_runtime") for c in fake_playback.stop.call_args_list])
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_does_not_return_during_activity_grace_window(self):
