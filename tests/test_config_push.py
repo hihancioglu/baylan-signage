@@ -17,7 +17,9 @@ class TestConfigPush(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls._tmpdir.cleanup()
+        # app.main is shared across test modules in the same interpreter process.
+        # Keeping this temp DB alive avoids cross-module readonly sqlite handles.
+        pass
 
 
     def test_build_command_contract_generates_unique_command_ids(self):
@@ -696,7 +698,8 @@ class TestConfigPush(unittest.TestCase):
         db = self.main.db_session()
         try:
             group = self.main.Group(name="Ann Group")
-            device = self.main.Device(hostname="pc-ann")
+            target_hostname = "pc-ann-config-push"
+            device = self.main.Device(hostname=target_hostname)
             db.add_all([group, device])
             db.commit()
 
@@ -716,7 +719,7 @@ class TestConfigPush(unittest.TestCase):
         finally:
             db.close()
 
-        cfg = self.main.build_config("pc-ann")
+        cfg = self.main.build_config(target_hostname)
         self.assertTrue(cfg.get("announcement_active"))
         self.assertEqual(cfg.get("announcement_message"), "Bakım bildirimi")
 

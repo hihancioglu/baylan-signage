@@ -1235,6 +1235,8 @@ class MultiMonitorPlayback:
     def _connected_monitor_count() -> int | None:
         if os.name != "nt":
             return None
+        if os.getenv("STRICT_MULTI_MONITOR_MATCH", "0").strip().lower() not in {"1", "true", "yes"}:
+            return None
         bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
         if not bounds:
             return None

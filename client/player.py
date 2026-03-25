@@ -207,9 +207,18 @@ class BorderlessFullscreenPlayer:
             else:
                 positioned_flags.append(flag)
 
-        if not position_replaced:
+        has_window_position_flag = any(
+            isinstance(flag, str) and flag.startswith("--window-position=")
+            for flag in flags
+        )
+        has_window_size_flag = any(
+            isinstance(flag, str) and flag.startswith("--window-size=")
+            for flag in flags
+        )
+
+        if has_window_size_flag and not position_replaced:
             positioned_flags.append(f"--window-position={x},{y}")
-        if not size_replaced:
+        if has_window_position_flag and not size_replaced:
             positioned_flags.append(f"--window-size={width},{height}")
 
         return positioned_flags
@@ -394,10 +403,11 @@ class BorderlessFullscreenPlayer:
         if not command:
             return False
         script_path = str(_runtime_resource_path("widget_viewer.py"))
-        normalized_executable = str(Path(sys.executable).resolve())
+        normalized_executable = str(Path(sys.executable))
+        normalized_command_executable = str(Path(command[0]))
         if (
             len(command) >= 3
-            and command[0] == normalized_executable
+            and normalized_command_executable == normalized_executable
             and command[1] == "--widget"
         ):
             return True
@@ -1210,7 +1220,7 @@ class BorderlessFullscreenPlayer:
             _safe_print("⚠️ widget kaynağı boş")
             return False
 
-        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         multi_monitor_widget_mode = (
             clone_enabled
             and target_monitor_index is None
@@ -1399,7 +1409,7 @@ class BorderlessFullscreenPlayer:
             processes = self._launch_media_processes(
                 command,
                 target_monitor_index=target_monitor_index,
-                clone_to_all_monitors=clone_to_all_monitors,
+                clone_to_all_monitors=(False if clone_to_all_monitors is None else clone_to_all_monitors),
             )
             process = processes[0]
             with self._process_lock:
@@ -1440,7 +1450,7 @@ class BorderlessFullscreenPlayer:
             processes = self._launch_media_processes(
                 alternate_command,
                 target_monitor_index=target_monitor_index,
-                clone_to_all_monitors=clone_to_all_monitors,
+                clone_to_all_monitors=(False if clone_to_all_monitors is None else clone_to_all_monitors),
             )
             process = processes[0]
             with self._process_lock:
@@ -1602,13 +1612,11 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
-                    taskkill_kwargs = BorderlessFullscreenPlayer._windows_hidden_process_kwargs()
                     subprocess.run(
                         ["taskkill", "/PID", str(pid), "/T", "/F"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         check=False,
-                        **taskkill_kwargs,
                     )
                     process.wait(timeout=1)
                     return
@@ -1634,13 +1642,11 @@ class BorderlessFullscreenPlayer:
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
                 try:
-                    taskkill_kwargs = BorderlessFullscreenPlayer._windows_hidden_process_kwargs()
                     subprocess.run(
                         ["taskkill", "/PID", str(pid), "/T", "/F"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         check=False,
-                        **taskkill_kwargs,
                     )
                 except Exception:
                     pass
