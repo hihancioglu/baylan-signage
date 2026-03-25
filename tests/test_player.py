@@ -981,6 +981,31 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         self.assertGreaterEqual(sleep_mock.call_count, 1)
 
+    def test_play_widget_blocking_holds_duration_when_python_widget_launcher_exits_immediately(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = 0
+        process.returncode = 0
+
+        monotonic_values = iter([200.0, 200.2, 200.3, 200.4, 201.0, 202.5])
+
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["BaylanSignageAgent.exe", "--widget", "https://example.com"],
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=True,
+        ), patch("subprocess.Popen", return_value=process), patch(
+            "time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ), patch("time.sleep", return_value=None) as sleep_mock:
+            result = player.play_widget_blocking("https://example.com", duration_sec=2)
+
+        self.assertTrue(result)
+        self.assertGreaterEqual(sleep_mock.call_count, 1)
+
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
         with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):
             player = self._build_player()
@@ -2100,6 +2125,29 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         state = multi_monitor._monitor_states[2]
         self.assertEqual(len(state["entries"]), 1)
         self.assertEqual(state["entries"][0]["item_type"], "widget")
+
+    def test_multi_monitor_playback_defaults_enabled_to_true_when_flag_missing(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m2.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        multi_monitor.update_from_config(
+            {
+                "2": {
+                    "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
+                    "playlist_version": "v2",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                }
+            }
+        )
+
+        self.assertTrue(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_called_once()
 
     def test_multi_monitor_worker_plays_widget_on_target_monitor(self):
         from client.client import MultiMonitorPlayback

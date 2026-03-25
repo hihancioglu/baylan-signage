@@ -1365,7 +1365,9 @@ class MultiMonitorPlayback:
             if not isinstance(payload, dict):
                 continue
 
-            enabled = bool(payload.get("enabled"))
+            # Ana playlist davranışıyla uyumlu olarak "enabled" alanı yoksa
+            # monitor playlist'ini varsayılan olarak açık kabul et.
+            enabled = bool(payload.get("enabled", True))
             videos = payload.get("videos") or []
             playlist_version = str(payload.get("playlist_version") or f"monitor{monitor_no}-empty")
             media_signatures = payload.get("media_signatures") or {}

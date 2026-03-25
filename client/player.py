@@ -1421,13 +1421,13 @@ class BorderlessFullscreenPlayer:
             if (
                 result
                 and not self._stop_requested
-                and not using_python_widget_viewer
                 and int(duration_sec) > 1
                 and wait_elapsed_sec < 1.0
             ):
                 _debug_log(
                     "widget launcher detached quickly; holding playback slot | "
-                    f"duration_sec={duration_sec} elapsed_sec={wait_elapsed_sec:.3f}"
+                    f"duration_sec={duration_sec} elapsed_sec={wait_elapsed_sec:.3f} "
+                    f"python_viewer={using_python_widget_viewer}"
                 )
                 return self._hold_widget_slot_for_duration(duration_sec, already_elapsed_sec=wait_elapsed_sec)
             return result
