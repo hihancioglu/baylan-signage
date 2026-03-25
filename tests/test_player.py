@@ -251,6 +251,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         with patch("client.player.os.name", "nt"), patch.object(
             player,
+            "_should_use_python_widget_viewer",
+            return_value=False,
+        ), patch.object(
+            player,
             "_resolve_windows_kiosk_browser",
             return_value=("msedge", ["--kiosk", "--window-position=0,0", "--app={widget}"]),
         ), patch.object(
@@ -466,6 +470,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
 
         with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_should_use_python_widget_viewer",
+            return_value=False,
+        ), patch.object(
             player,
             "_resolve_windows_kiosk_browser",
             return_value=("msedge", ["--kiosk", "--edge-kiosk-type=fullscreen", "--app={widget}"]),
