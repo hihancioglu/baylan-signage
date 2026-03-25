@@ -730,7 +730,10 @@ class BorderlessFullscreenPlayer:
             return widget_source
 
         decoded_path = unquote(parsed.path or "")
-        candidate = Path(decoded_path)
+        if parsed.netloc and not decoded_path.startswith("/"):
+            decoded_path = f"/{parsed.netloc}{decoded_path}"
+        normalized_candidate_path = decoded_path.rstrip("/\\")
+        candidate = Path(normalized_candidate_path or decoded_path)
         if os.name == "nt" and decoded_path.startswith("/") and len(decoded_path) > 3 and decoded_path[2] == ":":
             candidate = Path(decoded_path.lstrip("/"))
 

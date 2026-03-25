@@ -196,6 +196,23 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn(local_engine.resolve().as_uri(), result)
         self.assertIn("config_b64=abc", result)
 
+    def test_normalize_url_remaps_widget_engine_uri_with_trailing_slash(self):
+        stale = "file:///C:/ProgramData/BaylanSignage/RuntimeTmp/_MEI12345/client/widget_engine.html/?config_b64=abc"
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as handle:
+            engine_path = Path(handle.name)
+            handle.write(b"<html></html>")
+        remapped_engine = engine_path.with_name("widget_engine.html")
+        engine_path.rename(remapped_engine)
+
+        try:
+            with patch("client.widget_viewer._resolve_runtime_resource", return_value=remapped_engine):
+                result = widget_viewer._normalize_url(stale)
+        finally:
+            remapped_engine.unlink(missing_ok=True)
+
+        self.assertIn(remapped_engine.resolve().as_uri(), result)
+        self.assertIn("config_b64=abc", result)
+
     def test_normalize_url_uses_http_for_localhost(self):
         self.assertEqual(widget_viewer._normalize_url("localhost:5080/panel"), "http://localhost:5080/panel")
 
