@@ -386,7 +386,16 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch("client.player.sys.frozen", True, create=True), patch("client.player.sys.executable", "/tmp/BaylanSignageAgent.exe"):
             command = player._build_python_widget_command("https://example.com")
 
-        self.assertEqual(command, ["/tmp/BaylanSignageAgent.exe", "--widget", "https://example.com"])
+        self.assertEqual(
+            command,
+            [
+                "/tmp/BaylanSignageAgent.exe",
+                "--widget",
+                "https://example.com",
+                "--parent-pid",
+                str(os.getpid()),
+            ],
+        )
 
     def test_is_python_widget_command_accepts_single_exe_widget_mode(self):
         player = self._build_player()

@@ -394,12 +394,13 @@ class BorderlessFullscreenPlayer:
 
     def _build_python_widget_command(self, widget_source: str) -> list[str] | None:
         viewer_path = _resolve_runtime_resource("widget_viewer.py")
+        parent_pid = str(os.getpid())
         if getattr(sys, "frozen", False):
-            return [sys.executable, "--widget", widget_source]
+            return [sys.executable, "--widget", widget_source, "--parent-pid", parent_pid]
         if not viewer_path.is_file():
             _safe_print(f"⚠️ widget viewer script bulunamadı: {viewer_path}")
             return None
-        return [sys.executable, str(viewer_path), widget_source]
+        return [sys.executable, str(viewer_path), widget_source, "--parent-pid", parent_pid]
 
     @staticmethod
     def _widget_runtime_controller_enabled() -> bool:

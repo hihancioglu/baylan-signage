@@ -373,6 +373,7 @@ ACTIVE_DEBUG_LOG_PATH = _resolve_debug_log_path()
 FAULT_LOG_PATH = ACTIVE_DEBUG_LOG_PATH.with_name(f"{ACTIVE_DEBUG_LOG_PATH.stem}_fault{ACTIVE_DEBUG_LOG_PATH.suffix}")
 INSTANCE_LOCK_PATH = Path(tempfile.gettempdir()) / "baylan-client.lock"
 instance_lock_fd: int | None = None
+instance_mutex_handle = None
 
 
 def setup_debug_logging():
@@ -518,7 +519,23 @@ def _pid_is_running(pid: int) -> bool:
 
 def already_running() -> bool:
     """Ensure only one client process is active via a non-blocking file lock."""
-    global instance_lock_fd
+    global instance_lock_fd, instance_mutex_handle
+
+    if platform.system().lower().startswith("win"):
+        mutex_name = "Global\\BaylanSignageClientMainInstance"
+        kernel32 = ctypes.windll.kernel32
+        mutex_handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if not mutex_handle:
+            log_warning("⚠️ instance mutex oluşturulamadı, güvenli tarafta çıkılıyor.")
+            return True
+
+        ERROR_ALREADY_EXISTS = 183
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            log_info("⚠️ client zaten çalışıyor (mutex), çıkılıyor.")
+            kernel32.CloseHandle(mutex_handle)
+            return True
+
+        instance_mutex_handle = mutex_handle
 
     try:
         instance_lock_fd = os.open(str(INSTANCE_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o644)
@@ -556,7 +573,7 @@ def already_running() -> bool:
 
 
 def release_instance_lock() -> None:
-    global instance_lock_fd
+    global instance_lock_fd, instance_mutex_handle
     if instance_lock_fd is not None:
         try:
             if platform.system().lower().startswith("win"):
@@ -571,6 +588,26 @@ def release_instance_lock() -> None:
         except OSError:
             pass
         instance_lock_fd = None
+
+    if platform.system().lower().startswith("win") and instance_mutex_handle:
+        try:
+            ctypes.windll.kernel32.CloseHandle(instance_mutex_handle)
+        except Exception:
+            pass
+        instance_mutex_handle = None
+
+
+def _start_parent_watchdog(parent_pid: int | None) -> None:
+    if not isinstance(parent_pid, int) or parent_pid <= 0:
+        return
+
+    def _watch_parent():
+        while True:
+            if not _pid_is_running(parent_pid):
+                os._exit(0)
+            time.sleep(1.0)
+
+    threading.Thread(target=_watch_parent, daemon=True).start()
 
 
 def _is_same_or_child_path(path: Path, maybe_parent: Path) -> bool:
@@ -3354,11 +3391,24 @@ def _parse_cli_args(argv: list[str] | None = None):
         action="store_true",
         help="Start widget viewer hidden (used internally by agent runtime controller)",
     )
+    parser.add_argument(
+        "--parent-pid",
+        type=int,
+        default=0,
+        help="Parent process PID used to stop orphaned widget runtime processes.",
+    )
     return parser.parse_known_args(argv)
 
 
-def _run_widget_entrypoint(widget_url: str, runtime_ipc: bool = False, start_hidden: bool = False) -> int:
+def _run_widget_entrypoint(
+    widget_url: str,
+    runtime_ipc: bool = False,
+    start_hidden: bool = False,
+    parent_pid: int | None = None,
+) -> int:
     from widget_viewer import _build_engine_url, _normalize_url, _start_with_cef, _start_with_pywebview, _viewer_backend_order, _safe_print
+
+    _start_parent_watchdog(parent_pid)
 
     try:
         normalized_url = _build_engine_url(_normalize_url(widget_url))
@@ -3390,6 +3440,7 @@ if __name__ == "__main__":
                 args.widget_url,
                 runtime_ipc=args.runtime_ipc,
                 start_hidden=args.start_hidden,
+                parent_pid=args.parent_pid,
             )
         )
     main()
