@@ -429,6 +429,33 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         process.terminate.assert_called_once()
 
+    def test_play_widget_on_target_monitor_does_not_call_global_stop(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.side_effect = [None, None]
+        process.returncode = 0
+
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
+            player,
+            "stop",
+        ) as stop_mock, patch.object(
+            player,
+            "_build_widget_commands",
+            return_value=[["msedge", "--kiosk", "https://example.com"]],
+        ), patch("subprocess.Popen", return_value=process), patch(
+            "time.sleep",
+            side_effect=lambda *_args, **_kwargs: setattr(player, "_stop_requested", True),
+        ):
+            result = player.play_widget_blocking(
+                "https://example.com",
+                duration_sec=1,
+                target_monitor_index=1,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(result)
+        stop_mock.assert_not_called()
+
 
     def test_build_widget_source_uses_existing_module_resource_when_meipass_missing(self):
         player = self._build_player()
