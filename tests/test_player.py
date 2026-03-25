@@ -918,6 +918,20 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         widget_process.stdin.flush.assert_called_once_with()
         self.assertIs(player._widget_process, widget_process)
 
+    def test_stop_falls_back_to_stop_widget_engine_when_background_fails(self):
+        player = self._build_player()
+        widget_process = unittest.mock.Mock()
+        widget_process.poll.return_value = None
+        player._widget_process = widget_process
+
+        with patch.object(player, "background_widget_engine", return_value=False), patch.object(
+            player,
+            "stop_widget_engine",
+        ) as stop_widget_engine:
+            player.stop(stop_widget_runtime=False)
+
+        stop_widget_engine.assert_called_once_with()
+
     def test_background_widget_engine_returns_false_when_not_running(self):
         player = self._build_player()
         self.assertFalse(player.background_widget_engine())
