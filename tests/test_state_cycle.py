@@ -189,6 +189,8 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
 
         return_mock.assert_called_once()
+        self.assertGreaterEqual(fake_playback.stop.call_count, 1)
+        self.assertIn(True, [c.kwargs.get("stop_widget_runtime") for c in fake_playback.stop.call_args_list])
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
@@ -210,6 +212,8 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
 
         return_mock.assert_called_once()
+        self.assertGreaterEqual(fake_playback.stop.call_count, 1)
+        self.assertIn(True, [c.kwargs.get("stop_widget_runtime") for c in fake_playback.stop.call_args_list])
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):
