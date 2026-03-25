@@ -411,6 +411,9 @@ class BorderlessFullscreenPlayer:
             creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if creation_flags:
                 kwargs["creationflags"] = creation_flags
+            env = os.environ.copy()
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            kwargs["env"] = env
         return kwargs
 
 
