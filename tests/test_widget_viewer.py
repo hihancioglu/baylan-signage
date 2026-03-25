@@ -178,6 +178,24 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn('config_b64=abc', result)
         self.assertNotIn('/_MEI12345/', result)
 
+    def test_normalize_url_remaps_foreign_widget_engine_even_when_file_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            foreign_engine = tmp_root / "_MEIforeign" / "client" / "widget_engine.html"
+            foreign_engine.parent.mkdir(parents=True, exist_ok=True)
+            foreign_engine.write_text("<html>foreign</html>", encoding="utf-8")
+
+            local_engine = tmp_root / "_MEIlocal" / "client" / "widget_engine.html"
+            local_engine.parent.mkdir(parents=True, exist_ok=True)
+            local_engine.write_text("<html>local</html>", encoding="utf-8")
+
+            stale = f"{foreign_engine.resolve().as_uri()}?config_b64=abc"
+            with patch("client.widget_viewer._resolve_runtime_resource", return_value=local_engine):
+                result = widget_viewer._normalize_url(stale)
+
+        self.assertIn(local_engine.resolve().as_uri(), result)
+        self.assertIn("config_b64=abc", result)
+
     def test_normalize_url_uses_http_for_localhost(self):
         self.assertEqual(widget_viewer._normalize_url("localhost:5080/panel"), "http://localhost:5080/panel")
 
