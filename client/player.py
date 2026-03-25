@@ -1083,17 +1083,35 @@ class BorderlessFullscreenPlayer:
         if os.name != "nt":
             return
 
-        marker = str(self._last_widget_source or "").lower()
-        # Sadece runtime fallback browser süreçlerini hedefle.
-        if "widget_engine.html" not in marker:
+        marker = str(self._last_widget_source or "").strip()
+        if not marker:
+            return
+
+        normalized_marker = marker.lower()
+        marker_mode = "engine" if "widget_engine.html" in normalized_marker else "source"
+        if marker_mode == "source" and not self._is_widget_url(marker):
             return
 
         script = (
+            "param([string]$Mode,[string]$Marker);"
             "$ErrorActionPreference='SilentlyContinue';"
-            "$procs=Get-CimInstance Win32_Process | "
-            "Where-Object {($_.Name -in @('msedge.exe','chrome.exe')) -and $_.CommandLine -and "
-            "($_.CommandLine -like '*widget_engine.html*') -and ($_.CommandLine -like '*config_b64=*')};"
-            "foreach($p in $procs){ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }"
+            "$markerSafe=[Regex]::Escape($Marker);"
+            "$procs=Get-CimInstance Win32_Process | Where-Object {"
+            "$_.Name -in @('msedge.exe','chrome.exe') -and $_.CommandLine -and "
+            "$_.CommandLine -match '--kiosk'"
+            "};"
+            "foreach($p in $procs){"
+            "$cmd=$p.CommandLine;"
+            "if($Mode -eq 'engine'){"
+            "if(($cmd -match 'widget_engine\\.html') -and ($cmd -match 'config_b64=')){"
+            "Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue"
+            "}"
+            "} else {"
+            "if($cmd -match $markerSafe){"
+            "Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue"
+            "}"
+            "}"
+            "}"
         )
         kwargs = {
             "stdout": subprocess.DEVNULL,
@@ -1102,8 +1120,14 @@ class BorderlessFullscreenPlayer:
         }
         kwargs.update(self._windows_hidden_process_kwargs())
         try:
-            subprocess.run(["powershell", "-NoProfile", "-Command", script], **kwargs)
-            _debug_log("stop detached widget browser processes requested")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script, marker_mode, marker],
+                **kwargs,
+            )
+            _debug_log(
+                "stop detached widget browser processes requested | "
+                f"mode={marker_mode} marker={marker[:160]}"
+            )
         except Exception:
             pass
 
