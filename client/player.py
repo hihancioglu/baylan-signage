@@ -736,14 +736,23 @@ class BorderlessFullscreenPlayer:
 
         if candidate.name.lower() != "widget_engine.html":
             return widget_source
-        if candidate.is_file():
-            return widget_source
 
         local_engine = _resolve_runtime_resource("widget_engine.html")
         if not local_engine.is_file():
             return widget_source
+        local_resolved = local_engine.resolve()
 
-        remapped = local_engine.resolve().as_uri()
+        candidate_is_current_runtime = False
+        try:
+            if candidate.is_file():
+                candidate_is_current_runtime = candidate.resolve() == local_resolved
+        except OSError:
+            candidate_is_current_runtime = False
+
+        if candidate_is_current_runtime:
+            return widget_source
+
+        remapped = local_resolved.as_uri()
         local_parsed = urlsplit(remapped)
         return urlunsplit((local_parsed.scheme, local_parsed.netloc, local_parsed.path, parsed.query, parsed.fragment))
 
