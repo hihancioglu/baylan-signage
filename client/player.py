@@ -1218,7 +1218,8 @@ class BorderlessFullscreenPlayer:
             and len(self._windows_connected_monitor_bounds()) > 1
         )
 
-        if self._widget_runtime_controller_enabled() and not multi_monitor_widget_mode:
+        runtime_controller_allowed = target_monitor_index is None
+        if self._widget_runtime_controller_enabled() and not multi_monitor_widget_mode and runtime_controller_allowed:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None

@@ -170,11 +170,12 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_idle_background.hide.assert_called_once()
 
-    def test_playing_widget_ignores_activity_when_erp_not_foreground(self):
+    def test_playing_widget_returns_when_erp_not_foreground_and_activity_detected(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
         main._last_observed_idle_sec = 20.0
+        main._activity_drop_streak = max(main.ACTIVITY_DROP_CONFIRM_COUNT - 1, 0)
 
         fake_playback = Mock()
         fake_playback.current_content_name.return_value = "widget"
@@ -184,10 +185,11 @@ class TestRunStateCycle(unittest.TestCase):
             main, "get_idle_seconds", return_value=0.0
         ), patch.object(main.time, "monotonic", return_value=100.0), patch.object(
             main.window_manager, "is_window_foreground", return_value=False
-        ):
+        ), patch.object(main, "return_to_erp_window") as return_mock:
             main.run_state_cycle()
 
-        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
         self._configure_common()

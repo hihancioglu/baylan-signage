@@ -3070,19 +3070,19 @@ def run_state_cycle():
             idle_background.hide()
 
     minimum_playing_before_return = 0.0 if active_item_type == "widget" else MIN_PLAYING_SECONDS
-    widget_foreground_ready = True
-    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND:
-        widget_foreground_ready = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
-        if not widget_foreground_ready and user_activity_detected:
+    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
+        # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
+        # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
+        # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
+        if not window_manager.is_window_foreground(ERP_WINDOW_TITLE):
             log_debug(
-                "state_cycle PLAYING widget activity ignored | "
-                f"reason=erp_not_foreground title={ERP_WINDOW_TITLE!r}"
+                "state_cycle PLAYING widget activity | "
+                f"erp_not_foreground_detected title={ERP_WINDOW_TITLE!r} action=force_return"
             )
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
         and user_activity_detected
-        and widget_foreground_ready
     ):
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 

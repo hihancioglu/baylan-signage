@@ -703,7 +703,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.returncode = 0
         captured_sources = []
 
-        def _fake_build_widget_command(source):
+        def _fake_build_widget_command(source, **_kwargs):
             captured_sources.append(source)
             return ["msedge", source]
 
@@ -720,6 +720,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
                         {"type": "iframe", "url": "https://second.example.com"},
                     ]
                 },
+                clone_to_all_monitors=False,
             )
 
         self.assertTrue(result)
@@ -733,7 +734,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.returncode = 0
         captured_sources = []
 
-        def _fake_build_widget_command(source):
+        def _fake_build_widget_command(source, **_kwargs):
             captured_sources.append(source)
             return ["msedge", source]
 
@@ -745,12 +746,40 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
                 "https://ignored.example.com",
                 duration_sec=1,
                 widget_config={"widgets": [{"type": "iframe", "url": "https://www.google.com"}]},
+                clone_to_all_monitors=False,
             )
 
         self.assertTrue(result)
         self.assertEqual(len(captured_sources), 1)
         self.assertEqual(captured_sources[0], "https://www.google.com")
 
+
+
+    def test_play_widget_blocking_skips_runtime_controller_for_target_monitor(self):
+        player = self._build_player()
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player, "update_widget_layout"
+        ) as update_layout, patch.object(player, "_build_widget_commands", return_value=[["msedge", "https://example.com"]]), patch(
+            "subprocess.Popen"
+        ) as popen_mock, patch.object(player, "_wait_widget_processes_until_stop", return_value=True), patch.object(
+            player, "stop"
+        ):
+            process = unittest.mock.Mock()
+            process.poll.return_value = 0
+            process.returncode = 0
+            popen_mock.return_value = process
+
+            result = player.play_widget_blocking(
+                "https://example.com",
+                duration_sec=1,
+                target_monitor_index=1,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(result)
+        update_layout.assert_not_called()
+        popen_mock.assert_called_once()
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
         with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):
