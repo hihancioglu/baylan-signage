@@ -1206,6 +1206,104 @@ class CallRequestOverlay:
         return self._gui_runtime.call_overlay_active()
 
 
+class SecondaryMonitorPlayback:
+    def __init__(self, media_manager: MediaManager):
+        self.player = BorderlessFullscreenPlayer()
+        self.media_manager = media_manager
+        self._entries: list[dict] = []
+        self._loop_mode = "sequential"
+        self._enabled = False
+        self._lock = threading.Lock()
+        self._running = False
+        self._worker = None
+
+    def update_from_config(self, monitor_payload: dict | None):
+        payload = monitor_payload if isinstance(monitor_payload, dict) else {}
+        enabled = bool(payload.get("enabled"))
+        videos = payload.get("videos") or []
+        playlist_version = str(payload.get("playlist_version") or "monitor2-empty")
+        media_signatures = payload.get("media_signatures") or {}
+        loop_mode = str(payload.get("loop_mode") or "sequential").strip().lower()
+        if loop_mode not in {"sequential", "random"}:
+            loop_mode = "sequential"
+
+        normalized_items = []
+        for item in videos:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("item_type") or "media").strip().lower() == "widget":
+                continue
+            normalized_items.append({"path": item.get("path"), "media_type": item.get("media_type"), "duration_sec": item.get("duration_sec"), "item_type": "media"})
+
+        if enabled and normalized_items:
+            local_entries = self.media_manager.sync_playlist_entries(
+                normalized_items,
+                f"monitor2-{playlist_version}",
+                media_signatures,
+                progress_callback=None,
+            )
+        else:
+            local_entries = []
+
+        with self._lock:
+            self._enabled = bool(enabled and local_entries)
+            self._entries = list(local_entries or [])
+            self._loop_mode = loop_mode
+
+    def has_active_playlist(self) -> bool:
+        with self._lock:
+            return bool(self._enabled and self._entries)
+
+    def start(self):
+        if self._worker and self._worker.is_alive():
+            return
+        self._running = True
+        self._worker = threading.Thread(target=self._run, daemon=True)
+        self._worker.start()
+
+    def stop(self):
+        self._running = False
+        self.player.stop()
+        if self._worker and self._worker.is_alive():
+            self._worker.join(timeout=1)
+
+    def pause(self):
+        self.player.stop()
+
+    def _run(self):
+        index = 0
+        while self._running:
+            with self._lock:
+                enabled = self._enabled
+                entries = list(self._entries)
+                loop_mode = self._loop_mode
+
+            if not enabled or not entries:
+                time.sleep(0.5)
+                continue
+
+            if loop_mode == "random":
+                import random
+                item = random.choice(entries)
+            else:
+                item = entries[index % len(entries)]
+                index = (index + 1) % len(entries)
+
+            media_path = str(item.get("local_path") or "")
+            if not media_path:
+                time.sleep(0.2)
+                continue
+
+            duration_sec = item.get("duration_sec")
+            media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
+            self.player.play_blocking(
+                media_path,
+                image_duration_sec=media_duration_sec,
+                target_monitor_index=1,
+                clone_to_all_monitors=False,
+            )
+
+
 class PlaybackController:
     def __init__(self, gui_runtime: GuiRuntime):
         self.media_manager = MediaManager(
@@ -1239,6 +1337,8 @@ class PlaybackController:
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
         self._active_widget_signature: str | None = None
         self._prewarmed_widget_signature: str | None = None
+        self._clone_to_all_monitors = True
+        self.secondary_monitor_playback = SecondaryMonitorPlayback(self.media_manager)
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
@@ -1648,15 +1748,22 @@ class PlaybackController:
         with self._lock:
             was_fallback_only_mode = self._fallback_only_mode
 
-        enabled = bool(config.get("enabled", True))
-        videos = config.get("videos") or []
-        playlist_version = config.get("playlist_version") or "default"
-        media_signatures = config.get("media_signatures") or {}
+        monitor_playlists = config.get("monitor_playlists") if isinstance(config, dict) else {}
+        primary_payload = monitor_playlists.get("1") if isinstance(monitor_playlists, dict) else None
+        selected_payload = primary_payload if isinstance(primary_payload, dict) else config
+
+        enabled = bool(selected_payload.get("enabled", True))
+        videos = selected_payload.get("videos") or []
+        playlist_version = selected_payload.get("playlist_version") or "default"
+        media_signatures = selected_payload.get("media_signatures") or {}
         fallback_media = config.get("fallback_media")
         fallback_version = config.get("fallback_media_version") or "0"
-        loop_mode = str(config.get("loop_mode") or "sequential").strip().lower()
+        loop_mode = str(selected_payload.get("loop_mode") or "sequential").strip().lower()
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
+        secondary_payload = monitor_playlists.get("2") if isinstance(monitor_playlists, dict) else None
+        self.secondary_monitor_playback.update_from_config(secondary_payload)
+        self._clone_to_all_monitors = not self.secondary_monitor_playback.has_active_playlist()
 
         normalized_items = []
         for item in videos:
@@ -1737,6 +1844,7 @@ class PlaybackController:
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
+        self.secondary_monitor_playback.start()
         print("▶️ playback worker started")
 
     def stop(self, stop_widget_runtime: bool | None = None):
@@ -1744,6 +1852,7 @@ class PlaybackController:
         self.overlay.hide()
         self._background_overlay.hide()
         self.player.stop(stop_widget_runtime=stop_widget_runtime)
+        self.secondary_monitor_playback.stop()
 
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=1)
@@ -1758,6 +1867,7 @@ class PlaybackController:
                     self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
                 self._persist_playback_state()
         self.player.stop()
+        self.secondary_monitor_playback.pause()
 
     def _run(self):
         try:
@@ -1798,7 +1908,10 @@ class PlaybackController:
                         log_debug(f"mpv playlist mode selected | media_count={len(playlist_paths)}")
                         self._active_item = {"local_path": "MPV Playlist", "media_type": "playlist", "item_type": "media", "display_name": "MPV Playlist"}
                         self._active_item_started_at = time.monotonic()
-                        ok = self.player.play_mpv_playlist_blocking(playlist_paths)
+                        ok = self.player.play_mpv_playlist_blocking(
+                            playlist_paths,
+                            clone_to_all_monitors=self._clone_to_all_monitors,
+                        )
                         log_debug(f"mpv playlist play result | ok={ok}")
                         self._active_item = None
                         self._active_item_started_at = None
@@ -1934,13 +2047,22 @@ class PlaybackController:
                         ok = self.player.play_blocking(
                             media_path,
                             start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                            clone_to_all_monitors=self._clone_to_all_monitors,
                         )
                     else:
-                        ok = self.player.play_media_in_widget_runtime_blocking(
-                            media_path,
-                            media_duration_sec,
-                            start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
-                        )
+                        if self._clone_to_all_monitors:
+                            ok = self.player.play_media_in_widget_runtime_blocking(
+                                media_path,
+                                media_duration_sec,
+                                start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
+                            )
+                        else:
+                            ok = self.player.play_blocking(
+                                media_path,
+                                image_duration_sec=media_duration_sec,
+                                start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
+                                clone_to_all_monitors=False,
+                            )
                     interrupted = self.player.last_play_was_interrupted()
                     log_debug(f"media playback end | ok={ok} interrupted={interrupted} path={media_path}")
 

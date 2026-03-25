@@ -36,6 +36,7 @@ class Group(Base):
     idle_timeout_sec = Column(Integer)
     idle_mode_enabled = Column(Boolean, default=True, nullable=False)
     content_enabled = Column(Boolean, default=True, nullable=False)
+    monitor_count = Column(Integer, default=1, nullable=False)
 
 
 class Playlist(Base):
@@ -105,6 +106,7 @@ class GroupPlaylist(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     playlist_id = Column(Integer, ForeignKey("playlists.id"))
+    monitor_no = Column(Integer, default=1, nullable=False)
 
 
 class CommandLog(Base):

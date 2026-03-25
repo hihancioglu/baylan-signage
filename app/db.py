@@ -64,6 +64,10 @@ def ensure_sqlite_schema():
             "idle_timeout_sec": "INTEGER",
             "idle_mode_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
             "content_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
+            "monitor_count": "INTEGER DEFAULT 1 NOT NULL",
+        },
+        "group_playlists": {
+            "monitor_no": "INTEGER DEFAULT 1 NOT NULL",
         },
         "announcements": {
             "is_persistent": "BOOLEAN DEFAULT 0 NOT NULL",
