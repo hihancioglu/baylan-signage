@@ -233,13 +233,35 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_idle_background.hide.assert_not_called()
 
-    def test_active_state_keeps_widget_runtime_warm(self):
+    def test_active_state_skips_redundant_stop_when_nothing_is_playing(self):
         self._configure_common()
         main.current_state = main.ClientState.ACTIVE
 
         fake_playback = Mock()
         fake_playback.current_content_name.return_value = ""
         fake_playback._active_item = None
+        fake_playback._process = None
+        fake_playback._widget_process = None
+        fake_playback._extra_processes = []
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=10.0
+        ):
+            main.run_state_cycle()
+
+        fake_playback.stop.assert_not_called()
+
+    def test_active_state_keeps_widget_runtime_warm_when_widget_process_is_running(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+        fake_playback._process = None
+        fake_playback._widget_process = Mock()
+        fake_playback._widget_process.poll.return_value = None
+        fake_playback._extra_processes = []
 
         with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
             main, "get_idle_seconds", return_value=10.0

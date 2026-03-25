@@ -3125,6 +3125,36 @@ def run_state_cycle():
         active_item = getattr(playback, "_active_item", None)
         return isinstance(active_item, dict) and bool(active_item)
 
+    def _playback_has_running_process() -> bool:
+        process = getattr(playback, "_process", None)
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    return True
+            except Exception:
+                pass
+
+        widget_process = getattr(playback, "_widget_process", None)
+        if widget_process is not None:
+            try:
+                if widget_process.poll() is None:
+                    return True
+            except Exception:
+                pass
+
+        extra_processes = getattr(playback, "_extra_processes", None)
+        if isinstance(extra_processes, list):
+            for extra_process in extra_processes:
+                if extra_process is None:
+                    continue
+                try:
+                    if extra_process.poll() is None:
+                        return True
+                except Exception:
+                    continue
+
+        return False
+
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
@@ -3253,11 +3283,12 @@ def run_state_cycle():
         set_state(ClientState.ACTIVE, "returned_to_erp")
 
     if current_state == ClientState.ACTIVE:
-        log_debug("state_cycle ACTIVE | stopping playback with warm widget runtime")
-        # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
-        # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
-        playback.stop(stop_widget_runtime=False)
-        playback._active_widget_signature = None
+        if _playback_has_selected_content() or _playback_has_running_process():
+            log_debug("state_cycle ACTIVE | stopping playback with warm widget runtime")
+            # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
+            # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
+            playback.stop(stop_widget_runtime=False)
+            playback._active_widget_signature = None
 
     return idle_sec
 
