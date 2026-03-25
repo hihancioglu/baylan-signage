@@ -1589,6 +1589,15 @@ class PlaybackController:
         ):
             self.player.start_widget_engine_if_needed()
 
+    def _primary_target_monitor_index(self) -> int | None:
+        if os.name != "nt":
+            return None
+        if self._clone_to_all_monitors:
+            return None
+        if not self.multi_monitor_playback.has_active_playlist():
+            return None
+        return 0
+
     @staticmethod
     def _sanitize_playback_state(raw_state: dict) -> dict:
         """
@@ -2217,6 +2226,7 @@ class PlaybackController:
                         log_debug(f"widget spec | direct_url_candidate={self.player.is_direct_url_widget(widget_config)} signature={widget_signature}")
                         direct_url_widget = self.player.is_direct_url_widget(widget_config)
                         clone_widget_to_all_monitors = self._clone_to_all_monitors and os.name == "nt"
+                        primary_target_monitor_index = self._primary_target_monitor_index()
                         if direct_url_widget or clone_widget_to_all_monitors:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
                             # yönettiği için ikincil monitörler boş kalabiliyor. Bu durumda
@@ -2227,6 +2237,7 @@ class PlaybackController:
                                 widget_url,
                                 widget_duration_sec,
                                 widget_config=widget_config,
+                                target_monitor_index=primary_target_monitor_index,
                                 clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
                         else:
@@ -2291,6 +2302,7 @@ class PlaybackController:
                         ok = self.player.play_blocking(
                             media_path,
                             start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                            target_monitor_index=self._primary_target_monitor_index(),
                             clone_to_all_monitors=self._clone_to_all_monitors,
                         )
                     else:
@@ -2305,6 +2317,7 @@ class PlaybackController:
                                 media_path,
                                 image_duration_sec=media_duration_sec,
                                 start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
+                                target_monitor_index=self._primary_target_monitor_index(),
                                 clone_to_all_monitors=False,
                             )
                     interrupted = self.player.last_play_was_interrupted()
