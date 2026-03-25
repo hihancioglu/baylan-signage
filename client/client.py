@@ -2084,14 +2084,18 @@ class PlaybackController:
                         widget_url, widget_config, widget_signature = widget_spec
                         log_debug(f"widget spec | direct_url_candidate={self.player.is_direct_url_widget(widget_config)} signature={widget_signature}")
                         direct_url_widget = self.player.is_direct_url_widget(widget_config)
-                        if direct_url_widget:
+                        clone_widget_to_all_monitors = self._clone_to_all_monitors and os.name == "nt"
+                        if direct_url_widget or clone_widget_to_all_monitors:
+                            # Çoklu monitör klonlamada widget runtime controller tek pencere
+                            # yönettiği için ikincil monitörler boş kalabiliyor. Bu durumda
+                            # süreç tabanlı widget oynatım yoluna zorla düş.
                             self._active_widget_signature = None
                             self._prewarmed_widget_signature = None
                             ok = self.player.play_widget_blocking(
-                                # legacy/direct-url widget path
                                 widget_url,
                                 widget_duration_sec,
                                 widget_config=widget_config,
+                                clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
                         else:
                             if widget_signature == self._prewarmed_widget_signature:
