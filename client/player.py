@@ -239,6 +239,7 @@ class BorderlessFullscreenPlayer:
         self._process = None
         self._extra_processes: list[subprocess.Popen] = []
         self._process_lock = threading.RLock()
+        self._widget_process_lock = threading.RLock()
         self._stop_requested = False
         self._widget_process = None
         self._widget_process_stdin_lock = threading.Lock()
@@ -917,31 +918,32 @@ class BorderlessFullscreenPlayer:
     def start_widget_engine_if_needed(self) -> bool:
         if not self._widget_runtime_controller_enabled():
             return False
-        if self._widget_process and self._widget_process.poll() is None:
-            return True
+        with self._widget_process_lock:
+            if self._widget_process and self._widget_process.poll() is None:
+                return True
 
-        source = self._widget_runtime_engine_source()
-        command = self._build_python_widget_command(source)
-        if not command:
-            self._python_widget_viewer_runtime_enabled = False
-            return False
-        command.append("--runtime-ipc")
-        command.append("--start-hidden")
+            source = self._widget_runtime_engine_source()
+            command = self._build_python_widget_command(source)
+            if not command:
+                self._python_widget_viewer_runtime_enabled = False
+                return False
+            command.append("--runtime-ipc")
+            command.append("--start-hidden")
 
-        try:
-            self._stop_requested = False
-            popen_kwargs = self._widget_popen_kwargs(command)
-            self._widget_process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                text=True,
-                **popen_kwargs,
-            )
-            return True
-        except Exception as exc:
-            _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
-            self._widget_process = None
-            return False
+            try:
+                self._stop_requested = False
+                popen_kwargs = self._widget_popen_kwargs(command)
+                self._widget_process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    text=True,
+                    **popen_kwargs,
+                )
+                return True
+            except Exception as exc:
+                _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
+                self._widget_process = None
+                return False
 
     def is_direct_url_widget(self, widget_config: dict | None = None) -> bool:
         if self._single_url_widget_source(widget_config):
@@ -1019,37 +1021,39 @@ class BorderlessFullscreenPlayer:
         return self._send_widget_runtime_message(message)
 
     def stop_widget_engine(self) -> None:
-        process = self._widget_process
-        if not process or process.poll() is not None:
+        with self._widget_process_lock:
+            process = self._widget_process
+            if not process or process.poll() is not None:
+                self._widget_process = None
+                return
+
+            try:
+                if process.stdin:
+                    with self._widget_process_stdin_lock:
+                        process.stdin.write('{"type":"stop"}\n')
+                        process.stdin.flush()
+            except Exception:
+                pass
+
+            self._terminate_process(process, timeout_sec=2, force_tree=True)
             self._widget_process = None
-            return
-
-        try:
-            if process.stdin:
-                with self._widget_process_stdin_lock:
-                    process.stdin.write('{"type":"stop"}\n')
-                    process.stdin.flush()
-        except Exception:
-            pass
-
-        self._terminate_process(process, timeout_sec=2, force_tree=True)
-        self._widget_process = None
 
     def background_widget_engine(self) -> bool:
-        process = self._widget_process
-        if not process or process.poll() is not None or not process.stdin:
-            if process and process.poll() is not None:
-                self._widget_process = None
-            return False
+        with self._widget_process_lock:
+            process = self._widget_process
+            if not process or process.poll() is not None or not process.stdin:
+                if process and process.poll() is not None:
+                    self._widget_process = None
+                return False
 
-        try:
-            with self._widget_process_stdin_lock:
-                process.stdin.write('{"type":"background"}\n')
-                process.stdin.flush()
-            return True
-        except Exception as exc:
-            _safe_print(f"⚠️ widget runtime background moduna alınamadı: {exc}")
-            return False
+            try:
+                with self._widget_process_stdin_lock:
+                    process.stdin.write('{"type":"background"}\n')
+                    process.stdin.flush()
+                return True
+            except Exception as exc:
+                _safe_print(f"⚠️ widget runtime background moduna alınamadı: {exc}")
+                return False
 
     def wait_widget_duration(self, duration_sec: int) -> bool:
         deadline = time.monotonic() + max(1, int(duration_sec))
@@ -1241,13 +1245,14 @@ class BorderlessFullscreenPlayer:
                 self._last_interrupted = False
                 return False
 
-        self.stop()
+        with self._widget_process_lock:
+            self.stop()
 
-        commands = self._build_widget_commands(
-            source,
-            target_monitor_index=target_monitor_index,
-            clone_to_all_monitors=clone_to_all_monitors,
-        )
+            commands = self._build_widget_commands(
+                source,
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            )
         _debug_log(f"play_widget_blocking fallback process commands={commands}")
         if not commands:
             self._last_interrupted = False
@@ -1258,12 +1263,13 @@ class BorderlessFullscreenPlayer:
         using_python_widget_viewer = self._is_python_widget_command(commands[0])
         try:
             self._stop_requested = False
-            for command in commands:
-                process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
-                processes.append(process)
-                _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
-            self._widget_process = processes[0]
-            self._extra_processes = processes[1:]
+            with self._widget_process_lock:
+                for command in commands:
+                    process = subprocess.Popen(command, **self._widget_popen_kwargs(command))
+                    processes.append(process)
+                    _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
+                self._widget_process = processes[0]
+                self._extra_processes = processes[1:]
 
             return self._wait_widget_processes_until_stop(processes, max_duration_sec=duration_sec)
         except Exception as exc:
@@ -1273,8 +1279,9 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ widget oynatma hatası: {exc}")
             return False
         finally:
-            if self._widget_process and self._widget_process in processes:
-                self._widget_process = None
+            with self._widget_process_lock:
+                if self._widget_process and self._widget_process in processes:
+                    self._widget_process = None
             self._extra_processes = []
 
     def _build_command(self, media_path: str, image_duration_sec: int | None = None) -> list[str]:
@@ -1593,18 +1600,20 @@ class BorderlessFullscreenPlayer:
             if process and process.poll() is None:
                 self._terminate_process(process, timeout_sec=5)
 
-        if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
-            self.stop_widget_engine()
-        elif not stop_widget_runtime:
-            self.background_widget_engine()
+        with self._widget_process_lock:
+            if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
+                self.stop_widget_engine()
+            elif not stop_widget_runtime:
+                self.background_widget_engine()
 
         with self._process_lock:
             self._process = None
             self._extra_processes = []
-        if stop_widget_runtime:
-            self._widget_process = None
-        elif self._widget_process and self._widget_process.poll() is not None:
-            self._widget_process = None
+        with self._widget_process_lock:
+            if stop_widget_runtime:
+                self._widget_process = None
+            elif self._widget_process and self._widget_process.poll() is not None:
+                self._widget_process = None
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen, timeout_sec: float, force_tree: bool = False) -> None:
