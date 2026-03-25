@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import random
@@ -121,10 +122,12 @@ class MediaManager:
 
         for attempt in range(5):
             tmp_path = None
+            fd = None
             try:
                 tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
                 fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                with io.open(fd, "w", encoding="utf-8", closefd=True) as fh:
+                    fd = None
                     json.dump(safe_payload, fh, ensure_ascii=False, indent=2)
                     fh.flush()
                     os.fsync(fh.fileno())
@@ -136,8 +139,16 @@ class MediaManager:
                     raise
                 time.sleep(0.05 * (attempt + 1))
             finally:
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
                 if tmp_path and tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
     @staticmethod
     def _is_url(path: str) -> bool:

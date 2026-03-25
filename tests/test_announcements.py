@@ -9,13 +9,15 @@ from unittest.mock import patch
 class TestAnnouncements(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         os.environ["DATABASE_URL"] = f"sqlite:///{cls._tmpdir.name}/test_announcements.db"
         cls.main = importlib.import_module("app.main")
 
     @classmethod
     def tearDownClass(cls):
-        cls._tmpdir.cleanup()
+        # app.main is shared across test modules in the same interpreter process.
+        # Keeping this temp DB alive avoids cross-module readonly sqlite handles.
+        pass
 
     def test_create_list_and_delete_persistent_announcement(self):
         with patch("app.main._auth_failed", return_value=False):
@@ -50,8 +52,8 @@ class TestAnnouncements(unittest.TestCase):
     def test_active_announcement_expires_when_not_persistent(self):
         db = self.main.db_session()
         try:
-            group = self.main.Group(name="Ann Group")
-            device = self.main.Device(hostname="pc-ann")
+            group = self.main.Group(name="Ann Group Announcements")
+            device = self.main.Device(hostname="pc-ann-announcements")
             db.add_all([group, device])
             db.commit()
 
@@ -82,7 +84,7 @@ class TestAnnouncements(unittest.TestCase):
             db.add_all([expired, persistent])
             db.commit()
 
-            active = self.main._active_announcement_for_device(db, "pc-ann", group.id)
+            active = self.main._active_announcement_for_device(db, "pc-ann-announcements", group.id)
             self.assertIsNotNone(active)
             self.assertEqual(active.id, persistent.id)
 
