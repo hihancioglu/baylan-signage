@@ -680,6 +680,24 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIn(local_engine.resolve().as_uri(), normalized)
         self.assertIn("config_b64=abc", normalized)
 
+    def test_normalize_widget_source_remaps_widget_engine_uri_with_trailing_slash(self):
+        player = self._build_player()
+        stale = "file:///C:/ProgramData/BaylanSignage/RuntimeTmp/_MEI12345/client/widget_engine.html/?config_b64=abc"
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as handle:
+            engine_path = Path(handle.name)
+            handle.write(b"<html></html>")
+        remapped_engine = engine_path.with_name("widget_engine.html")
+        engine_path.rename(remapped_engine)
+
+        try:
+            with patch("client.player._resolve_runtime_resource", return_value=remapped_engine):
+                normalized = player._normalize_widget_source(stale)
+        finally:
+            remapped_engine.unlink(missing_ok=True)
+
+        self.assertIn(remapped_engine.resolve().as_uri(), normalized)
+        self.assertIn("config_b64=abc", normalized)
+
     def test_build_widget_layout_payload_normalizes_widget_url(self):
         player = self._build_player()
 
