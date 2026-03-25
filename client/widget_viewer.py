@@ -89,11 +89,13 @@ def _maybe_remap_stale_engine_uri(url: str) -> str:
     if parsed.netloc and not decoded_path.startswith("/"):
         decoded_path = f"/{parsed.netloc}{decoded_path}"
     normalized_candidate_path = decoded_path.rstrip("/\\")
+    candidate_path_for_name = normalized_candidate_path or decoded_path
+    candidate_name = re.split(r"[\\/]+", candidate_path_for_name)[-1].lower() if candidate_path_for_name else ""
     candidate = Path(normalized_candidate_path or decoded_path)
     if os.name == "nt" and decoded_path.startswith("/") and len(decoded_path) > 3 and decoded_path[2] == ":":
         candidate = Path(decoded_path.lstrip("/"))
 
-    if candidate.name.lower() != "widget_engine.html":
+    if candidate_name != "widget_engine.html":
         return url
 
     local_engine = _resolve_runtime_resource("widget_engine.html")
