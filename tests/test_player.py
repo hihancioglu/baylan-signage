@@ -294,6 +294,31 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(commands[1][1:], ["--kiosk", "--window-position=1920,0", "--app=https://example.com", "--window-size=1920,1080"])
         self.assertEqual(commands[2][1:], ["--kiosk", "--window-position=3840,0", "--app=https://example.com", "--window-size=1920,1080"])
 
+    def test_build_widget_commands_for_monitors_ignores_duplicate_monitor_bounds(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"],
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=False,
+        ), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[
+                (0, 0, 1920, 1080),
+                (0, 0, 1920, 1080),
+                (1920, 0, 1920, 1080),
+            ],
+        ):
+            commands = player._build_widget_commands_for_monitors("https://example.com")
+
+        unique_positions = {tuple(command[1:]) for command in commands}
+        self.assertEqual(len(unique_positions), 2)
+
     def test_launch_media_processes_clones_mpv_per_monitor(self):
         player = self._build_player()
         fake_process = unittest.mock.Mock()
