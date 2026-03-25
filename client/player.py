@@ -56,8 +56,15 @@ def _resolve_runtime_resource(*relative_parts: str) -> Path:
     primary = _runtime_resource_path(*relative_parts)
     candidates.append(primary)
 
+    prefixed_primary = _runtime_resource_path("client", *relative_parts)
+    if prefixed_primary not in candidates:
+        candidates.append(prefixed_primary)
+
     executable_dir = Path(sys.executable).resolve().parent
     candidates.append(executable_dir.joinpath(*relative_parts))
+    prefixed_executable = executable_dir.joinpath("client", *relative_parts)
+    if prefixed_executable not in candidates:
+        candidates.append(prefixed_executable)
 
     module_dir = Path(__file__).resolve().parent
     candidates.append(module_dir.joinpath(*relative_parts))
