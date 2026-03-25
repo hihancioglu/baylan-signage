@@ -114,6 +114,7 @@ class TestRunStateCycle(unittest.TestCase):
         self._configure_common()
         main.current_state = main.ClientState.IDLE_PENDING
         main._last_observed_idle_sec = 80.0
+        main._activity_drop_streak = max(main.ACTIVITY_DROP_CONFIRM_COUNT - 1, 0)
 
         fake_playback = Mock()
         fake_playback.current_content_name.return_value = ""
@@ -136,6 +137,7 @@ class TestRunStateCycle(unittest.TestCase):
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
         main._last_observed_idle_sec = 5.0
+        main._activity_drop_streak = max(main.ACTIVITY_DROP_CONFIRM_COUNT - 1, 0)
 
         fake_playback = Mock()
         fake_playback.current_content_name.return_value = "video.mp4"
@@ -167,6 +169,46 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
 
         fake_idle_background.hide.assert_called_once()
+
+    def test_playing_widget_ignores_activity_when_erp_not_foreground(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 20.0
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=0.0
+        ), patch.object(main.time, "monotonic", return_value=100.0), patch.object(
+            main.window_manager, "is_window_foreground", return_value=False
+        ):
+            main.run_state_cycle()
+
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
+    def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 20.0
+        main._activity_drop_streak = max(main.ACTIVITY_DROP_CONFIRM_COUNT - 1, 0)
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=0.0
+        ), patch.object(main.time, "monotonic", return_value=100.0), patch.object(
+            main.window_manager, "is_window_foreground", return_value=True
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):
         self._configure_common()

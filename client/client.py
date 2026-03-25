@@ -174,6 +174,7 @@ ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
 OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
+WIDGET_RETURN_REQUIRES_ERP_FOREGROUND = _env_bool("WIDGET_RETURN_REQUIRES_ERP_FOREGROUND", True)
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
@@ -672,6 +673,21 @@ class _WindowManager:
         self._user32.ShowWindow(hwnd, SW_RESTORE)
         self._user32.SetForegroundWindow(hwnd)
         return True
+
+    def is_window_foreground(self, window_title: str) -> bool:
+        if not self._enabled:
+            return False
+
+        hwnd = self._find_window_handle(window_title)
+        if not hwnd:
+            return False
+
+        get_foreground_window = getattr(self._user32, "GetForegroundWindow", None)
+        if get_foreground_window is None:
+            return False
+
+        foreground_hwnd = int(get_foreground_window())
+        return foreground_hwnd == int(hwnd)
 
 
 class GuiRuntime:
@@ -3054,10 +3070,19 @@ def run_state_cycle():
             idle_background.hide()
 
     minimum_playing_before_return = 0.0 if active_item_type == "widget" else MIN_PLAYING_SECONDS
+    widget_foreground_ready = True
+    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND:
+        widget_foreground_ready = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
+        if not widget_foreground_ready and user_activity_detected:
+            log_debug(
+                "state_cycle PLAYING widget activity ignored | "
+                f"reason=erp_not_foreground title={ERP_WINDOW_TITLE!r}"
+            )
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
         and user_activity_detected
+        and widget_foreground_ready
     ):
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
