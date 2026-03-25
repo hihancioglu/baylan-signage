@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 import re
 
 
@@ -67,11 +67,41 @@ def _normalize_url(source: str) -> str:
             pass
 
     if url.lower().startswith(("http://", "https://", "file://")):
-        return url
+        return _maybe_remap_stale_engine_uri(url)
 
     scheme = _default_widget_scheme(url)
     return f"{scheme}://{url}"
 
+
+
+
+def _maybe_remap_stale_engine_uri(url: str) -> str:
+    """Remap stale _MEI widget_engine file:// URLs to this process runtime path."""
+    try:
+        parsed = urlsplit(url)
+    except Exception:
+        return url
+
+    if parsed.scheme.lower() != "file":
+        return url
+
+    decoded_path = unquote(parsed.path or "")
+    candidate = Path(decoded_path)
+    if os.name == "nt" and decoded_path.startswith("/") and len(decoded_path) > 3 and decoded_path[2] == ":":
+        candidate = Path(decoded_path.lstrip("/"))
+
+    if candidate.name.lower() != "widget_engine.html":
+        return url
+    if candidate.is_file():
+        return url
+
+    local_engine = _resolve_runtime_resource("widget_engine.html")
+    if not local_engine.is_file():
+        return url
+
+    remapped = local_engine.resolve().as_uri()
+    local_parsed = urlsplit(remapped)
+    return urlunsplit((local_parsed.scheme, local_parsed.netloc, local_parsed.path, parsed.query, parsed.fragment))
 
 def _default_widget_scheme(raw_source: str) -> str:
     host_candidate = str(raw_source or "").split("/", 1)[0].strip().strip("[]")
