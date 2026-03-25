@@ -3397,6 +3397,11 @@ def _parse_cli_args(argv: list[str] | None = None):
         default=0,
         help="Parent process PID used to stop orphaned widget runtime processes.",
     )
+    parser.add_argument(
+        "--monitor-bounds",
+        default="",
+        help="Target monitor bounds as x,y,width,height for widget viewer placement.",
+    )
     return parser.parse_known_args(argv)
 
 
@@ -3405,10 +3410,22 @@ def _run_widget_entrypoint(
     runtime_ipc: bool = False,
     start_hidden: bool = False,
     parent_pid: int | None = None,
+    monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> int:
-    from widget_viewer import _build_engine_url, _normalize_url, _start_with_cef, _start_with_pywebview, _viewer_backend_order, _safe_print
+    from widget_viewer import (
+        _build_engine_url,
+        _normalize_url,
+        _parse_monitor_bounds,
+        _safe_print,
+        _start_with_cef,
+        _start_with_pywebview,
+        _viewer_backend_order,
+    )
 
     _start_parent_watchdog(parent_pid)
+    parsed_monitor_bounds = monitor_bounds
+    if parsed_monitor_bounds is None:
+        parsed_monitor_bounds = _parse_monitor_bounds(os.getenv("WIDGET_MONITOR_BOUNDS", ""))
 
     try:
         normalized_url = _build_engine_url(_normalize_url(widget_url))
@@ -3421,9 +3438,19 @@ def _run_widget_entrypoint(
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
             if backend == "cef":
-                _start_with_cef(normalized_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+                _start_with_cef(
+                    normalized_url,
+                    runtime_ipc=runtime_ipc,
+                    start_hidden=start_hidden,
+                    monitor_bounds=parsed_monitor_bounds,
+                )
             else:
-                _start_with_pywebview(normalized_url, runtime_ipc=runtime_ipc, start_hidden=start_hidden)
+                _start_with_pywebview(
+                    normalized_url,
+                    runtime_ipc=runtime_ipc,
+                    start_hidden=start_hidden,
+                    monitor_bounds=parsed_monitor_bounds,
+                )
             return 0
         except Exception as exc:
             errors.append(f"{backend}: {exc}")
@@ -3435,12 +3462,15 @@ def _run_widget_entrypoint(
 if __name__ == "__main__":
     args, _unknown_args = _parse_cli_args()
     if args.widget_url:
+        from widget_viewer import _parse_monitor_bounds
+
         raise SystemExit(
             _run_widget_entrypoint(
                 args.widget_url,
                 runtime_ipc=args.runtime_ipc,
                 start_hidden=args.start_hidden,
                 parent_pid=args.parent_pid,
+                monitor_bounds=_parse_monitor_bounds(args.monitor_bounds),
             )
         )
     main()
