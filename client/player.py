@@ -1260,7 +1260,13 @@ class BorderlessFullscreenPlayer:
                 return False
 
         with self._widget_process_lock:
-            self.stop()
+            if self._process and self._process.poll() is None:
+                self._terminate_process(self._process, timeout_sec=5)
+            self._process = None
+            for extra_process in list(self._extra_processes):
+                if extra_process and extra_process.poll() is None:
+                    self._terminate_process(extra_process, timeout_sec=5)
+            self._extra_processes = []
 
             commands = self._build_widget_commands(
                 source,
