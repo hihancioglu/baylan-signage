@@ -312,7 +312,8 @@ class BorderlessFullscreenPlayer:
             return []
 
         enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
-        if not enum_display_monitors:
+        get_monitor_info = getattr(ctypes.windll.user32, "GetMonitorInfoW", None)
+        if not enum_display_monitors or not get_monitor_info:
             return []
 
         class RECT(ctypes.Structure):
@@ -323,7 +324,16 @@ class BorderlessFullscreenPlayer:
                 ("bottom", ctypes.c_long),
             ]
 
-        monitor_rects: list[tuple[int, int, int, int]] = []
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", ctypes.c_ulong),
+            ]
+
+        MONITORINFOF_PRIMARY = 1
+        monitor_rects: list[tuple[int, int, int, int, bool]] = []
         callback_type = ctypes.WINFUNCTYPE(
             ctypes.c_int,
             wintypes.HMONITOR,
@@ -332,13 +342,22 @@ class BorderlessFullscreenPlayer:
             wintypes.LPARAM,
         )
 
-        def _collect_monitor(_monitor, _hdc, rect_ptr, _data):
+        def _collect_monitor(monitor_handle, _hdc, rect_ptr, _data):
             if not rect_ptr:
                 return 1
             rect = rect_ptr.contents
             width = max(1, int(rect.right - rect.left))
             height = max(1, int(rect.bottom - rect.top))
-            monitor_rects.append((int(rect.left), int(rect.top), width, height))
+            is_primary = False
+            try:
+                monitor_info = MONITORINFO()
+                monitor_info.cbSize = ctypes.sizeof(MONITORINFO)
+                if get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
+                    is_primary = bool(int(monitor_info.dwFlags) & MONITORINFOF_PRIMARY)
+            except Exception:
+                is_primary = False
+
+            monitor_rects.append((int(rect.left), int(rect.top), width, height, is_primary))
             return 1
 
         try:
@@ -346,11 +365,12 @@ class BorderlessFullscreenPlayer:
         except Exception:
             return []
 
-        monitor_rects.sort(key=lambda item: (item[1], item[0]))
+        monitor_rects.sort(key=lambda item: (0 if item[4] else 1, item[1], item[0]))
 
         unique_monitor_rects: list[tuple[int, int, int, int]] = []
         seen_rects: set[tuple[int, int, int, int]] = set()
-        for rect in monitor_rects:
+        for left, top, width, height, _is_primary in monitor_rects:
+            rect = (left, top, width, height)
             if rect in seen_rects:
                 continue
             seen_rects.add(rect)

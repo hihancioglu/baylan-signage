@@ -319,6 +319,50 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         unique_positions = {tuple(command[1:]) for command in commands}
         self.assertEqual(len(unique_positions), 2)
 
+    def test_windows_connected_monitor_bounds_prioritizes_primary_display(self):
+        import types
+        import ctypes
+
+        class FakeRect:
+            def __init__(self, left: int, top: int, right: int, bottom: int):
+                self.left = left
+                self.top = top
+                self.right = right
+                self.bottom = bottom
+
+        class FakeRectPtr:
+            def __init__(self, rect: FakeRect):
+                self.contents = rect
+
+        class FakeUser32:
+            def __init__(self):
+                self.monitors = [
+                    {"rect": (1920, 0, 3840, 1080), "primary": False},
+                    {"rect": (0, 0, 1920, 1080), "primary": True},
+                ]
+
+            def EnumDisplayMonitors(self, _hdc, _clip, callback, _data):
+                for index, monitor in enumerate(self.monitors):
+                    left, top, right, bottom = monitor["rect"]
+                    callback(index + 1, 0, FakeRectPtr(FakeRect(left, top, right, bottom)), 0)
+                return 1
+
+            def GetMonitorInfoW(self, monitor_handle, monitor_info_ptr):
+                monitor = self.monitors[int(monitor_handle) - 1]
+                monitor_info = monitor_info_ptr._obj
+                monitor_info.dwFlags = 1 if monitor["primary"] else 0
+                return 1
+
+        fake_windll = types.SimpleNamespace(user32=FakeUser32())
+        with patch("client.player.os.name", "nt"), patch("client.player.ctypes.windll", fake_windll, create=True), patch(
+            "client.player.ctypes.WINFUNCTYPE",
+            side_effect=lambda *_args, **_kwargs: (lambda func: func),
+            create=True,
+        ):
+            bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
+
+        self.assertEqual(bounds, [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)])
+
     def test_build_widget_commands_disables_python_viewer_when_cloning_on_windows(self):
         player = self._build_player()
 
