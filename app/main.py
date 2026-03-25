@@ -896,6 +896,147 @@ def join_group_rooms(db, sid, hostname):
         join_room(f"group:{membership.group_id}")
 
 
+def _build_playlist_runtime_payload(db, playlist, runtime_vars, widgets_by_id, media_name_by_path):
+    if not playlist or not playlist.enabled:
+        return None
+
+    items = (
+        db.query(PlaylistItem)
+        .filter_by(playlist_id=playlist.id)
+        .order_by(PlaylistItem.order_no)
+        .all()
+    )
+
+    videos = []
+    for i in items:
+        item_type = str(i.item_type or "media").strip().lower()
+        if item_type == "widget":
+            widget_def = widgets_by_id.get(i.widget_id) if i.widget_id else None
+            widget_payload = _decode_widget_payload(i.widget_payload)
+            widget_url = i.widget_url or i.source_url
+            widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
+            widget_name = ""
+
+            if widget_def:
+                widget_type = str(widget_def.get("type") or "html").strip().lower()
+                widget_name = str(widget_def.get("name") or "").strip()
+                widget_payload = {
+                    "name": widget_name,
+                    "type": widget_type,
+                    "content": widget_def.get("content") or "",
+                }
+                if widget_type == "url":
+                    widget_url = str(widget_def.get("content") or "").strip() or None
+                    widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
+                elif widget_type == "dashboard":
+                    parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
+                    if parsed_dashboard_payload:
+                        widget_payload = parsed_dashboard_payload
+                        widget_payload["name"] = widget_def.get("name") or ""
+                    widget_url = None
+                else:
+                    widget_url = None
+
+            if isinstance(widget_payload, (dict, list, str)):
+                widget_payload = _apply_widget_runtime_vars(widget_payload, runtime_vars)
+
+            videos.append(
+                {
+                    "path": widget_url or i.path or i.widget_url or i.source_url,
+                    "display_name": widget_name
+                    or (str(widget_payload.get("name") or "").strip() if isinstance(widget_payload, dict) else ""),
+                    "item_type": "widget",
+                    "media_type": "widget",
+                    "duration_sec": i.duration_sec,
+                    "order_no": i.order_no,
+                    "widget_id": i.widget_id,
+                    "widget_payload": widget_payload,
+                    "widget_url": widget_url,
+                }
+            )
+            continue
+
+        if not i.path:
+            continue
+
+        raw_item_path = str(i.path).strip()
+        decoded_item_path = unquote(raw_item_path)
+        item_file_name = Path(raw_item_path.split("?")[0]).name
+        decoded_item_file_name = Path(decoded_item_path.split("?")[0]).name
+
+        videos.append(
+            {
+                "path": i.path,
+                "display_name": (
+                    media_name_by_path.get(raw_item_path)
+                    or media_name_by_path.get(decoded_item_path)
+                    or media_name_by_path.get(item_file_name)
+                    or media_name_by_path.get(decoded_item_file_name)
+                    or decoded_item_file_name
+                    or item_file_name
+                ),
+                "item_type": "media",
+                "media_type": i.media_type or _media_kind_from_path(i.path),
+                "duration_sec": i.duration_sec,
+                "order_no": i.order_no,
+                "widget_id": None,
+                "widget_payload": None,
+                "widget_url": None,
+            }
+        )
+
+    media_signatures = {
+        f"{item.get('item_type') or 'media'}:{item.get('path') or item.get('widget_url') or item.get('widget_id')}": hashlib.sha256(
+            json.dumps(
+                {
+                    "item_type": item.get("item_type") or "media",
+                    "path": item.get("path"),
+                    "display_name": item.get("display_name"),
+                    "media_type": item.get("media_type"),
+                    "duration_sec": item.get("duration_sec") or 0,
+                    "order_no": item.get("order_no") or 0,
+                    "widget_id": item.get("widget_id"),
+                    "widget_payload": item.get("widget_payload"),
+                    "widget_url": item.get("widget_url"),
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        for item in videos
+    }
+    playlist_fingerprint = "|".join(
+        json.dumps(
+            {
+                "item_type": item.get("item_type") or "media",
+                "path": item.get("path"),
+                "display_name": item.get("display_name"),
+                "media_type": item.get("media_type"),
+                "duration_sec": item.get("duration_sec") or 0,
+                "order_no": item.get("order_no") or 0,
+                "widget_id": item.get("widget_id"),
+                "widget_payload": item.get("widget_payload"),
+                "widget_url": item.get("widget_url"),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        for item in videos
+    )
+    playlist_version = hashlib.sha256(
+        f"{playlist.id}:{playlist.loop_mode}:{playlist_fingerprint}".encode("utf-8")
+    ).hexdigest()[:16]
+
+    return {
+        "enabled": True,
+        "videos": videos,
+        "playlist_version": playlist_version,
+        "media_signatures": media_signatures,
+        "loop_mode": playlist.loop_mode or "sequential",
+        "playlist_id": playlist.id,
+    }
+
+
 def build_config(hostname):
     db = db_session()
     try:
@@ -968,153 +1109,52 @@ def build_config(hostname):
         if not dg:
             return base_config
 
-        gp = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).first()
-        if not gp:
-            return base_config
-
-        playlist = db.query(Playlist).filter_by(id=gp.playlist_id).first()
-        if not playlist or not playlist.enabled:
-            return base_config
-
-        items = (
-            db.query(PlaylistItem)
-            .filter_by(playlist_id=playlist.id)
-            .order_by(PlaylistItem.order_no)
-            .all()
-        )
         widgets_by_id = {widget["id"]: widget for widget in _load_widgets(db)}
-
         media_assets = db.query(MediaAsset.relative_path, MediaAsset.stored_name, MediaAsset.original_name).all()
         media_name_by_path = _build_media_display_name_lookup(media_assets)
+        monitor_count = max(1, int(getattr(group, "monitor_count", 1) or 1)) if group else 1
+        group_playlists = db.query(GroupPlaylist).filter_by(group_id=dg.group_id).all()
+        playlist_by_monitor = {int(gp.monitor_no or 1): gp.playlist_id for gp in group_playlists}
+        primary_playlist_id = playlist_by_monitor.get(1)
+        if not primary_playlist_id and group_playlists:
+            first_binding = sorted(group_playlists, key=lambda x: int(x.monitor_no or 1))[0]
+            primary_playlist_id = first_binding.playlist_id
 
-        videos = []
-        for i in items:
-            item_type = str(i.item_type or "media").strip().lower()
-            if item_type == "widget":
-                widget_def = widgets_by_id.get(i.widget_id) if i.widget_id else None
-                widget_payload = _decode_widget_payload(i.widget_payload)
-                widget_url = i.widget_url or i.source_url
-                widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
-                widget_name = ""
-
-                if widget_def:
-                    widget_type = str(widget_def.get("type") or "html").strip().lower()
-                    widget_name = str(widget_def.get("name") or "").strip()
-                    widget_payload = {
-                        "name": widget_name,
-                        "type": widget_type,
-                        "content": widget_def.get("content") or "",
-                    }
-                    if widget_type == "url":
-                        widget_url = str(widget_def.get("content") or "").strip() or None
-                        widget_url = _apply_widget_runtime_vars(widget_url, runtime_vars) if widget_url else widget_url
-                    elif widget_type == "dashboard":
-                        parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
-                        if parsed_dashboard_payload:
-                            widget_payload = parsed_dashboard_payload
-                            widget_payload["name"] = widget_def.get("name") or ""
-                        widget_url = None
-                    else:
-                        widget_url = None
-
-                if isinstance(widget_payload, (dict, list, str)):
-                    widget_payload = _apply_widget_runtime_vars(widget_payload, runtime_vars)
-
-                videos.append(
-                    {
-                        "path": widget_url or i.path or i.widget_url or i.source_url,
-                        "display_name": widget_name
-                        or (str(widget_payload.get("name") or "").strip() if isinstance(widget_payload, dict) else ""),
-                        "item_type": "widget",
-                        "media_type": "widget",
-                        "duration_sec": i.duration_sec,
-                        "order_no": i.order_no,
-                        "widget_id": i.widget_id,
-                        "widget_payload": widget_payload,
-                        "widget_url": widget_url,
-                    }
-                )
-                continue
-
-            if not i.path:
-                continue
-
-            raw_item_path = str(i.path).strip()
-            decoded_item_path = unquote(raw_item_path)
-            item_file_name = Path(raw_item_path.split("?")[0]).name
-            decoded_item_file_name = Path(decoded_item_path.split("?")[0]).name
-
-            videos.append(
-                {
-                    "path": i.path,
-                    "display_name": (
-                        media_name_by_path.get(raw_item_path)
-                        or media_name_by_path.get(decoded_item_path)
-                        or media_name_by_path.get(item_file_name)
-                        or media_name_by_path.get(decoded_item_file_name)
-                        or decoded_item_file_name
-                        or item_file_name
-                    ),
-                    "item_type": "media",
-                    "media_type": i.media_type or _media_kind_from_path(i.path),
-                    "duration_sec": i.duration_sec,
-                    "order_no": i.order_no,
-                    "widget_id": None,
-                    "widget_payload": None,
-                    "widget_url": None,
-                }
-            )
-
-        media_signatures = {
-            f"{item.get('item_type') or 'media'}:{item.get('path') or item.get('widget_url') or item.get('widget_id')}": hashlib.sha256(
-                json.dumps(
-                    {
-                        "item_type": item.get("item_type") or "media",
-                        "path": item.get("path"),
-                        "display_name": item.get("display_name"),
-                        "media_type": item.get("media_type"),
-                        "duration_sec": item.get("duration_sec") or 0,
-                        "order_no": item.get("order_no") or 0,
-                        "widget_id": item.get("widget_id"),
-                        "widget_payload": item.get("widget_payload"),
-                        "widget_url": item.get("widget_url"),
-                    },
-                    sort_keys=True,
-                    ensure_ascii=False,
-                ).encode("utf-8")
-            ).hexdigest()
-            for item in videos
-        }
-        playlist_fingerprint = "|".join(
-            json.dumps(
-                {
-                    "item_type": item.get("item_type") or "media",
-                    "path": item.get("path"),
-                    "display_name": item.get("display_name"),
-                    "media_type": item.get("media_type"),
-                    "duration_sec": item.get("duration_sec") or 0,
-                    "order_no": item.get("order_no") or 0,
-                    "widget_id": item.get("widget_id"),
-                    "widget_payload": item.get("widget_payload"),
-                    "widget_url": item.get("widget_url"),
-                },
-                sort_keys=True,
-                ensure_ascii=False,
-            )
-            for item in videos
+        primary_playlist = db.query(Playlist).filter_by(id=primary_playlist_id).first() if primary_playlist_id else None
+        primary_payload = _build_playlist_runtime_payload(
+            db,
+            primary_playlist,
+            runtime_vars,
+            widgets_by_id,
+            media_name_by_path,
         )
-        playlist_version = hashlib.sha256(
-            f"{playlist.id}:{playlist.loop_mode}:{playlist_fingerprint}".encode("utf-8")
-        ).hexdigest()[:16]
+        if not primary_payload:
+            return base_config
 
-        return {
-            **base_config,
-            "enabled": True,
-            "videos": videos,
-            "playlist_version": playlist_version,
-            "media_signatures": media_signatures,
-            "loop_mode": playlist.loop_mode or "sequential",
-        }
+        monitor_playlists = {}
+        for monitor_no in range(1, monitor_count + 1):
+            monitor_playlist_id = playlist_by_monitor.get(monitor_no)
+            monitor_playlist = db.query(Playlist).filter_by(id=monitor_playlist_id).first() if monitor_playlist_id else None
+            monitor_payload = _build_playlist_runtime_payload(
+                db,
+                monitor_playlist,
+                runtime_vars,
+                widgets_by_id,
+                media_name_by_path,
+            )
+            if monitor_payload:
+                monitor_playlists[str(monitor_no)] = monitor_payload
+            else:
+                monitor_playlists[str(monitor_no)] = {
+                    "enabled": False,
+                    "videos": [],
+                    "playlist_version": f"empty-monitor-{monitor_no}",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                    "playlist_id": None,
+                }
+
+        return {**base_config, **primary_payload, "monitor_playlists": monitor_playlists, "monitor_count": monitor_count}
 
     finally:
         db.close()
@@ -1493,12 +1533,17 @@ def list_groups():
         groups = db.query(Group).all()
         result = []
         for g in groups:
-            active_playlist = (
-                db.query(Playlist.id, Playlist.name)
-                .join(GroupPlaylist, GroupPlaylist.playlist_id == Playlist.id)
+            playlist_rows = (
+                db.query(GroupPlaylist.monitor_no, Playlist.id, Playlist.name)
+                .join(Playlist, GroupPlaylist.playlist_id == Playlist.id)
                 .filter(GroupPlaylist.group_id == g.id)
-                .first()
+                .all()
             )
+            playlists_by_monitor = {
+                str(int(row[0] or 1)): {"id": row[1], "name": row[2]}
+                for row in playlist_rows
+            }
+            primary_playlist = playlists_by_monitor.get("1")
             result.append(
                 {
                     "id": g.id,
@@ -1506,10 +1551,9 @@ def list_groups():
                     "idle_timeout_sec": g.idle_timeout_sec,
                     "idle_mode_enabled": bool(g.idle_mode_enabled) if g.idle_mode_enabled is not None else True,
                     "content_enabled": bool(g.content_enabled) if g.content_enabled is not None else True,
-                    "playlist": {
-                        "id": active_playlist[0],
-                        "name": active_playlist[1],
-                    } if active_playlist else None,
+                    "monitor_count": max(1, int(getattr(g, "monitor_count", 1) or 1)),
+                    "playlists_by_monitor": playlists_by_monitor,
+                    "playlist": primary_playlist,
                 }
             )
         return jsonify(result)
@@ -1530,6 +1574,7 @@ def create_group():
     idle_timeout_sec = payload.get("idle_timeout_sec")
     idle_mode_enabled = payload.get("idle_mode_enabled")
     content_enabled = payload.get("content_enabled")
+    monitor_count = payload.get("monitor_count", 1)
     if idle_timeout_sec is not None:
         if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
             return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
@@ -1539,6 +1584,8 @@ def create_group():
 
     if content_enabled is not None and not isinstance(content_enabled, bool):
         return jsonify({"error": "content_enabled must be a boolean"}), 400
+    if not isinstance(monitor_count, int) or monitor_count < 1 or monitor_count > 4:
+        return jsonify({"error": "monitor_count must be between 1 and 4"}), 400
 
     db = db_session()
     try:
@@ -1551,6 +1598,7 @@ def create_group():
             idle_timeout_sec=idle_timeout_sec,
             idle_mode_enabled=True if idle_mode_enabled is None else idle_mode_enabled,
             content_enabled=True if content_enabled is None else content_enabled,
+            monitor_count=monitor_count,
         )
         db.add(g)
         db.commit()
@@ -1572,6 +1620,7 @@ def update_group(group_id):
     idle_timeout_sec = payload.get("idle_timeout_sec")
     idle_mode_enabled = payload.get("idle_mode_enabled")
     content_enabled = payload.get("content_enabled")
+    monitor_count = payload.get("monitor_count")
     if idle_timeout_sec is not None:
         if not isinstance(idle_timeout_sec, int) or idle_timeout_sec <= 0:
             return jsonify({"error": "idle_timeout_sec must be a positive integer"}), 400
@@ -1581,6 +1630,8 @@ def update_group(group_id):
 
     if content_enabled is not None and not isinstance(content_enabled, bool):
         return jsonify({"error": "content_enabled must be a boolean"}), 400
+    if monitor_count is not None and (not isinstance(monitor_count, int) or monitor_count < 1 or monitor_count > 4):
+        return jsonify({"error": "monitor_count must be between 1 and 4"}), 400
 
     db = db_session()
     try:
@@ -1595,6 +1646,7 @@ def update_group(group_id):
         previous_idle_timeout_sec = group.idle_timeout_sec
         previous_idle_mode_enabled = group.idle_mode_enabled
         previous_content_enabled = group.content_enabled
+        previous_monitor_count = max(1, int(getattr(group, "monitor_count", 1) or 1))
 
         group.name = name
         group.idle_timeout_sec = idle_timeout_sec
@@ -1602,12 +1654,20 @@ def update_group(group_id):
             group.idle_mode_enabled = idle_mode_enabled
         if content_enabled is not None:
             group.content_enabled = content_enabled
+        if monitor_count is not None:
+            group.monitor_count = monitor_count
+            if monitor_count < previous_monitor_count:
+                db.query(GroupPlaylist).filter(
+                    GroupPlaylist.group_id == group_id,
+                    GroupPlaylist.monitor_no > monitor_count,
+                ).delete(synchronize_session=False)
         db.commit()
 
         if (
             previous_idle_timeout_sec != idle_timeout_sec
             or previous_idle_mode_enabled != group.idle_mode_enabled
             or previous_content_enabled != group.content_enabled
+            or previous_monitor_count != max(1, int(getattr(group, "monitor_count", 1) or 1))
         ):
             _emit_config_update(_hostnames_for_group(db, group_id))
 
@@ -1653,10 +1713,22 @@ def bind_group_playlist(group_id, playlist_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
+    monitor_no = request.args.get("monitor_no", "1")
+    try:
+        monitor_no = int(monitor_no)
+    except ValueError:
+        return jsonify({"error": "monitor_no must be an integer"}), 400
+
     db = db_session()
     try:
-        db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
-        db.add(GroupPlaylist(group_id=group_id, playlist_id=playlist_id))
+        group = db.query(Group).filter_by(id=group_id).first()
+        if not group:
+            return jsonify({"error": "group not found"}), 404
+        if monitor_no < 1 or monitor_no > max(1, int(getattr(group, "monitor_count", 1) or 1)):
+            return jsonify({"error": "monitor_no out of range"}), 400
+
+        db.query(GroupPlaylist).filter_by(group_id=group_id, monitor_no=monitor_no).delete()
+        db.add(GroupPlaylist(group_id=group_id, playlist_id=playlist_id, monitor_no=monitor_no))
         db.commit()
 
         _emit_config_update(_hostnames_for_group(db, group_id))
@@ -1671,13 +1743,24 @@ def unbind_group_playlist(group_id):
     if _auth_failed():
         return jsonify({"error": "unauthorized"}), 401
 
+    monitor_no_raw = request.args.get("monitor_no")
+    monitor_no = None
+    if monitor_no_raw not in (None, ""):
+        try:
+            monitor_no = int(monitor_no_raw)
+        except ValueError:
+            return jsonify({"error": "monitor_no must be an integer"}), 400
+
     db = db_session()
     try:
         group = db.query(Group).filter_by(id=group_id).first()
         if not group:
             return jsonify({"error": "group not found"}), 404
 
-        db.query(GroupPlaylist).filter_by(group_id=group_id).delete()
+        query = db.query(GroupPlaylist).filter_by(group_id=group_id)
+        if monitor_no is not None:
+            query = query.filter(GroupPlaylist.monitor_no == monitor_no)
+        query.delete(synchronize_session=False)
         db.commit()
 
         _emit_config_update(_hostnames_for_group(db, group_id))

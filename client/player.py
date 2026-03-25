@@ -1129,9 +1129,26 @@ class BorderlessFullscreenPlayer:
             for monitor_bounds in monitor_bounds_list
         ]
 
-    def _launch_media_processes(self, command: list[str]) -> list[subprocess.Popen]:
-        processes = [subprocess.Popen(command)]
-        if not self._should_clone_to_all_monitors() or os.name != "nt" or not self._is_mpv_command(command):
+    def _launch_media_processes(
+        self,
+        command: list[str],
+        *,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> list[subprocess.Popen]:
+        normalized_command = list(command)
+        if (
+            isinstance(target_monitor_index, int)
+            and target_monitor_index >= 0
+            and os.name == "nt"
+            and self._is_mpv_command(normalized_command)
+            and target_monitor_index > 0
+        ):
+            normalized_command.insert(1, f"--screen={target_monitor_index}")
+
+        processes = [subprocess.Popen(normalized_command)]
+        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        if not clone_enabled or target_monitor_index is not None or os.name != "nt" or not self._is_mpv_command(normalized_command):
             return processes
 
         monitor_bounds_list = self._windows_connected_monitor_bounds()
@@ -1139,7 +1156,7 @@ class BorderlessFullscreenPlayer:
             return processes
 
         for monitor_index in range(1, len(monitor_bounds_list)):
-            monitor_command = [*command]
+            monitor_command = [*normalized_command]
             monitor_command.insert(1, f"--screen={monitor_index}")
             processes.append(subprocess.Popen(monitor_command))
         return processes
@@ -1282,6 +1299,8 @@ class BorderlessFullscreenPlayer:
         media_path: str,
         image_duration_sec: int | None = None,
         start_position_sec: float | None = None,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
     ) -> bool:
         _debug_log(f"play_blocking start | media_path={media_path} image_duration_sec={image_duration_sec} start_position_sec={start_position_sec}")
         if not Path(media_path).exists():
@@ -1334,7 +1353,11 @@ class BorderlessFullscreenPlayer:
 
             self._stop_requested = False
             _debug_log(f"play_blocking command={command}")
-            processes = self._launch_media_processes(command)
+            processes = self._launch_media_processes(
+                command,
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            )
             process = processes[0]
             with self._process_lock:
                 self._process = process
@@ -1371,7 +1394,11 @@ class BorderlessFullscreenPlayer:
             )
 
             self._stop_requested = False
-            processes = self._launch_media_processes(alternate_command)
+            processes = self._launch_media_processes(
+                alternate_command,
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            )
             process = processes[0]
             with self._process_lock:
                 self._process = process
@@ -1409,7 +1436,13 @@ class BorderlessFullscreenPlayer:
             return False
         return self._is_mpv_command(probe_command)
 
-    def play_mpv_playlist_blocking(self, media_paths: list[str], image_duration_sec: int | None = None) -> bool:
+    def play_mpv_playlist_blocking(
+        self,
+        media_paths: list[str],
+        image_duration_sec: int | None = None,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> bool:
         if not self.can_play_with_mpv_playlist(media_paths):
             self._last_interrupted = False
             return False
@@ -1462,7 +1495,11 @@ class BorderlessFullscreenPlayer:
             ]
 
             self._stop_requested = False
-            processes = self._launch_media_processes(command)
+            processes = self._launch_media_processes(
+                command,
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            )
             process = processes[0]
             with self._process_lock:
                 self._process = process

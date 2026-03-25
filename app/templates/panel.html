@@ -125,11 +125,12 @@
                 <div class="row g-2 mb-3 align-items-center">
                   <div class="col-12 col-md-4"><input id="new-group-name" class="form-control" placeholder="Yeni grup adı" /></div>
                   <div class="col-12 col-md-3"><input id="new-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Idle Timeout (sn)" /></div>
+                  <div class="col-12 col-md-2"><select id="new-group-monitor-count" class="form-select"><option value="1">1 Monitor</option><option value="2">2 Monitor</option></select></div>
                   <div class="col-auto"><div class="form-check"><input class="form-check-input" type="checkbox" id="new-group-idle-enabled" checked><label class="form-check-label" for="new-group-idle-enabled">IDLE aktif</label></div><div class="form-check"><input class="form-check-input" type="checkbox" id="new-group-content-enabled" checked><label class="form-check-label" for="new-group-content-enabled">İçerik aktif</label></div></div><div class="col-auto"><button class="btn btn-primary" onclick="createGroup()">Grup Ekle</button></div>
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th>Grup</th><th>Idle Timeout (sn)</th><th>IDLE Modu</th><th>İçerik</th><th>Aktif Playlist</th><th>Cihazlar</th><th>İşlem</th></tr></thead>
+                    <thead class="table-light"><tr><th>Grup</th><th>Idle Timeout (sn)</th><th>IDLE Modu</th><th>İçerik</th><th>Monitor</th><th>Playlist Atamaları</th><th>Cihazlar</th><th>İşlem</th></tr></thead>
                     <tbody id="groups-body"></tbody>
                   </table>
                 </div>
@@ -269,9 +270,11 @@
                   <input type="hidden" id="modal-group-id" />
                   <div class="mb-3"><label class="form-label">Grup Adı</label><input id="modal-group-name" class="form-control" /></div>
                   <div class="mb-3"><label class="form-label">Idle Timeout (sn)</label><input id="modal-group-idle-timeout" class="form-control" type="number" min="1" placeholder="Boş bırak: client varsayılanı" /></div>
+                  <div class="mb-3"><label class="form-label">Monitor Sayısı</label><select id="modal-group-monitor-count" class="form-select" onchange="toggleGroupMonitorPlaylistFields()"><option value="1">1 Monitor</option><option value="2">2 Monitor</option></select></div>
                   <div class="form-check mb-2"><input id="modal-group-idle-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-group-idle-enabled">IDLE modu aktif</label></div>
                   <div class="form-check mb-3"><input id="modal-group-content-enabled" class="form-check-input" type="checkbox" /><label class="form-check-label" for="modal-group-content-enabled">İçerik oynatma aktif</label></div>
-                  <div><label class="form-label">Aktif Playlist</label><select id="modal-group-playlist" class="form-select"></select></div>
+                  <div class="mb-3"><label class="form-label">Monitor 1 Playlist</label><select id="modal-group-playlist-monitor-1" class="form-select"></select></div>
+                  <div id="modal-group-monitor-2-wrapper"><label class="form-label">Monitor 2 Playlist</label><select id="modal-group-playlist-monitor-2" class="form-select"></select></div>
                 </div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
@@ -768,8 +771,10 @@ async function loadGroupsPlaylists(){
   cachedGroups = groups || [];
 
   const pOpts = '<option value="">Playlist yok</option>' + (playlists||[]).map(p=>`<option value="${p.id}">${p.name}${p.enabled ? '' : ' (pasif)'}</option>`).join('');
-  const modalPlaylistSelect = document.getElementById('modal-group-playlist');
-  modalPlaylistSelect.innerHTML = pOpts;
+  const modalPlaylistSelect1 = document.getElementById('modal-group-playlist-monitor-1');
+  const modalPlaylistSelect2 = document.getElementById('modal-group-playlist-monitor-2');
+  modalPlaylistSelect1.innerHTML = pOpts;
+  modalPlaylistSelect2.innerHTML = pOpts;
 
   const pa = document.getElementById('playlist-add-select');
   const po = document.getElementById('playlist-order-select');
@@ -1297,11 +1302,17 @@ function renderGroupsTable(){
       : '<span class="text-secondary">Cihaz yok</span>';
 
     const tr = document.createElement('tr');
-    const playlistName = g.playlist?.name || '-';
+    const monitorCount = Math.max(1, Number(g.monitor_count || 1));
+    const playlistsByMonitor = g.playlists_by_monitor || {};
+    const playlistAssignments = Array.from({length: monitorCount}, (_, idx) => {
+      const monitorNo = String(idx + 1);
+      const name = playlistsByMonitor[monitorNo]?.name || '-';
+      return `<div><strong>M${monitorNo}:</strong> ${escapeHtml(name)}</div>`;
+    }).join('');
     const idleTimeoutText = g.idle_timeout_sec ? String(g.idle_timeout_sec) : 'Varsayılan';
     const idleEnabledText = g.idle_mode_enabled === false ? 'Kapalı' : 'Açık';
     const contentEnabledText = g.content_enabled === false ? 'Kapalı' : 'Açık';
-    tr.innerHTML = `<td>${g.name}</td><td>${idleTimeoutText}</td><td>${idleEnabledText}</td><td>${contentEnabledText}</td><td>${playlistName}</td><td><div class="mb-2">${groupDeviceBadges}</div><div class="d-flex gap-2"><select id="group-device-select-${g.id}" class="form-select form-select-sm"><option value="">Cihaz seçin</option>${deviceOptions}</select><button class="btn btn-sm btn-outline-success" onclick="addDeviceToGroup(${g.id})">Ekle</button></div></td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
+    tr.innerHTML = `<td>${g.name}</td><td>${idleTimeoutText}</td><td>${idleEnabledText}</td><td>${contentEnabledText}</td><td>${monitorCount}</td><td>${playlistAssignments}</td><td><div class="mb-2">${groupDeviceBadges}</div><div class="d-flex gap-2"><select id="group-device-select-${g.id}" class="form-select form-select-sm"><option value="">Cihaz seçin</option>${deviceOptions}</select><button class="btn btn-sm btn-outline-success" onclick="addDeviceToGroup(${g.id})">Ekle</button></div></td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="openGroupEditModal(${g.id})">Düzenle</button><button class="btn btn-sm btn-outline-danger" onclick="deleteGroup(${g.id})">Sil</button></div></td>`;
     body.appendChild(tr);
   });
 }
@@ -1359,14 +1370,21 @@ async function createGroup(){
 
   const idleModeEnabled = document.getElementById('new-group-idle-enabled').checked;
   const contentEnabled = document.getElementById('new-group-content-enabled').checked;
-  const resp = await jpost('/api/groups', {name, idle_timeout_sec: idleTimeoutSec, idle_mode_enabled: idleModeEnabled, content_enabled: contentEnabled});
+  const monitorCount = Number(document.getElementById('new-group-monitor-count').value || '1') || 1;
+  const resp = await jpost('/api/groups', {name, idle_timeout_sec: idleTimeoutSec, idle_mode_enabled: idleModeEnabled, content_enabled: contentEnabled, monitor_count: monitorCount});
   if(!resp.ok){ alert(resp.error || 'Grup oluşturulamadı'); return; }
   alert(resp.already_exists ? 'Grup zaten vardı' : 'Grup oluşturuldu');
   document.getElementById('new-group-name').value = '';
   document.getElementById('new-group-idle-timeout').value = '';
   document.getElementById('new-group-idle-enabled').checked = true;
   document.getElementById('new-group-content-enabled').checked = true;
+  document.getElementById('new-group-monitor-count').value = '1';
   await loadGroupsPlaylists();
+}
+
+function toggleGroupMonitorPlaylistFields(){
+  const monitorCount = Number(document.getElementById('modal-group-monitor-count').value || '1') || 1;
+  document.getElementById('modal-group-monitor-2-wrapper').classList.toggle('d-none', monitorCount < 2);
 }
 
 function openGroupEditModal(groupId){
@@ -1374,17 +1392,24 @@ function openGroupEditModal(groupId){
   if(!group) return;
   document.getElementById('modal-group-id').value = group.id;
   document.getElementById('modal-group-name').value = group.name;
-  document.getElementById('modal-group-playlist').value = group.playlist?.id ? String(group.playlist.id) : '';
+  const monitorCount = Math.max(1, Number(group.monitor_count || 1));
+  const playlistsByMonitor = group.playlists_by_monitor || {};
+  document.getElementById('modal-group-monitor-count').value = String(monitorCount);
+  document.getElementById('modal-group-playlist-monitor-1').value = playlistsByMonitor['1']?.id ? String(playlistsByMonitor['1'].id) : '';
+  document.getElementById('modal-group-playlist-monitor-2').value = playlistsByMonitor['2']?.id ? String(playlistsByMonitor['2'].id) : '';
   document.getElementById('modal-group-idle-timeout').value = group.idle_timeout_sec ? String(group.idle_timeout_sec) : '';
   document.getElementById('modal-group-idle-enabled').checked = group.idle_mode_enabled !== false;
   document.getElementById('modal-group-content-enabled').checked = group.content_enabled !== false;
+  toggleGroupMonitorPlaylistFields();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('group-edit-modal')).show();
 }
 
 async function saveGroupModal(){
   const groupId = Number(document.getElementById('modal-group-id').value);
   const name = document.getElementById('modal-group-name').value.trim();
-  const playlistId = Number(document.getElementById('modal-group-playlist').value);
+  const playlistIdMonitor1 = Number(document.getElementById('modal-group-playlist-monitor-1').value);
+  const playlistIdMonitor2 = Number(document.getElementById('modal-group-playlist-monitor-2').value);
+  const monitorCount = Number(document.getElementById('modal-group-monitor-count').value || '1') || 1;
   const idleTimeoutRaw = document.getElementById('modal-group-idle-timeout').value.trim();
   if(!groupId || !name){
     alert('Grup adı zorunlu');
@@ -1402,25 +1427,42 @@ async function saveGroupModal(){
 
   const idleModeEnabled = document.getElementById('modal-group-idle-enabled').checked;
   const contentEnabled = document.getElementById('modal-group-content-enabled').checked;
-  const updateResp = await jpatch(`/api/groups/${groupId}`, {name, idle_timeout_sec: idleTimeoutSec, idle_mode_enabled: idleModeEnabled, content_enabled: contentEnabled});
+  const updateResp = await jpatch(`/api/groups/${groupId}`, {name, idle_timeout_sec: idleTimeoutSec, idle_mode_enabled: idleModeEnabled, content_enabled: contentEnabled, monitor_count: monitorCount});
   if(!updateResp.ok){
     alert(updateResp.error || 'Grup güncellenemedi');
     return;
   }
 
   const group = cachedGroups.find(x => x.id === groupId);
-  const currentPlaylistId = group?.playlist?.id || null;
-  if(playlistId && playlistId !== currentPlaylistId){
-    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistId}`, {});
+  const playlistsByMonitor = group?.playlists_by_monitor || {};
+  const currentPlaylistIdMonitor1 = playlistsByMonitor['1']?.id || null;
+  const currentPlaylistIdMonitor2 = playlistsByMonitor['2']?.id || null;
+
+  if(playlistIdMonitor1 && playlistIdMonitor1 !== currentPlaylistIdMonitor1){
+    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistIdMonitor1}?monitor_no=1`, {});
     if(!assignResp.ok){
       alert(assignResp.error || 'Playlist atanamadı');
       return;
     }
   }
-  if(!playlistId && currentPlaylistId){
-    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist`);
+  if(!playlistIdMonitor1 && currentPlaylistIdMonitor1){
+    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist?monitor_no=1`);
     if(!unbindResp.ok){
       alert(unbindResp.error || 'Playlist kaldırma hatası');
+      return;
+    }
+  }
+  if(monitorCount >= 2 && playlistIdMonitor2 && playlistIdMonitor2 !== currentPlaylistIdMonitor2){
+    const assignResp = await jpost(`/api/groups/${groupId}/playlist/${playlistIdMonitor2}?monitor_no=2`, {});
+    if(!assignResp.ok){
+      alert(assignResp.error || 'Monitor 2 playlist atanamadı');
+      return;
+    }
+  }
+  if((monitorCount < 2 || !playlistIdMonitor2) && currentPlaylistIdMonitor2){
+    const unbindResp = await jdelete(`/api/groups/${groupId}/playlist?monitor_no=2`);
+    if(!unbindResp.ok){
+      alert(unbindResp.error || 'Monitor 2 playlist kaldırma hatası');
       return;
     }
   }
