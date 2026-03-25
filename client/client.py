@@ -1226,6 +1226,7 @@ class MultiMonitorPlayback:
     def __init__(self, media_manager: MediaManager):
         self.media_manager = media_manager
         self._monitor_states: dict[int, dict] = {}
+        self._monitor_versions: dict[int, str] = {}
         self._players: dict[int, BorderlessFullscreenPlayer] = {}
         self._workers: dict[int, threading.Thread] = {}
         self._running_monitors: dict[int, bool] = {}
@@ -1306,10 +1307,28 @@ class MultiMonitorPlayback:
                 "enabled": bool(enabled and entries),
                 "entries": entries,
                 "loop_mode": loop_mode,
+                "playlist_version": playlist_version,
             }
 
+        players_to_restart: list[BorderlessFullscreenPlayer] = []
         with self._lock:
+            previous_versions = dict(self._monitor_versions)
             self._monitor_states = monitor_states
+            self._monitor_versions = {
+                monitor_no: str((state or {}).get("playlist_version") or "")
+                for monitor_no, state in monitor_states.items()
+            }
+            for monitor_no, player in self._players.items():
+                if player is None:
+                    continue
+                if previous_versions.get(monitor_no) != self._monitor_versions.get(monitor_no):
+                    players_to_restart.append(player)
+
+        for player in players_to_restart:
+            try:
+                player.stop()
+            except Exception:
+                pass
 
     def has_active_playlist(self) -> bool:
         with self._lock:
@@ -1386,9 +1405,16 @@ class MultiMonitorPlayback:
                 widget_url = str(item.get("widget_url") or item.get("path") or "").strip()
                 widget_payload = item.get("widget_payload")
                 widget_config = widget_payload if isinstance(widget_payload, dict) else None
-                widget_duration_sec = item.get("duration_sec")
-                if not isinstance(widget_duration_sec, int) or widget_duration_sec <= 0:
-                    widget_duration_sec = 15
+                raw_widget_duration = item.get("duration_sec")
+                try:
+                    widget_duration_sec = int(raw_widget_duration)
+                except (TypeError, ValueError):
+                    widget_duration_sec = 0
+                if widget_duration_sec <= 0:
+                    if len(entries) == 1:
+                        widget_duration_sec = max(30, int(os.getenv("SECONDARY_WIDGET_PERSIST_SEC", "3600")))
+                    else:
+                        widget_duration_sec = 15
                 if not widget_url and not widget_config:
                     time.sleep(0.2)
                     continue
