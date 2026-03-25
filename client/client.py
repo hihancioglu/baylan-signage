@@ -299,6 +299,7 @@ SOCKETIO_TRANSPORTS = [
 RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
 RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
 RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS", "24")))
+RUNTIME_TMP_CLEANUP_MAX_ENTRIES = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_ENTRIES", "30")))
 CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT = max(1, int(os.getenv("CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT", "30")))
 AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 _rollout_waited_versions: set[str] = set()
@@ -642,7 +643,11 @@ def cleanup_runtime_tmp_dir(
         if meipass:
             active_runtime_dir = Path(meipass).resolve()
 
+    max_entries = max(1, int(RUNTIME_TMP_CLEANUP_MAX_ENTRIES))
+
     cleaned_count = 0
+    cleaned_by_age_count = 0
+    cleaned_by_count_count = 0
     skipped_active_count = 0
     skipped_recent_count = 0
     error_count = 0
@@ -652,6 +657,8 @@ def cleanup_runtime_tmp_dir(
     except OSError as exc:
         log_warning(f"⚠️ RuntimeTmp okunamadı: path={target_root} err={exc}")
         return
+
+    eligible_entries: list[tuple[Path, float]] = []
 
     for entry in entries:
         if active_runtime_dir and (
@@ -665,24 +672,44 @@ def cleanup_runtime_tmp_dir(
         except OSError:
             continue
 
-        if stat_info.st_mtime >= cutoff_timestamp:
-            skipped_recent_count += 1
-            continue
+        eligible_entries.append((entry, stat_info.st_mtime))
 
+    delete_targets: dict[Path, str] = {}
+
+    for entry, mtime in eligible_entries:
+        if mtime < cutoff_timestamp:
+            delete_targets[entry] = "age"
+
+    recent_entries = [(entry, mtime) for entry, mtime in eligible_entries if entry not in delete_targets]
+    recent_entries.sort(key=lambda item: item[1], reverse=True)
+    if len(recent_entries) > max_entries:
+        for entry, _ in recent_entries[max_entries:]:
+            delete_targets[entry] = "count"
+
+
+    for entry, reason in delete_targets.items():
         try:
             if entry.is_dir():
                 shutil.rmtree(entry)
             else:
                 entry.unlink(missing_ok=True)
             cleaned_count += 1
+            if reason == "age":
+                cleaned_by_age_count += 1
+            elif reason == "count":
+                cleaned_by_count_count += 1
         except OSError as exc:
             error_count += 1
-            log_warning(f"⚠️ RuntimeTmp silinemedi: path={entry} err={exc}")
+            log_warning(f"⚠️ RuntimeTmp silinemedi: path={entry} reason={reason} err={exc}")
+
+    skipped_recent_count = max(0, len(recent_entries) - cleaned_by_count_count)
 
     log_info(
         "🧹 RuntimeTmp cleanup tamamlandı | "
         f"path={target_root} cleaned={cleaned_count} "
-        f"skipped_recent={skipped_recent_count} skipped_active={skipped_active_count} errors={error_count}"
+        f"cleaned_by_age={cleaned_by_age_count} cleaned_by_count={cleaned_by_count_count} "
+        f"kept_recent={skipped_recent_count} max_entries={max_entries} "
+        f"skipped_active={skipped_active_count} errors={error_count}"
     )
 
 
