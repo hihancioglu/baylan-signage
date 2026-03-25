@@ -508,7 +508,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         process.poll.return_value = None
         process.returncode = 0
 
-        monotonic_values = iter([100.0, 100.2, 100.6, 101.1])
+        monotonic_values = iter([100.0, 100.2, 100.6, 101.1, 101.2, 101.3])
 
         with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
             player,
@@ -860,6 +860,27 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(result)
         update_layout.assert_not_called()
         popen_mock.assert_called_once()
+
+    def test_play_widget_blocking_holds_duration_when_browser_launcher_exits_immediately(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = 0
+        process.returncode = 0
+
+        monotonic_values = iter([100.0, 100.2, 100.3, 100.4, 101.0, 102.5])
+
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_CONTROLLER_ENABLED": "0"}, clear=False), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["msedge", "--kiosk", "https://example.com"],
+        ), patch("subprocess.Popen", return_value=process), patch(
+            "time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ), patch("time.sleep", return_value=None) as sleep_mock:
+            result = player.play_widget_blocking("https://example.com", duration_sec=2)
+
+        self.assertTrue(result)
+        self.assertGreaterEqual(sleep_mock.call_count, 1)
 
     def test_stop_widget_process_uses_taskkill_tree_on_windows_timeout(self):
         with patch.dict("os.environ", {"WIDGET_KEEP_RUNTIME_WARM": "0"}, clear=False):

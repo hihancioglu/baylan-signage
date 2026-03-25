@@ -1139,6 +1139,22 @@ class BorderlessFullscreenPlayer:
         self._last_interrupted = interrupted
         return all(process.returncode in (0, None) for process in processes) or interrupted
 
+    def _hold_widget_slot_for_duration(self, duration_sec: int, already_elapsed_sec: float = 0.0) -> bool:
+        remaining_sec = max(0.0, max(1, int(duration_sec)) - max(0.0, float(already_elapsed_sec)))
+        if remaining_sec <= 0:
+            self._last_interrupted = False
+            return True
+
+        deadline = time.monotonic() + remaining_sec
+        while time.monotonic() < deadline:
+            if self._stop_requested:
+                self._last_interrupted = True
+                return True
+            time.sleep(0.2)
+
+        self._last_interrupted = False
+        return True
+
     def _build_widget_commands_for_monitors(self, source: str) -> list[list[str]]:
         command = self._build_widget_command(source)
         if not command:
@@ -1291,8 +1307,22 @@ class BorderlessFullscreenPlayer:
                     _debug_log(f"widget process started | pid={getattr(process, 'pid', None)}")
                 self._widget_process = processes[0]
                 self._extra_processes = processes[1:]
-
-            return self._wait_widget_processes_until_stop(processes, max_duration_sec=duration_sec)
+            wait_started_at = time.monotonic()
+            result = self._wait_widget_processes_until_stop(processes, max_duration_sec=duration_sec)
+            wait_elapsed_sec = max(0.0, time.monotonic() - wait_started_at)
+            if (
+                result
+                and not self._stop_requested
+                and not using_python_widget_viewer
+                and int(duration_sec) > 1
+                and wait_elapsed_sec < 1.0
+            ):
+                _debug_log(
+                    "widget launcher detached quickly; holding playback slot | "
+                    f"duration_sec={duration_sec} elapsed_sec={wait_elapsed_sec:.3f}"
+                )
+                return self._hold_widget_slot_for_duration(duration_sec, already_elapsed_sec=wait_elapsed_sec)
+            return result
         except Exception as exc:
             self._last_interrupted = False
             if using_python_widget_viewer:
