@@ -1554,6 +1554,16 @@ class BorderlessFullscreenPlayer:
 
         runtime_controller_allowed = target_monitor_index is None and not multi_monitor_widget_mode
         runtime_controller_skipped = not runtime_controller_allowed
+        if runtime_controller_skipped and self._widget_process and self._widget_process.poll() is None:
+            # Fallback process modunda (özellikle çoklu monitör widget oynatımında)
+            # sıcak tutulan runtime engine ek bir gizli widget_viewer süreci üretir.
+            # Bu durumda engine'i kapatıp sadece monitör komutlarından gelen
+            # süreçleri açık bırakıyoruz.
+            _debug_log(
+                "play_widget_blocking runtime-controller skipped | "
+                "stopping warm runtime engine before fallback launch"
+            )
+            self.stop_widget_engine()
         if self._widget_runtime_controller_enabled() and runtime_controller_allowed:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
