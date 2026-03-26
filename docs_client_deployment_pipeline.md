@@ -341,6 +341,8 @@ Temizlik uygulaması:
 
 - Çıkış anında silmeye güvenmeyin (crash/power-loss senaryolarında çalışmayabilir).
 - Uygulama açılışında, kullanımda olmayan ve yaş eşiğini (varsayılan 24 saat) aşmış alt klasörler temizlenir.
+- Agent açıkken periyodik bakım çalışır (varsayılan 900 saniye).
+- Yaş eşiğine takılmasa da giriş sayısı `RUNTIME_TMP_CLEANUP_MAX_ENTRIES` değerini aşarsa en eski girişler temizlenir.
 - Dosya kilidi/alınamayan izin (`file in use` / `access denied`) durumlarında ilgili klasörü atlayıp sonraki açılışta tekrar deneyin.
 
 İlgili env ayarları:
@@ -348,6 +350,8 @@ Temizlik uygulaması:
 - `RUNTIME_TMP_DIR`
 - `RUNTIME_TMP_CLEANUP_ENABLED`
 - `RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS`
+- `RUNTIME_TMP_CLEANUP_MAX_ENTRIES`
+- `RUNTIME_TMP_CLEANUP_INTERVAL_SEC`
 
 Gerekirse override edebilirsiniz:
 
