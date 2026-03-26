@@ -2524,6 +2524,17 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         media_manager.sync_playlist_entries.assert_called_once()
         self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor1-v1")
 
+
+    def test_multi_monitor_playback_target_monitor_index_falls_back_when_windows_map_empty(self):
+        from client.client import MultiMonitorPlayback
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_windows_monitor_id_to_index_map",
+            return_value={},
+        ):
+            self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(2), 1)
+
     def test_multi_monitor_playback_target_monitor_index_uses_windows_monitor_id_mapping(self):
         from client.client import MultiMonitorPlayback
 
