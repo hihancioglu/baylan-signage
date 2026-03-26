@@ -1696,8 +1696,13 @@ class BorderlessFullscreenPlayer:
             ):
                 _debug_log("play_widget_blocking runtime-controller path active")
                 return self.wait_widget_duration(duration_sec)
-            self._last_interrupted = False
-            return False
+            if not self._widget_legacy_process_fallback_enabled():
+                self._last_interrupted = False
+                return False
+            _debug_log(
+                "play_widget_blocking runtime-controller update failed; "
+                "falling back to legacy widget process launcher"
+            )
 
         with self._widget_process_lock:
             if self._process and self._process.poll() is None:
