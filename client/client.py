@@ -1415,18 +1415,53 @@ class MultiMonitorPlayback:
             return None
         return count
 
+    @staticmethod
+    def _windows_monitor_id_to_index_map() -> dict[int, int]:
+        if os.name != "nt":
+            return {}
+        return BorderlessFullscreenPlayer._windows_monitor_id_to_index_map()
+
+    @classmethod
+    def _windows_primary_monitor_id(cls) -> int | None:
+        monitor_map = cls._windows_monitor_id_to_index_map()
+        if not monitor_map:
+            return 1
+        for monitor_id, monitor_index in monitor_map.items():
+            if int(monitor_index) == 0:
+                return int(monitor_id)
+        return 1
+
+    @classmethod
+    def _target_monitor_index_for_monitor_no(cls, monitor_no: int) -> int:
+        if os.name == "nt":
+            monitor_map = cls._windows_monitor_id_to_index_map()
+            mapped_index = monitor_map.get(int(monitor_no))
+            if mapped_index is not None:
+                return int(mapped_index)
+        return max(0, int(monitor_no) - 1)
+
     def update_from_config(self, monitor_playlists_payload: dict | None):
         monitor_states: dict[int, dict] = {}
         monitor_playlists = monitor_playlists_payload if isinstance(monitor_playlists_payload, dict) else {}
         connected_monitor_count = self._connected_monitor_count()
+        windows_monitor_map = self._windows_monitor_id_to_index_map()
+        primary_monitor_id = self._windows_primary_monitor_id()
         for monitor_no_text, payload in monitor_playlists.items():
             try:
                 monitor_no = int(monitor_no_text)
             except (TypeError, ValueError):
                 continue
-            if monitor_no < 2:
+            if monitor_no < 1:
                 continue
-            if connected_monitor_count is not None and monitor_no > connected_monitor_count:
+            if os.name == "nt":
+                if windows_monitor_map:
+                    if monitor_no == primary_monitor_id or monitor_no not in windows_monitor_map:
+                        continue
+                elif connected_monitor_count is not None and monitor_no > connected_monitor_count:
+                    continue
+                elif monitor_no < 2:
+                    continue
+            elif monitor_no < 2:
                 continue
             if not isinstance(payload, dict):
                 continue
@@ -1627,9 +1662,10 @@ class MultiMonitorPlayback:
                 if not widget_url and not widget_config:
                     time.sleep(0.2)
                     continue
+                target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
                 widget_target_monitor_index, widget_clone_enabled = _resolve_widget_launch_options(
                     clone_requested=False,
-                    requested_target_monitor_index=monitor_no - 1,
+                    requested_target_monitor_index=target_monitor_index,
                     has_multiple_monitors=True,
                 )
                 player.play_widget_blocking(
@@ -1645,15 +1681,16 @@ class MultiMonitorPlayback:
                     continue
                 duration_sec = item.get("duration_sec")
                 media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
+                target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
                 log_debug(
                     "monitor_media_launch | "
-                    f"monitor_no={monitor_no} target_monitor_index={monitor_no - 1} "
+                    f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
                     f"path={media_path} media_duration_sec={media_duration_sec}"
                 )
                 player.play_blocking(
                     media_path,
                     image_duration_sec=media_duration_sec,
-                    target_monitor_index=monitor_no - 1,
+                    target_monitor_index=target_monitor_index,
                     clone_to_all_monitors=False,
                 )
 

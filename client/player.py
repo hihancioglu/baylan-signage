@@ -398,6 +398,87 @@ class BorderlessFullscreenPlayer:
         return unique_monitor_rects
 
     @staticmethod
+    def _windows_monitor_id_to_index_map() -> dict[int, int]:
+        bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
+        if not bounds:
+            return {}
+
+        # Windows Display Settings kimlikleri (DISPLAY1, DISPLAY2, ...)
+        # MONITORINFOEXW::szDevice alanından okunur. Bu kimlikleri
+        # uygulama tarafındaki monitor_no ile eşleyerek seçim yapıyoruz.
+        if os.name != "nt" or not hasattr(ctypes, "windll"):
+            return {}
+
+        enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
+        get_monitor_info = getattr(ctypes.windll.user32, "GetMonitorInfoW", None)
+        if not enum_display_monitors or not get_monitor_info:
+            return {}
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class MONITORINFOEXW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", ctypes.c_ulong),
+                ("szDevice", ctypes.c_wchar * 32),
+            ]
+
+        callback_type = ctypes.WINFUNCTYPE(
+            ctypes.c_int,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(RECT),
+            wintypes.LPARAM,
+        )
+
+        windows_id_to_bounds: dict[int, tuple[int, int, int, int]] = {}
+
+        def _collect_monitor(monitor_handle, _hdc, rect_ptr, _data):
+            if not rect_ptr:
+                return 1
+            rect = rect_ptr.contents
+            width = max(1, int(rect.right - rect.left))
+            height = max(1, int(rect.bottom - rect.top))
+            monitor_info = MONITORINFOEXW()
+            monitor_info.cbSize = ctypes.sizeof(MONITORINFOEXW)
+            try:
+                if get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
+                    device_name = str(monitor_info.szDevice or "")
+                    match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
+                    if match:
+                        windows_id = int(match.group(1))
+                        windows_id_to_bounds[windows_id] = (
+                            int(rect.left),
+                            int(rect.top),
+                            width,
+                            height,
+                        )
+            except Exception:
+                return 1
+            return 1
+
+        try:
+            enum_display_monitors(0, 0, callback_type(_collect_monitor), 0)
+        except Exception:
+            return {}
+
+        bounds_to_index = {monitor_bounds: index for index, monitor_bounds in enumerate(bounds)}
+        id_to_index: dict[int, int] = {}
+        for windows_id, monitor_bounds in windows_id_to_bounds.items():
+            index = bounds_to_index.get(monitor_bounds)
+            if index is not None:
+                id_to_index[windows_id] = int(index)
+        return id_to_index
+
+    @staticmethod
     def _prefer_python_widget_viewer() -> bool:
         return os.getenv("WIDGET_USE_PYTHON_VIEWER", "1").strip().lower() in {"1", "true", "yes"}
 

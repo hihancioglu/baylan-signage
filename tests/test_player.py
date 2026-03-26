@@ -2483,6 +2483,57 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         media_manager.sync_playlist_entries.assert_called_once()
         self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor2-v2")
 
+    def test_multi_monitor_playback_windows_uses_windows_monitor_ids_for_secondary_selection(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m1.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_windows_monitor_id_to_index_map",
+            return_value={1: 1, 2: 0},
+        ), patch.object(
+            MultiMonitorPlayback,
+            "_windows_primary_monitor_id",
+            return_value=2,
+        ):
+            multi_monitor.update_from_config(
+                {
+                    "1": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m1.mp4", "media_type": "video"}],
+                        "playlist_version": "v1",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                    "2": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
+                        "playlist_version": "v2",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+        self.assertTrue(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_called_once()
+        self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor1-v1")
+
+    def test_multi_monitor_playback_target_monitor_index_uses_windows_monitor_id_mapping(self):
+        from client.client import MultiMonitorPlayback
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_windows_monitor_id_to_index_map",
+            return_value={1: 2, 2: 0, 3: 1},
+        ):
+            self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 1)
+
     def test_multi_monitor_playback_accepts_widget_only_playlist(self):
         from client.client import MultiMonitorPlayback
 
