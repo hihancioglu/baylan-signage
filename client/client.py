@@ -2346,10 +2346,16 @@ class PlaybackController:
                             f"has_multiple_monitors={has_multiple_monitors} "
                             f"primary_target_monitor_index={primary_target_monitor_index}"
                         )
-                        if direct_url_widget or clone_widget_to_all_monitors:
+                        force_process_widget_playback = (
+                            direct_url_widget
+                            or clone_widget_to_all_monitors
+                            or primary_target_monitor_index is not None
+                        )
+                        if force_process_widget_playback:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
-                            # yönettiği için ikincil monitörler boş kalabiliyor. Bu durumda
-                            # süreç tabanlı widget oynatım yoluna zorla düş.
+                            # yönettiği için ikincil monitörler boş kalabiliyor. Ayrıca
+                            # monitöre hedefli oynatımda her monitör için ayrı süreç/komut
+                            # üretilmesi gerektiğinden bu durumda süreç tabanlı oynatımı zorla.
                             self._active_widget_signature = None
                             self._prewarmed_widget_signature = None
                             ok = self.player.play_widget_blocking(
