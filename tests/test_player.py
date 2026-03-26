@@ -1327,6 +1327,32 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertTrue(ok)
         build_command.assert_called_once_with(WIDGET_ENGINE_SENTINEL)
 
+    def test_start_widget_engine_keeps_existing_runtime_when_target_not_specified(self):
+        player = self._build_player()
+        process_a = unittest.mock.Mock()
+        process_a.poll.return_value = None
+        process_a.stdin = unittest.mock.Mock()
+        process_b = unittest.mock.Mock()
+        process_b.poll.return_value = None
+        process_b.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [process_a, process_b]
+        player._widget_process = process_a
+        player._extra_processes = [process_b]
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch(
+            "subprocess.Popen"
+        ) as popen_mock:
+            ok = player.start_widget_engine_if_needed(
+                target_monitor_index=None,
+                clone_to_all_monitors=None,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(player._widget_runtime_processes, [process_a, process_b])
+        self.assertEqual(player._widget_process, process_a)
+        self.assertEqual(player._extra_processes, [process_b])
+        popen_mock.assert_not_called()
+
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
