@@ -1645,6 +1645,11 @@ class MultiMonitorPlayback:
                     continue
                 duration_sec = item.get("duration_sec")
                 media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
+                log_debug(
+                    "monitor_media_launch | "
+                    f"monitor_no={monitor_no} target_monitor_index={monitor_no - 1} "
+                    f"path={media_path} media_duration_sec={media_duration_sec}"
+                )
                 player.play_blocking(
                     media_path,
                     image_duration_sec=media_duration_sec,
