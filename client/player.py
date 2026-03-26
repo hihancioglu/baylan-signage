@@ -550,6 +550,15 @@ class BorderlessFullscreenPlayer:
         return "mpv" in executable_name
 
     @staticmethod
+    def _with_mpv_screen_target(command: list[str], screen_index: int) -> list[str]:
+        normalized_screen_index = max(0, int(screen_index))
+        updated_command = [part for part in command if not str(part).startswith("--screen=") and not str(part).startswith("--fs-screen=")]
+        insert_at = 1 if updated_command else 0
+        updated_command.insert(insert_at, f"--screen={normalized_screen_index}")
+        updated_command.insert(insert_at + 1, f"--fs-screen={normalized_screen_index}")
+        return updated_command
+
+    @staticmethod
     def _is_vlc_image_fallback_allowed() -> bool:
         return os.getenv("ALLOW_VLC_IMAGE_FALLBACK", "0").strip().lower() in {
             "1",
@@ -1678,8 +1687,10 @@ class BorderlessFullscreenPlayer:
                 f"resolved_target_monitor_index={resolved_target_monitor_index} "
                 f"used_active_monitor_hint={use_active_monitor_hint}"
             )
-            if resolved_target_monitor_index > 0:
-                normalized_command.insert(1, f"--screen={resolved_target_monitor_index}")
+            normalized_command = self._with_mpv_screen_target(
+                normalized_command,
+                resolved_target_monitor_index,
+            )
 
         processes = [subprocess.Popen(normalized_command)]
         _debug_log(f"media_launch_primary_started | command={normalized_command}")
@@ -1691,8 +1702,7 @@ class BorderlessFullscreenPlayer:
             return processes
 
         for monitor_index in range(1, len(monitor_bounds_list)):
-            monitor_command = [*normalized_command]
-            monitor_command.insert(1, f"--screen={monitor_index}")
+            monitor_command = self._with_mpv_screen_target(normalized_command, monitor_index)
             processes.append(subprocess.Popen(monitor_command))
             _debug_log(f"media_launch_clone_started | monitor_index={monitor_index} command={monitor_command}")
         return processes

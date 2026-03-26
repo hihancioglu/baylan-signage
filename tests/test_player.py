@@ -530,7 +530,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(len(processes), 2)
         self.assertEqual(popen.call_count, 2)
-        self.assertEqual(popen.call_args_list[1].args[0][:3], ["mpv", "--screen=1", "--fs"])
+        self.assertEqual(
+            popen.call_args_list[1].args[0][:4],
+            ["mpv", "--screen=1", "--fs-screen=1", "--fs"],
+        )
 
     def test_launch_media_processes_clamps_mpv_screen_index_when_out_of_bounds(self):
         player = self._build_player()
@@ -549,7 +552,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(len(processes), 1)
         self.assertEqual(popen.call_count, 1)
-        self.assertEqual(popen.call_args.args[0][:3], ["mpv", "--screen=1", "--fs"])
+        self.assertEqual(
+            popen.call_args.args[0][:4],
+            ["mpv", "--screen=1", "--fs-screen=1", "--fs"],
+        )
 
     def test_launch_media_processes_uses_active_monitor_for_implicit_primary_target(self):
         player = self._build_player()
@@ -571,7 +577,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(len(processes), 1)
         self.assertEqual(popen.call_count, 1)
-        self.assertEqual(popen.call_args.args[0][:3], ["mpv", "--screen=2", "--fs"])
+        self.assertEqual(
+            popen.call_args.args[0][:4],
+            ["mpv", "--screen=2", "--fs-screen=2", "--fs"],
+        )
 
     def test_apply_windows_monitor_position_rewrites_size_and_drops_fullscreen_flags(self):
         flags = ["--kiosk", "--start-maximized", "--window-size=800,600", "--start-fullscreen"]
