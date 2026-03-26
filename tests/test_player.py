@@ -2321,6 +2321,80 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             clone_to_all_monitors=False,
         )
 
+    def test_multi_monitor_worker_normalizes_list_widget_payload(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        mock_player = unittest.mock.Mock()
+        multi_monitor._players[2] = mock_player
+        multi_monitor._running_monitors[2] = True
+        multi_monitor._monitor_states[2] = {
+            "enabled": True,
+            "entries": [
+                {
+                    "item_type": "widget",
+                    "widget_url": "",
+                    "widget_payload": [{"type": "iframe", "url": "https://example.com/widget"}],
+                    "duration_sec": 12,
+                }
+            ],
+            "loop_mode": "sequential",
+        }
+
+        def _stop_after_first_play(*_args, **_kwargs):
+            multi_monitor._running_monitors[2] = False
+            return True
+
+        mock_player.play_widget_blocking.side_effect = _stop_after_first_play
+        with patch("time.sleep", return_value=None):
+            multi_monitor._run(2)
+
+        mock_player.play_widget_blocking.assert_called_once_with(
+            "",
+            12,
+            widget_config={"widgets": [{"type": "iframe", "url": "https://example.com/widget"}]},
+            target_monitor_index=1,
+            clone_to_all_monitors=False,
+        )
+
+    def test_multi_monitor_worker_wraps_single_widget_payload_dict(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        mock_player = unittest.mock.Mock()
+        multi_monitor._players[2] = mock_player
+        multi_monitor._running_monitors[2] = True
+        multi_monitor._monitor_states[2] = {
+            "enabled": True,
+            "entries": [
+                {
+                    "item_type": "widget",
+                    "widget_url": "",
+                    "widget_payload": {"type": "html", "content": "<b>duyuru</b>"},
+                    "duration_sec": 12,
+                }
+            ],
+            "loop_mode": "sequential",
+        }
+
+        def _stop_after_first_play(*_args, **_kwargs):
+            multi_monitor._running_monitors[2] = False
+            return True
+
+        mock_player.play_widget_blocking.side_effect = _stop_after_first_play
+        with patch("time.sleep", return_value=None):
+            multi_monitor._run(2)
+
+        mock_player.play_widget_blocking.assert_called_once_with(
+            "",
+            12,
+            widget_config={"widgets": [{"type": "html", "content": "<b>duyuru</b>"}]},
+            target_monitor_index=1,
+            clone_to_all_monitors=False,
+        )
+
     def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
         from client.client import PlaybackController
 
