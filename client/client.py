@@ -2125,7 +2125,7 @@ class PlaybackController:
         if clone_flag_raw is None and isinstance(config, dict):
             clone_flag_raw = config.get("clone_to_all_monitors")
         if clone_flag_raw is None:
-            clone_requested = _has_multiple_connected_monitors() and not self.multi_monitor_playback.has_active_playlist()
+            clone_requested = False
         else:
             clone_requested = bool(clone_flag_raw)
         self._clone_to_all_monitors = clone_requested
