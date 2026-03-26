@@ -1645,6 +1645,12 @@ class BorderlessFullscreenPlayer:
         if os.name == "nt":
             monitor_bounds_list = self._windows_connected_monitor_bounds()
             connected_monitor_count = len(monitor_bounds_list)
+        _debug_log(
+            "media_launch_prepare | "
+            f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors} "
+            f"connected_monitor_count={connected_monitor_count} monitor_bounds={monitor_bounds_list} "
+            f"base_command={normalized_command}"
+        )
         if (
             isinstance(target_monitor_index, int)
             and target_monitor_index >= 0
@@ -1666,10 +1672,17 @@ class BorderlessFullscreenPlayer:
                             break
             if connected_monitor_count > 0:
                 resolved_target_monitor_index = min(resolved_target_monitor_index, connected_monitor_count - 1)
+            _debug_log(
+                "media_launch_mpv_target | "
+                f"requested_target_monitor_index={target_monitor_index} "
+                f"resolved_target_monitor_index={resolved_target_monitor_index} "
+                f"used_active_monitor_hint={use_active_monitor_hint}"
+            )
             if resolved_target_monitor_index > 0:
                 normalized_command.insert(1, f"--screen={resolved_target_monitor_index}")
 
         processes = [subprocess.Popen(normalized_command)]
+        _debug_log(f"media_launch_primary_started | command={normalized_command}")
         clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         if not clone_enabled or target_monitor_index is not None or os.name != "nt" or not self._is_mpv_command(normalized_command):
             return processes
@@ -1681,6 +1694,7 @@ class BorderlessFullscreenPlayer:
             monitor_command = [*normalized_command]
             monitor_command.insert(1, f"--screen={monitor_index}")
             processes.append(subprocess.Popen(monitor_command))
+            _debug_log(f"media_launch_clone_started | monitor_index={monitor_index} command={monitor_command}")
         return processes
 
     def play_widget_blocking(
@@ -1893,7 +1907,11 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
-        _debug_log(f"play_blocking start | media_path={media_path} image_duration_sec={image_duration_sec} start_position_sec={start_position_sec}")
+        _debug_log(
+            "play_blocking start | "
+            f"media_path={media_path} image_duration_sec={image_duration_sec} start_position_sec={start_position_sec} "
+            f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors}"
+        )
         if not Path(media_path).exists():
             self._last_interrupted = False
             _safe_print(f"⚠️ medya bulunamadı: {media_path}")
