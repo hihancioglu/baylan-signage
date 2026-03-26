@@ -1460,7 +1460,14 @@ class MultiMonitorPlayback:
                 continue
             if os.name == "nt":
                 if use_windows_display_ids and windows_monitor_map:
-                    if monitor_no == primary_monitor_id or monitor_no not in windows_monitor_map:
+                    # Windows servis/uzak oturumlarında ID haritası bazen
+                    # tek monitör (çoğunlukla sadece primary) döndürebiliyor.
+                    # Böyle durumlarda haritayı katı şekilde uygulamak
+                    # secondary playlist'leri gereksiz yere filtreleyebiliyor.
+                    windows_map_is_reliable = len(windows_monitor_map) > 1
+                    if monitor_no == primary_monitor_id:
+                        continue
+                    if windows_map_is_reliable and monitor_no not in windows_monitor_map:
                         continue
                 elif connected_monitor_count is not None and monitor_no > connected_monitor_count:
                     continue
