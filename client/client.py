@@ -1516,6 +1516,41 @@ class MultiMonitorPlayback:
             self._workers[monitor_no] = worker
         worker.start()
 
+    @staticmethod
+    def _normalize_widget_config(widget_payload: object) -> dict | None:
+        payload = widget_payload
+        if isinstance(payload, str):
+            text_payload = payload.strip()
+            if text_payload:
+                try:
+                    decoded_payload = json.loads(text_payload)
+                except Exception:
+                    decoded_payload = None
+                payload = decoded_payload
+            else:
+                payload = None
+
+        if isinstance(payload, list):
+            return {"widgets": list(payload)}
+
+        if not isinstance(payload, dict):
+            return None
+
+        payload_copy = dict(payload)
+        widgets = payload_copy.get("widgets")
+        if isinstance(widgets, list):
+            normalized = {"widgets": list(widgets)}
+            if isinstance(payload_copy.get("columns"), (int, list)):
+                normalized["columns"] = payload_copy.get("columns")
+            if isinstance(payload_copy.get("rows"), int):
+                normalized["rows"] = payload_copy.get("rows")
+            return normalized
+
+        widget_type = str(payload_copy.get("type") or "").strip().lower()
+        if widget_type:
+            return {"widgets": [payload_copy]}
+        return None
+
     def _run(self, monitor_no: int):
         index = 0
         while True:
@@ -1549,7 +1584,7 @@ class MultiMonitorPlayback:
             if item_type == "widget":
                 widget_url = str(item.get("widget_url") or item.get("path") or "").strip()
                 widget_payload = item.get("widget_payload")
-                widget_config = widget_payload if isinstance(widget_payload, dict) else None
+                widget_config = self._normalize_widget_config(widget_payload)
                 raw_widget_duration = item.get("duration_sec")
                 try:
                     widget_duration_sec = int(raw_widget_duration)
