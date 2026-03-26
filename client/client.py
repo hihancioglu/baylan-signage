@@ -2312,6 +2312,13 @@ class PlaybackController:
                             and has_multiple_monitors
                         )
                         primary_target_monitor_index = self._primary_target_monitor_index()
+                        log_debug(
+                            "widget_route_decision | "
+                            f"direct_url_widget={direct_url_widget} "
+                            f"clone_widget_to_all_monitors={clone_widget_to_all_monitors} "
+                            f"has_multiple_monitors={has_multiple_monitors} "
+                            f"primary_target_monitor_index={primary_target_monitor_index}"
+                        )
                         if direct_url_widget or clone_widget_to_all_monitors:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
                             # yönettiği için ikincil monitörler boş kalabiliyor. Bu durumda
