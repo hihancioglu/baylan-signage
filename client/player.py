@@ -1414,7 +1414,9 @@ class BorderlessFullscreenPlayer:
         clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         connected_monitor_count = 0
         allow_python_viewer = True
-        if os.name == "nt" and clone_enabled and target_monitor_index is None:
+        if os.name == "nt":
+            connected_monitor_count = len(self._windows_connected_monitor_bounds())
+        if os.name == "nt" and clone_enabled and target_monitor_index is None and connected_monitor_count > 1:
             # Python widget viewer tek pencere başlattığı için çoklu monitör
             # klonlamada sadece tek ekranda açılabilir ve döngüde tekrar tekrar
             # başlatılıyormuş gibi görünür. Klon modunda browser komutunu zorla.
@@ -1424,7 +1426,7 @@ class BorderlessFullscreenPlayer:
             _debug_log(
                 "widget_monitor_command_build | "
                 f"scope=build clone_enabled={clone_enabled} "
-                f"connected_monitors={connected_monitor_count} generated_commands=0"
+                f"monitor_count={connected_monitor_count} command_count=0"
             )
             return []
 
@@ -1470,7 +1472,7 @@ class BorderlessFullscreenPlayer:
                 _debug_log(
                     "widget_monitor_command_build | "
                     f"scope=build clone_enabled={clone_enabled} "
-                    f"connected_monitors={connected_monitor_count} generated_commands=1"
+                    f"monitor_count={connected_monitor_count} command_count=1"
                 )
                 return [monitor_command]
 
@@ -1478,7 +1480,7 @@ class BorderlessFullscreenPlayer:
             _debug_log(
                 "widget_monitor_command_build | "
                 f"scope=build clone_enabled={clone_enabled} "
-                f"connected_monitors={connected_monitor_count} generated_commands=1"
+                f"monitor_count={connected_monitor_count} command_count=1"
             )
             return [command]
         commands = self._build_widget_commands_for_monitors(source, clone_to_all_monitors=clone_enabled)
@@ -1487,7 +1489,7 @@ class BorderlessFullscreenPlayer:
         _debug_log(
             "widget_monitor_command_build | "
             f"scope=build clone_enabled={clone_enabled} "
-            f"connected_monitors={connected_monitor_count} generated_commands={len(commands)}"
+            f"monitor_count={connected_monitor_count} command_count={len(commands)}"
         )
         return commands
 
@@ -1539,15 +1541,19 @@ class BorderlessFullscreenPlayer:
             return False
 
         clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        monitor_count = 0
+        if os.name == "nt":
+            monitor_count = len(self._windows_connected_monitor_bounds())
         multi_monitor_widget_mode = (
             clone_enabled
             and target_monitor_index is None
             and os.name == "nt"
-            and len(self._windows_connected_monitor_bounds()) > 1
+            and monitor_count > 1
         )
 
-        runtime_controller_allowed = target_monitor_index is None
-        if self._widget_runtime_controller_enabled() and not multi_monitor_widget_mode and runtime_controller_allowed:
+        runtime_controller_allowed = target_monitor_index is None and not multi_monitor_widget_mode
+        runtime_controller_skipped = not runtime_controller_allowed
+        if self._widget_runtime_controller_enabled() and runtime_controller_allowed:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None
@@ -1573,6 +1579,11 @@ class BorderlessFullscreenPlayer:
                 target_monitor_index=target_monitor_index,
                 clone_to_all_monitors=clone_to_all_monitors,
             )
+        _debug_log(
+            "widget_launch_telemetry | "
+            f"clone_enabled={clone_enabled} monitor_count={monitor_count} "
+            f"command_count={len(commands)} runtime_controller_skipped={runtime_controller_skipped}"
+        )
         _debug_log(f"play_widget_blocking fallback process commands={commands}")
         if not commands:
             self._last_interrupted = False
