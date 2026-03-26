@@ -300,6 +300,7 @@ RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "
 RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
 RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS", "24")))
 RUNTIME_TMP_CLEANUP_MAX_ENTRIES = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_ENTRIES", "30")))
+RUNTIME_TMP_CLEANUP_INTERVAL_SEC = max(60, int(os.getenv("RUNTIME_TMP_CLEANUP_INTERVAL_SEC", "900")))
 CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT = max(1, int(os.getenv("CLIENT_DEBUG_LOG_ROTATE_BACKUP_COUNT", "30")))
 AUTO_UPDATE_ROLLOUT_WINDOW_SEC = max(0, int(os.getenv("AUTO_UPDATE_ROLLOUT_WINDOW_SEC", "300")))
 _rollout_waited_versions: set[str] = set()
@@ -740,6 +741,24 @@ def cleanup_runtime_tmp_dir(
         f"kept_recent={skipped_recent_count} max_entries={max_entries} "
         f"skipped_active={skipped_active_count} errors={error_count}"
     )
+
+
+def _start_runtime_tmp_cleanup_worker() -> None:
+    if not RUNTIME_TMP_CLEANUP_ENABLED:
+        return
+
+    cleanup_interval_sec = max(60, int(RUNTIME_TMP_CLEANUP_INTERVAL_SEC))
+
+    def _cleanup_loop():
+        while True:
+            time.sleep(cleanup_interval_sec)
+            try:
+                cleanup_runtime_tmp_dir()
+            except Exception as exc:
+                log_warning(f"⚠️ RuntimeTmp periyodik cleanup hatası: err={exc}")
+
+    threading.Thread(target=_cleanup_loop, daemon=True, name="runtime-tmp-cleanup").start()
+    log_info(f"🧹 RuntimeTmp periyodik cleanup aktif | interval_sec={cleanup_interval_sec}")
 
 
 if not IS_WIDGET_VIEWER_PROCESS:
@@ -3592,6 +3611,7 @@ def main():
     try:
         if RUNTIME_TMP_CLEANUP_ENABLED:
             cleanup_runtime_tmp_dir()
+            _start_runtime_tmp_cleanup_worker()
         hide_console_window()
         start_console_hider()
         gui_runtime.start()

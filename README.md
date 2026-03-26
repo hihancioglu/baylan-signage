@@ -103,7 +103,7 @@ Aktivasyon için:
 - Build script PyInstaller onefile extraction için sabit runtime dizini (`--runtime-tmpdir`) kullanır. Varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp` (opsiyonel override: `-RuntimeTmpDir`).
 
 ### RuntimeTmp temizliği (uygulanan strateji)
-Client açılışında (`main()` başlangıcı) `RuntimeTmp` için otomatik bakım çalışır:
+Client açılışında (`main()` başlangıcı) `RuntimeTmp` için otomatik bakım çalışır ve agent çalışırken periyodik olarak tekrar edilir:
 
 - Çalışan süreç kapanırken (exit) silmeye çalışmak, uygulama çökmesi/güç kesintisi durumlarında güvenilir değildir.
 - Her açılışta, aktif süreç tarafından kullanılan klasör dışındaki eski alt klasörleri yaş eşiğiyle (ör. 24 saat) temizlemek daha güvenlidir.
@@ -113,7 +113,8 @@ Uygulanan politika:
 
 1. Uygulama başlangıcında `RuntimeTmp` içindeki eski klasörleri tara.
 2. Son yazılma zamanı belirli eşiği geçenleri sil.
-3. Silme sırasında `access denied / file in use` alınırsa klasörü atla; bir sonraki açılışta tekrar dene.
+3. Yeni kalan giriş sayısı `RUNTIME_TMP_CLEANUP_MAX_ENTRIES` eşiğini geçerse en eski girişleri de temizle.
+4. Silme sırasında `access denied / file in use` alınırsa klasörü atla; bir sonraki periyodik döngüde tekrar dene.
 
 Bu model, hem disk birikimini kontrol eder hem de çalışan instance ile çakışma riskini azaltır.
 
@@ -122,6 +123,8 @@ Bu model, hem disk birikimini kontrol eder hem de çalışan instance ile çakı
 - `RUNTIME_TMP_DIR` (varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp`)
 - `RUNTIME_TMP_CLEANUP_ENABLED` (`true` varsayılan)
 - `RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS` (`24` varsayılan)
+- `RUNTIME_TMP_CLEANUP_MAX_ENTRIES` (`30` varsayılan)
+- `RUNTIME_TMP_CLEANUP_INTERVAL_SEC` (`900` varsayılan, minimum `60`)
 
 `WIDGET_SINGLE_ENGINE=1` paketleme notu:
 - Agent build `client/widget_engine.html` dosyasını `BaylanSignageAgent.exe` içine gömer; runtime controller bu gömülü kaynağı kullanır.
