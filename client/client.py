@@ -2451,6 +2451,13 @@ class PlaybackController:
                 self._active_item = None
                 self._active_item_started_at = None
 
+                if not self._running:
+                    log_debug(
+                        "playback loop stop detected after item outcome | "
+                        f"item_type={item_type} content={self._item_label(item)}"
+                    )
+                    break
+
                 if not ok:
                     print(f"⚠️ bozuk/oynatılamayan içerik atlandı: {self._item_label(item)}")
                     if not interrupted:
@@ -2461,6 +2468,12 @@ class PlaybackController:
                                 f"delay_sec={retry_delay_sec} item_type={item_type} content={self._item_label(item)}"
                             )
                             time.sleep(retry_delay_sec)
+                            if not self._running:
+                                log_debug(
+                                    "playback retry aborted because stop requested | "
+                                    f"item_type={item_type} content={self._item_label(item)}"
+                                )
+                                break
 
                 played_index = None
                 if loop_mode == "sequential":

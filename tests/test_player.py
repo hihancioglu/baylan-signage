@@ -1845,6 +1845,48 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertGreaterEqual(player.play_blocking.call_count, 1)
         sleep_mock.assert_any_call(0.25)
 
+    def test_stopped_worker_skips_retry_and_prewarm_after_failed_widget_playback(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_direct_url_widget.return_value = False
+        player.update_widget_layout.return_value = False
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+        controller.player = player
+
+        widget_item = {
+            "item_type": "widget",
+            "duration_sec": 5,
+            "widget_payload": {"type": "url", "content": "https://example.com/one"},
+        }
+
+        with patch.object(controller, "_effective_playlist", return_value=[widget_item]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch.object(
+            controller,
+            "_prewarm_next_widget",
+            return_value=None,
+        ) as prewarm_mock, patch("client.client.PLAYBACK_FAILURE_RETRY_SEC", 0.25), patch(
+            "time.sleep",
+            return_value=None,
+        ) as sleep_mock:
+            controller._running = True
+
+            def _stop_worker_after_first_layout(*_args, **_kwargs):
+                controller._running = False
+                return False
+
+            player.update_widget_layout.side_effect = _stop_worker_after_first_layout
+            controller._run()
+
+        sleep_mock.assert_not_called()
+        prewarm_mock.assert_not_called()
+
     def test_sync_in_background_keeps_playback_running_when_media_exists(self):
         from client.client import PlaybackController
 
