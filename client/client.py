@@ -597,6 +597,15 @@ def _resolve_widget_launch_options(
     return normalized_target_monitor_index, False
 
 
+def _has_multiple_connected_monitors() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        return len(BorderlessFullscreenPlayer._windows_connected_monitor_bounds()) > 1
+    except Exception:
+        return False
+
+
 def release_instance_lock() -> None:
     global instance_lock_fd, instance_mutex_handle
     if instance_lock_fd is not None:
@@ -2112,8 +2121,14 @@ class PlaybackController:
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
         self.multi_monitor_playback.update_from_config(monitor_playlists)
-        # Klon modu kapalı tutulur; aynı içerik gerekirse panelden aynı playlist seçilir.
-        self._clone_to_all_monitors = False
+        clone_flag_raw = selected_payload.get("clone_to_all_monitors")
+        if clone_flag_raw is None and isinstance(config, dict):
+            clone_flag_raw = config.get("clone_to_all_monitors")
+        if clone_flag_raw is None:
+            clone_requested = _has_multiple_connected_monitors() and not self.multi_monitor_playback.has_active_playlist()
+        else:
+            clone_requested = bool(clone_flag_raw)
+        self._clone_to_all_monitors = clone_requested
 
         normalized_items = []
         for item in videos:
@@ -2130,6 +2145,7 @@ class PlaybackController:
             "🧩 Playback config summary | "
             f"enabled={enabled} loop_mode={loop_mode} "
             f"playlist_version={playlist_version} items={len(normalized_items)} "
+            f"clone_to_all_monitors={self._clone_to_all_monitors} "
             f"first_items={first_items}"
         )
 
