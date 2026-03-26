@@ -432,8 +432,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             commands = player._build_widget_commands("https://example.com", target_monitor_index=1, clone_to_all_monitors=False)
 
         self.assertEqual(build_widget_command.call_args.kwargs.get("allow_python_viewer"), True)
-        self.assertIn("--monitor-bounds", commands[0])
-        self.assertIn("1920,0,1920,1080", commands[0])
+        self.assertIn("--monitor-bounds=1920,0,1920,1080", commands[0])
 
     def test_build_widget_commands_uses_indexed_bounds_for_explicit_primary_target(self):
         player = self._build_player()
@@ -461,8 +460,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         ):
             commands = player._build_widget_commands("https://example.com", target_monitor_index=0, clone_to_all_monitors=False)
 
-        self.assertIn("--monitor-bounds", commands[0])
-        self.assertIn("-1920,-65,1536,960", commands[0])
+        self.assertIn("--monitor-bounds=-1920,-65,1536,960", commands[0])
 
 
     def test_build_widget_commands_prefers_active_monitor_bounds_for_implicit_primary_target(self):
@@ -491,8 +489,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         ):
             commands = player._build_widget_commands("https://example.com", target_monitor_index=0)
 
-        self.assertIn("--monitor-bounds", commands[0])
-        self.assertIn("0,0,1920,1080", commands[0])
+        self.assertIn("--monitor-bounds=0,0,1920,1080", commands[0])
 
     def test_launch_media_processes_clones_mpv_per_monitor(self):
         player = self._build_player()
