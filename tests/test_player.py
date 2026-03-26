@@ -491,6 +491,32 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertIn("--monitor-bounds=0,0,1920,1080", commands[0])
 
+    def test_build_widget_commands_clamps_target_monitor_when_index_is_out_of_bounds(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["python", "widget_viewer.py", "https://example.com"],
+        ), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_apply_windows_monitor_position",
+            side_effect=lambda parts, monitor_bounds=None: parts,
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=True,
+        ):
+            commands = player._build_widget_commands("https://example.com", target_monitor_index=2, clone_to_all_monitors=False)
+
+        self.assertIn("--monitor", commands[0])
+        self.assertIn("1", commands[0])
+        self.assertIn("--monitor-bounds=1920,0,1920,1080", commands[0])
+
     def test_launch_media_processes_clones_mpv_per_monitor(self):
         player = self._build_player()
         fake_process = unittest.mock.Mock()
@@ -505,6 +531,25 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(len(processes), 2)
         self.assertEqual(popen.call_count, 2)
         self.assertEqual(popen.call_args_list[1].args[0][:3], ["mpv", "--screen=1", "--fs"])
+
+    def test_launch_media_processes_clamps_mpv_screen_index_when_out_of_bounds(self):
+        player = self._build_player()
+        fake_process = unittest.mock.Mock()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ), patch("client.player.subprocess.Popen", return_value=fake_process) as popen:
+            processes = player._launch_media_processes(
+                ["mpv", "--fs", "file.mp4"],
+                target_monitor_index=2,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertEqual(len(processes), 1)
+        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(popen.call_args.args[0][:3], ["mpv", "--screen=1", "--fs"])
 
     def test_apply_windows_monitor_position_rewrites_size_and_drops_fullscreen_flags(self):
         flags = ["--kiosk", "--start-maximized", "--window-size=800,600", "--start-fullscreen"]
