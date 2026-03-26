@@ -1590,6 +1590,13 @@ class BorderlessFullscreenPlayer:
             if selected_monitor_bounds is None and target_monitor_index < len(monitor_bounds_list):
                 selected_monitor_bounds = monitor_bounds_list[target_monitor_index]
                 selected_monitor_index = target_monitor_index
+            if (
+                selected_monitor_bounds is None
+                and monitor_bounds_list
+                and target_monitor_index >= len(monitor_bounds_list)
+            ):
+                selected_monitor_index = len(monitor_bounds_list) - 1
+                selected_monitor_bounds = monitor_bounds_list[selected_monitor_index]
 
             if selected_monitor_bounds is not None:
                 monitor_bounds = selected_monitor_bounds
@@ -1633,21 +1640,28 @@ class BorderlessFullscreenPlayer:
         clone_to_all_monitors: bool | None = None,
     ) -> list[subprocess.Popen]:
         normalized_command = list(command)
+        monitor_bounds_list: list[tuple[int, int, int, int]] = []
+        connected_monitor_count = 0
+        if os.name == "nt":
+            monitor_bounds_list = self._windows_connected_monitor_bounds()
+            connected_monitor_count = len(monitor_bounds_list)
         if (
             isinstance(target_monitor_index, int)
             and target_monitor_index >= 0
             and os.name == "nt"
             and self._is_mpv_command(normalized_command)
-            and target_monitor_index > 0
         ):
-            normalized_command.insert(1, f"--screen={target_monitor_index}")
+            resolved_target_monitor_index = target_monitor_index
+            if connected_monitor_count > 0:
+                resolved_target_monitor_index = min(target_monitor_index, connected_monitor_count - 1)
+            if resolved_target_monitor_index > 0:
+                normalized_command.insert(1, f"--screen={resolved_target_monitor_index}")
 
         processes = [subprocess.Popen(normalized_command)]
         clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         if not clone_enabled or target_monitor_index is not None or os.name != "nt" or not self._is_mpv_command(normalized_command):
             return processes
 
-        monitor_bounds_list = self._windows_connected_monitor_bounds()
         if len(monitor_bounds_list) <= 1:
             return processes
 
