@@ -505,7 +505,9 @@ def _start_with_pywebview(
         window_kwargs["y"] = y
         window_kwargs["width"] = width
         window_kwargs["height"] = height
-        window_kwargs["fullscreen"] = False
+        # Keep true fullscreen even on explicitly targeted monitors.
+        # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
+        window_kwargs["fullscreen"] = True
 
     window = webview.create_window(**window_kwargs)
 
