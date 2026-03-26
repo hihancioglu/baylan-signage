@@ -2505,6 +2505,28 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback.update_from_config.assert_called_once()
         self.assertFalse(controller._clone_to_all_monitors)
 
+    def test_update_from_config_keeps_clone_disabled_when_no_monitor_playlist(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        controller.media_manager.sync_playlist_entries.return_value = []
+        controller.media_manager.load_last_successful_playlist_entries.return_value = []
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = False
+
+        controller.update_from_config(
+            {
+                "enabled": True,
+                "videos": [],
+                "playlist_version": "v1",
+                "monitor_playlists": {},
+            }
+        )
+
+        controller.multi_monitor_playback.update_from_config.assert_called_once()
+        self.assertFalse(controller._clone_to_all_monitors)
+
 
 if __name__ == "__main__":
     unittest.main()
