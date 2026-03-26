@@ -205,6 +205,18 @@
                       <option value="dashboard">Dashboard (Çoklu Iframe)</option>
                     </select>
                   </div>
+                  <div class="col-12 col-md-5">
+                    <label class="form-label">Hazır Şablon</label>
+                    <div class="input-group">
+                      <select id="widget-template-select" class="form-select">
+                        <option value="">Şablon seçin</option>
+                        <option value="clock">Saat Widget (HTML)</option>
+                        <option value="weather">Hava Durumu Widget (HTML)</option>
+                        <option value="dashboard-weather-clock">Dashboard: Hava Durumu + Saat</option>
+                      </select>
+                      <button class="btn btn-outline-primary" type="button" onclick="applyWidgetTemplate()">Şablonu Uygula</button>
+                    </div>
+                  </div>
                   <div class="col-12">
                     <label class="form-label">İçerik alanı</label>
                     <textarea id="widget-content" class="form-control" rows="5" placeholder="HTML içeriği veya URL" oninput="updateWidgetPreview()"></textarea>
@@ -537,6 +549,92 @@ let cachedWidgets = [];
 let cachedCallManagement = { enabled_hostnames: [], active_calls: [] };
 let deviceSortField = 'is_online';
 let deviceSortDirection = 'desc';
+const widgetTemplates = {
+  clock: {
+    name: 'Dijital Saat',
+    type: 'html',
+    content: `<div style="margin:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#020617,#0f172a);font-family:'Segoe UI',sans-serif;color:#f8fafc;">
+  <div style="text-align:center">
+    <div id="clock-time" style="font-size:clamp(52px,11vw,170px);font-weight:700;letter-spacing:4px;">--:--:--</div>
+    <div id="clock-date" style="font-size:clamp(18px,3vw,42px);opacity:.85;margin-top:10px;">-</div>
+  </div>
+</div>
+<script>
+(() => {
+  const locale = 'tr-TR';
+  const updateClock = () => {
+    const now = new Date();
+    const time = now.toLocaleTimeString(locale, { hour12: false });
+    const date = now.toLocaleDateString(locale, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+    document.getElementById('clock-time').textContent = time;
+    document.getElementById('clock-date').textContent = date;
+  };
+  updateClock();
+  setInterval(updateClock, 1000);
+})();
+</script>`
+  },
+  weather: {
+    name: 'Hava Durumu (Open-Meteo)',
+    type: 'html',
+    content: `<div style="margin:0;padding:30px;box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#0f172a,#1e293b);font-family:'Segoe UI',sans-serif;color:#f8fafc;">
+  <div style="width:min(92%,900px);padding:28px;border-radius:20px;background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.3);box-shadow:0 16px 32px rgba(2,6,23,.35);">
+    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-end;">
+      <div>
+        <div style="font-size:clamp(26px,5vw,48px);font-weight:700;" id="weather-temp">--°C</div>
+        <div style="font-size:clamp(16px,2.4vw,24px);opacity:.9;" id="weather-desc">Yükleniyor...</div>
+      </div>
+      <div style="text-align:right;opacity:.85;">
+        <div style="font-size:clamp(14px,2vw,20px);" id="weather-city">İstanbul</div>
+        <div style="font-size:clamp(13px,1.8vw,18px);" id="weather-meta">--</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const city = { name: 'İstanbul', lat: 41.0082, lon: 28.9784 };
+  const codeMap = { 0:'Açık', 1:'Az Bulutlu', 2:'Parçalı Bulutlu', 3:'Bulutlu', 45:'Sisli', 48:'Yoğun Sis', 51:'Hafif Çisenti', 53:'Çisenti', 55:'Yoğun Çisenti', 61:'Hafif Yağmur', 63:'Yağmur', 65:'Kuvvetli Yağmur', 71:'Hafif Kar', 73:'Kar', 75:'Yoğun Kar', 80:'Sağanak', 81:'Kuvvetli Sağanak', 82:'Şiddetli Sağanak', 95:'Fırtına' };
+  const tempEl = document.getElementById('weather-temp');
+  const descEl = document.getElementById('weather-desc');
+  const cityEl = document.getElementById('weather-city');
+  const metaEl = document.getElementById('weather-meta');
+  cityEl.textContent = city.name;
+
+  const loadWeather = async () => {
+    try {
+      const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + city.lat + '&longitude=' + city.lon + '&current=temperature_2m,weather_code,wind_speed_10m';
+      const resp = await fetch(url);
+      const data = await resp.json();
+      const current = data?.current || {};
+      tempEl.textContent = Math.round(Number(current.temperature_2m || 0)) + '°C';
+      descEl.textContent = codeMap[current.weather_code] || 'Güncel Veri';
+      metaEl.textContent = 'Rüzgar: ' + Math.round(Number(current.wind_speed_10m || 0)) + ' km/h';
+    } catch (error) {
+      tempEl.textContent = '--°C';
+      descEl.textContent = 'Veri alınamadı';
+      metaEl.textContent = 'Bağlantı kontrol edin';
+    }
+  };
+
+  loadWeather();
+  setInterval(loadWeather, 10 * 60 * 1000);
+})();
+</script>`
+  },
+  'dashboard-weather-clock': {
+    name: 'Dashboard Hava + Saat',
+    type: 'dashboard',
+    content: JSON.stringify({
+      columns: 2,
+      rows: 1,
+      widgets: [
+        {type: 'iframe', url: 'https://wttr.in/Istanbul?format=4'},
+        {type: 'iframe', url: 'https://free.timeanddate.com/clock/i9p7z8j7/n107/szw160/szh160/hoc000/hbw0/hfcfff/cf100/hgr0/fav0/fan2/fs45/fdi72/mqc000/mqs2/mql13/mqw4/mqd76/mhc000/mhs2/mhl13/mhw4/mhd76/mmc000/mml10/mmw1'}
+      ]
+    }, null, 2)
+  }
+};
 
 function escapeHtml(value){
   return String(value || '').replace(/[&<>\"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
@@ -846,10 +944,40 @@ function resetWidgetForm(){
   document.getElementById('widget-name').value = '';
   document.getElementById('widget-type').value = 'html';
   document.getElementById('widget-content').value = '';
+  document.getElementById('widget-template-select').value = '';
   document.getElementById('dashboard-columns').value = '2';
   document.getElementById('dashboard-rows').value = '1';
   document.getElementById('dashboard-iframe-list').innerHTML = '';
   reflowDashboardIframeRows();
+  updateWidgetPreview();
+}
+
+function applyWidgetTemplate(){
+  const templateKey = document.getElementById('widget-template-select')?.value || '';
+  if(!templateKey){
+    alert('Lütfen bir şablon seçin');
+    return;
+  }
+
+  const template = widgetTemplates[templateKey];
+  if(!template){
+    alert('Şablon bulunamadı');
+    return;
+  }
+
+  document.getElementById('widget-type').value = template.type;
+  const nameInput = document.getElementById('widget-name');
+  if(nameInput && !String(nameInput.value || '').trim()){
+    nameInput.value = template.name;
+  }
+  document.getElementById('widget-content').value = template.content;
+
+  if(template.type === 'dashboard'){
+    syncDashboardBuilderFromContent(template.content);
+  } else {
+    document.getElementById('dashboard-iframe-list').innerHTML = '';
+  }
+
   updateWidgetPreview();
 }
 
