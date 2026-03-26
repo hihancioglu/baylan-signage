@@ -255,6 +255,7 @@ class BorderlessFullscreenPlayer:
         self._widget_process_lock = threading.RLock()
         self._stop_requested = False
         self._widget_process = None
+        self._widget_runtime_processes: list[subprocess.Popen] = []
         self._widget_process_stdin_lock = threading.Lock()
         self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
@@ -1028,48 +1029,123 @@ class BorderlessFullscreenPlayer:
         # yerine sentinel olarak iletip, child process'in kendi runtime'ında çözümlüyoruz.
         return WIDGET_ENGINE_SENTINEL
 
-    def start_widget_engine_if_needed(self) -> bool:
+    def _resolve_widget_runtime_monitor_targets(
+        self,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> list[tuple[int | None, tuple[int, int, int, int] | None]]:
+        if os.name != "nt":
+            return [(None, None)]
+
+        monitor_bounds_list = self._windows_connected_monitor_bounds()
+        if not monitor_bounds_list:
+            return [(None, None)]
+
+        clone_enabled = bool(clone_to_all_monitors)
+        if clone_enabled and target_monitor_index is None and len(monitor_bounds_list) > 1:
+            return [(monitor_index, bounds) for monitor_index, bounds in enumerate(monitor_bounds_list)]
+
+        if isinstance(target_monitor_index, int) and 0 <= target_monitor_index < len(monitor_bounds_list):
+            return [(target_monitor_index, monitor_bounds_list[target_monitor_index])]
+
+        return [(0, monitor_bounds_list[0])]
+
+    def _runtime_processes_snapshot(self) -> list[subprocess.Popen]:
+        processes = [process for process in self._widget_runtime_processes if process is not None]
+        if processes:
+            return processes
+        fallback_processes: list[subprocess.Popen] = []
+        if self._widget_process is not None:
+            fallback_processes.append(self._widget_process)
+        for process in self._extra_processes:
+            if process is not None and process not in fallback_processes:
+                fallback_processes.append(process)
+        return fallback_processes
+
+    def _build_widget_runtime_command(
+        self,
+        monitor_index: int | None = None,
+        monitor_bounds: tuple[int, int, int, int] | None = None,
+    ) -> list[str] | None:
+        source = self._widget_runtime_engine_source()
+        command = self._build_python_widget_command(source)
+        if not command:
+            return None
+        command.append("--runtime-ipc")
+        command.append("--start-hidden")
+        if isinstance(monitor_index, int) and monitor_index >= 0:
+            command.extend(["--monitor", str(monitor_index)])
+        if monitor_bounds is not None:
+            x, y, width, height = monitor_bounds
+            command.append(f"--monitor-bounds={x},{y},{width},{height}")
+        return command
+
+    def start_widget_engine_if_needed(
+        self,
+        *,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> bool:
         if not self._widget_runtime_controller_enabled():
             return False
         with self._widget_process_lock:
-            previous_returncode = None
-            if self._widget_process and self._widget_process.poll() is None:
+            runtime_targets = self._resolve_widget_runtime_monitor_targets(
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            )
+            desired_count = len(runtime_targets)
+            running_processes = [
+                process for process in self._widget_runtime_processes
+                if process and process.poll() is None
+            ]
+            if running_processes and len(running_processes) == desired_count:
+                self._widget_process = running_processes[0]
                 return True
-            if self._widget_process and self._widget_process.poll() is not None:
-                previous_returncode = self._widget_process.returncode
-                _debug_log(
-                    "widget runtime restart detected | "
-                    f"prev_pid={getattr(self._widget_process, 'pid', None)} "
-                    f"prev_returncode={previous_returncode}"
-                )
 
-            source = self._widget_runtime_engine_source()
-            command = self._build_python_widget_command(source)
-            if not command:
+            for process in list(self._widget_runtime_processes):
+                if process and process.poll() is None:
+                    self._terminate_process(process, timeout_sec=2, force_tree=True)
+            self._widget_runtime_processes = []
+            self._widget_process = None
+            self._extra_processes = []
+
+            commands: list[list[str]] = []
+            for monitor_index, monitor_bounds in runtime_targets:
+                command = self._build_widget_runtime_command(
+                    monitor_index=monitor_index,
+                    monitor_bounds=monitor_bounds,
+                )
+                if command:
+                    commands.append(command)
+            if not commands:
                 self._python_widget_viewer_runtime_enabled = False
                 return False
-            command.append("--runtime-ipc")
-            command.append("--start-hidden")
 
             try:
                 self._stop_requested = False
-                popen_kwargs = self._widget_popen_kwargs(command)
-                _debug_log(
-                    "widget runtime spawn attempt | "
-                    f"cwd={Path.cwd()} command={command} popen_kwargs_keys={list(popen_kwargs.keys())}"
-                )
-                self._widget_process = subprocess.Popen(
-                    command,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    **popen_kwargs,
-                )
+                spawned_processes: list[subprocess.Popen] = []
+                for command in commands:
+                    popen_kwargs = self._widget_popen_kwargs(command)
+                    _debug_log(
+                        "widget runtime spawn attempt | "
+                        f"cwd={Path.cwd()} command={command} popen_kwargs_keys={list(popen_kwargs.keys())}"
+                    )
+                    process = subprocess.Popen(
+                        command,
+                        stdin=subprocess.PIPE,
+                        text=True,
+                        **popen_kwargs,
+                    )
+                    spawned_processes.append(process)
                 self._widget_runtime_restart_count += 1
+                self._widget_runtime_processes = spawned_processes
+                self._widget_process = spawned_processes[0]
+                self._extra_processes = spawned_processes[1:]
                 _debug_log(
                     "widget runtime started | "
-                    f"pid={getattr(self._widget_process, 'pid', None)} "
+                    f"pids={[getattr(process, 'pid', None) for process in spawned_processes]} "
                     f"restart_count={self._widget_runtime_restart_count} "
-                    f"previous_returncode={previous_returncode}"
+                    f"monitor_targets={runtime_targets}"
                 )
                 return True
             except FileNotFoundError as exc:
@@ -1079,10 +1155,12 @@ class BorderlessFullscreenPlayer:
                 )
                 _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
                 self._widget_process = None
+                self._widget_runtime_processes = []
                 return False
             except Exception as exc:
                 _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
                 self._widget_process = None
+                self._widget_runtime_processes = []
                 return False
 
     def is_direct_url_widget(self, widget_config: dict | None = None) -> bool:
@@ -1092,29 +1170,41 @@ class BorderlessFullscreenPlayer:
         normalized_payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
         return bool(self._single_iframe_widget_url(normalized_payload))
 
-    def _send_widget_runtime_message(self, message: dict) -> bool:
+    def _send_widget_runtime_message(
+        self,
+        message: dict,
+        *,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> bool:
         message_type = str(message.get("type") or "").strip().lower()
-        if not self.start_widget_engine_if_needed():
+        if not self.start_widget_engine_if_needed(
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        ):
             _debug_log(f"widget runtime message dropped | type={message_type} reason=start_failed")
             return False
 
-        process = self._widget_process
-        if not process or process.poll() is not None or not process.stdin:
+        processes = [
+            process for process in self._runtime_processes_snapshot()
+            if process and process.poll() is None and process.stdin
+        ]
+        if not processes:
             _debug_log(
                 "widget runtime message dropped | "
-                f"type={message_type} pid={getattr(process, 'pid', None) if process else None} "
-                f"returncode={process.poll() if process else None} reason=process_not_running"
+                f"type={message_type} reason=process_not_running"
             )
             return False
 
         _debug_log(
             "widget runtime message send | "
-            f"type={message_type} pid={getattr(process, 'pid', None)}"
+            f"type={message_type} pids={[getattr(process, 'pid', None) for process in processes]}"
         )
         try:
             with self._widget_process_stdin_lock:
-                process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
-                process.stdin.flush()
+                for process in processes:
+                    process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+                    process.stdin.flush()
             return True
         except Exception as exc:
             _safe_print(f"⚠️ widget runtime mesajı gönderilemedi: {exc}")
@@ -1150,6 +1240,8 @@ class BorderlessFullscreenPlayer:
         widget_source: str,
         widget_config: dict | None = None,
         widget_signature: str | None = None,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
     ) -> bool:
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
         if payload is None:
@@ -1168,25 +1260,36 @@ class BorderlessFullscreenPlayer:
                 "config": payload,
             },
         }
-        return self._send_widget_runtime_message(message)
+        return self._send_widget_runtime_message(
+            message,
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        )
 
     def stop_widget_engine(self) -> None:
         with self._widget_process_lock:
-            process = self._widget_process
-            if not process or process.poll() is not None:
+            processes = [
+                process for process in self._runtime_processes_snapshot()
+                if process and process.poll() is None
+            ]
+            if not processes:
                 self._widget_process = None
+                self._widget_runtime_processes = []
                 return
 
             try:
-                if process.stdin:
-                    with self._widget_process_stdin_lock:
-                        process.stdin.write('{"type":"stop"}\n')
-                        process.stdin.flush()
+                with self._widget_process_stdin_lock:
+                    for process in processes:
+                        if process.stdin:
+                            process.stdin.write('{"type":"stop"}\n')
+                            process.stdin.flush()
             except Exception:
                 pass
 
-            self._terminate_process(process, timeout_sec=2, force_tree=True)
+            for process in processes:
+                self._terminate_process(process, timeout_sec=2, force_tree=True)
             self._widget_process = None
+            self._widget_runtime_processes = []
 
     def _stop_detached_widget_browser_processes(self) -> None:
         if os.name != "nt":
@@ -1242,16 +1345,20 @@ class BorderlessFullscreenPlayer:
 
     def background_widget_engine(self) -> bool:
         with self._widget_process_lock:
-            process = self._widget_process
-            if not process or process.poll() is not None or not process.stdin:
-                if process and process.poll() is not None:
-                    self._widget_process = None
+            processes = [
+                process for process in self._runtime_processes_snapshot()
+                if process and process.poll() is None and process.stdin
+            ]
+            if not processes:
+                self._widget_process = None
+                self._widget_runtime_processes = []
                 return False
 
             try:
                 with self._widget_process_stdin_lock:
-                    process.stdin.write('{"type":"background"}\n')
-                    process.stdin.flush()
+                    for process in processes:
+                        process.stdin.write('{"type":"background"}\n')
+                        process.stdin.flush()
                 return True
             except Exception as exc:
                 _safe_print(f"⚠️ widget runtime background moduna alınamadı: {exc}")
@@ -1264,14 +1371,19 @@ class BorderlessFullscreenPlayer:
             if self._stop_requested:
                 self._last_interrupted = True
                 return True
-            process = self._widget_process
-            returncode = None
-            if process is not None:
-                returncode = process.poll()
-            if not process or returncode is not None:
+            processes = [process for process in self._runtime_processes_snapshot() if process is not None]
+            if not processes:
                 _debug_log(
                     "wait_widget_duration aborted | "
-                    f"reason=widget_process_stopped returncode={returncode}"
+                    "reason=widget_process_stopped returncode=None"
+                )
+                self._last_interrupted = False
+                return False
+            return_codes = [process.poll() for process in processes]
+            if any(return_code is not None for return_code in return_codes):
+                _debug_log(
+                    "wait_widget_duration aborted | "
+                    f"reason=widget_process_stopped returncodes={return_codes}"
                 )
                 self._last_interrupted = False
                 return False
@@ -1426,7 +1538,7 @@ class BorderlessFullscreenPlayer:
         allow_python_viewer = True
         if os.name == "nt":
             connected_monitor_count = len(self._windows_connected_monitor_bounds())
-        if os.name == "nt" and clone_enabled and target_monitor_index is None and connected_monitor_count > 1:
+        if os.name == "nt" and clone_enabled and target_monitor_index is None:
             # Python widget viewer tek pencere başlattığı için çoklu monitör
             # klonlamada sadece tek ekranda açılabilir ve döngüde tekrar tekrar
             # başlatılıyormuş gibi görünür. Klon modunda browser komutunu zorla.
@@ -1555,36 +1667,24 @@ class BorderlessFullscreenPlayer:
         monitor_count = 0
         if os.name == "nt":
             monitor_count = len(self._windows_connected_monitor_bounds())
-        multi_monitor_widget_mode = (
-            clone_enabled
-            and target_monitor_index is None
-            and os.name == "nt"
-            and monitor_count > 1
-        )
 
-        runtime_controller_allowed = target_monitor_index is None and not multi_monitor_widget_mode
+        runtime_controller_allowed = os.name == "nt" and self._python_widget_viewer_supported
         runtime_controller_skipped = not runtime_controller_allowed
-        if runtime_controller_skipped and self._widget_process and self._widget_process.poll() is None:
-            # Fallback process modunda (özellikle çoklu monitör widget oynatımında)
-            # sıcak tutulan runtime engine ek bir gizli widget_viewer süreci üretir.
-            # Bu durumda engine'i kapatıp sadece monitör komutlarından gelen
-            # süreçleri açık bırakıyoruz.
-            _debug_log(
-                "play_widget_blocking runtime-controller skipped | "
-                "stopping warm runtime engine before fallback launch"
-            )
-            self.stop_widget_engine()
         if self._widget_runtime_controller_enabled() and runtime_controller_allowed:
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None
             self._stop_requested = False
-            if self.update_widget_layout(widget_source, widget_config=widget_config):
+            if self.update_widget_layout(
+                widget_source,
+                widget_config=widget_config,
+                target_monitor_index=target_monitor_index,
+                clone_to_all_monitors=clone_to_all_monitors,
+            ):
                 _debug_log("play_widget_blocking runtime-controller path active")
                 return self.wait_widget_duration(duration_sec)
-            if not self._widget_legacy_process_fallback_enabled():
-                self._last_interrupted = False
-                return False
+            self._last_interrupted = False
+            return False
 
         with self._widget_process_lock:
             if self._process and self._process.poll() is None:
