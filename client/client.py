@@ -2362,22 +2362,7 @@ class PlaybackController:
                             f"has_multiple_monitors={has_multiple_monitors} "
                             f"primary_target_monitor_index={primary_target_monitor_index}"
                         )
-                        # Widget runtime controller tek pencere/tek runtime mantığıyla çalışır.
-                        # Çoklu monitör kurulumunda:
-                        # - clone veya direct-url modunda süreç tabanlı fallback zorunlu.
-                        # - belirli bir ikincil monitör hedefleniyorsa (index > 0) yine
-                        #   süreç tabanlı yol gerekli.
-                        # - yalnızca birincil monitör (index=0) hedefleniyorsa runtime
-                        #   controller yolunu koruyabiliriz; aksi durumda her idle geçişinde
-                        #   gereksiz fallback spawn'ı oluşuyor.
-                        force_process_widget_playback = (
-                            direct_url_widget
-                            or clone_widget_to_all_monitors
-                            or (
-                                primary_target_monitor_index is not None
-                                and primary_target_monitor_index > 0
-                            )
-                        )
+                        force_process_widget_playback = False
                         if force_process_widget_playback:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
                             # yönettiği için ikincil monitörler boş kalabiliyor. Ayrıca
@@ -2397,10 +2382,12 @@ class PlaybackController:
                                 ok = True
                             else:
                                 ok = self.player.update_widget_layout(
-                                    widget_url,
-                                    widget_config=widget_config,
-                                    widget_signature=widget_signature,
-                                )
+                                widget_url,
+                                widget_config=widget_config,
+                                widget_signature=widget_signature,
+                                target_monitor_index=primary_target_monitor_index,
+                                clone_to_all_monitors=clone_widget_to_all_monitors,
+                            )
                             self._active_widget_signature = widget_signature if ok else None
                             log_debug(f"widget runtime layout update result | ok={ok} active_signature={self._active_widget_signature}")
                             self._prewarmed_widget_signature = None
