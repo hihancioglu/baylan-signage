@@ -1677,7 +1677,8 @@ class PlaybackController:
         self._background_overlay = IdleBackgroundOverlay(gui_runtime)
         self._active_widget_signature: str | None = None
         self._prewarmed_widget_signature: str | None = None
-        self._clone_to_all_monitors = True
+        # Klon modu devre dışı: her monitör bağımsız playlist ile yönetilir.
+        self._clone_to_all_monitors = False
         self.multi_monitor_playback = MultiMonitorPlayback(self.media_manager)
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
@@ -2111,7 +2112,8 @@ class PlaybackController:
         if loop_mode not in {"sequential", "random"}:
             loop_mode = "sequential"
         self.multi_monitor_playback.update_from_config(monitor_playlists)
-        self._clone_to_all_monitors = not self.multi_monitor_playback.has_active_playlist()
+        # Klon modu kapalı tutulur; aynı içerik gerekirse panelden aynı playlist seçilir.
+        self._clone_to_all_monitors = False
 
         normalized_items = []
         for item in videos:
