@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
-from client.player import BorderlessFullscreenPlayer
+from client.player import BorderlessFullscreenPlayer, WIDGET_ENGINE_SENTINEL
 
 
 class TestBorderlessFullscreenPlayer(unittest.TestCase):
@@ -1307,6 +1307,25 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(popen_mock.call_count, 1)
         self.assertEqual(len(started), 1)
+
+    def test_start_widget_engine_uses_engine_sentinel_source(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        process.stdin = unittest.mock.Mock()
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=["widget_viewer"],
+        ) as build_command, patch.object(player, "_widget_popen_kwargs", return_value={}), patch(
+            "subprocess.Popen",
+            return_value=process,
+        ):
+            ok = player.start_widget_engine_if_needed()
+
+        self.assertTrue(ok)
+        build_command.assert_called_once_with(WIDGET_ENGINE_SENTINEL)
 
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()

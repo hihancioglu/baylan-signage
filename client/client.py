@@ -3612,8 +3612,10 @@ def _run_widget_entrypoint(
     monitor: int | None = None,
 ) -> int:
     from widget_viewer import (
+        WIDGET_ENGINE_SENTINEL,
         _build_engine_url,
         _normalize_url,
+        _resolve_runtime_resource,
         _parse_monitor_bounds,
         _safe_print,
         _start_with_cef,
@@ -3636,8 +3638,12 @@ def _run_widget_entrypoint(
             return 2
         parsed_monitor_bounds = monitor_list[monitor]
 
+    normalized_input = str(widget_url or "").strip()
+    if normalized_input == WIDGET_ENGINE_SENTINEL:
+        normalized_input = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
+
     try:
-        normalized_url = _build_engine_url(_normalize_url(widget_url))
+        normalized_url = _build_engine_url(_normalize_url(normalized_input))
     except Exception as exc:
         _safe_print(f"Geçersiz widget URL: {exc}")
         return 2

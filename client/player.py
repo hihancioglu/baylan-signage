@@ -19,6 +19,9 @@ from urllib.parse import quote
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 
+WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
+
+
 def _safe_print(message: str) -> None:
     try:
         print(message)
@@ -1020,7 +1023,10 @@ class BorderlessFullscreenPlayer:
         return widget_url or None
 
     def _widget_runtime_engine_source(self) -> str:
-        return _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
+        # PyInstaller onefile süreçlerinde parent process'in _MEI yolu child process
+        # başlatılırken temizlenebiliyor. Engine kaynağını parent'ın mutlak file URI'si
+        # yerine sentinel olarak iletip, child process'in kendi runtime'ında çözümlüyoruz.
+        return WIDGET_ENGINE_SENTINEL
 
     def start_widget_engine_if_needed(self) -> bool:
         if not self._widget_runtime_controller_enabled():
