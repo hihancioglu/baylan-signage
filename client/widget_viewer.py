@@ -25,6 +25,7 @@ WEATHER_WIDGET_HREF_PATTERN = re.compile(
 )
 
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
+WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
 
 
 def _debug_log(message: str) -> None:
