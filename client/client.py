@@ -3548,6 +3548,12 @@ def _parse_cli_args(argv: list[str] | None = None):
         default="",
         help="Target monitor bounds as x,y,width,height for widget viewer placement.",
     )
+    parser.add_argument(
+        "--monitor",
+        type=int,
+        default=None,
+        help="Target monitor index for widget viewer placement (0-based). Ignored when --monitor-bounds is set.",
+    )
     return parser.parse_known_args(argv)
 
 
@@ -3557,6 +3563,7 @@ def _run_widget_entrypoint(
     start_hidden: bool = False,
     parent_pid: int | None = None,
     monitor_bounds: tuple[int, int, int, int] | None = None,
+    monitor: int | None = None,
 ) -> int:
     from widget_viewer import (
         _build_engine_url,
@@ -3566,12 +3573,22 @@ def _run_widget_entrypoint(
         _start_with_cef,
         _start_with_pywebview,
         _viewer_backend_order,
+        _windows_connected_monitor_bounds,
     )
 
     _start_parent_watchdog(parent_pid)
     parsed_monitor_bounds = monitor_bounds
     if parsed_monitor_bounds is None:
         parsed_monitor_bounds = _parse_monitor_bounds(os.getenv("WIDGET_MONITOR_BOUNDS", ""))
+    if parsed_monitor_bounds is None and monitor is not None:
+        monitor_list = _windows_connected_monitor_bounds()
+        if not monitor_list:
+            _safe_print("Monitor seçimi çözümlenemedi: bağlı monitör listesi alınamadı.")
+            return 2
+        if monitor < 0 or monitor >= len(monitor_list):
+            _safe_print(f"Geçersiz --monitor değeri: {monitor}. Geçerli aralık: 0-{len(monitor_list) - 1}")
+            return 2
+        parsed_monitor_bounds = monitor_list[monitor]
 
     try:
         normalized_url = _build_engine_url(_normalize_url(widget_url))
@@ -3617,6 +3634,7 @@ if __name__ == "__main__":
                 start_hidden=args.start_hidden,
                 parent_pid=args.parent_pid,
                 monitor_bounds=_parse_monitor_bounds(args.monitor_bounds),
+                monitor=args.monitor,
             )
         )
     main()

@@ -423,6 +423,43 @@ def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | 
     return x, y, width, height
 
 
+def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
+    if os.name != "nt":
+        return []
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    monitor_bounds: list[tuple[int, int, int, int]] = []
+    enum_proc = ctypes.WINFUNCTYPE(
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(RECT),
+        ctypes.c_long,
+    )
+
+    def _enum_callback(_monitor, _hdc, lprc_monitor, _data) -> int:
+        rect = lprc_monitor.contents
+        width = int(rect.right - rect.left)
+        height = int(rect.bottom - rect.top)
+        if width > 0 and height > 0:
+            monitor_bounds.append((int(rect.left), int(rect.top), width, height))
+        return 1
+
+    try:
+        ctypes.windll.user32.EnumDisplayMonitors(0, 0, enum_proc(_enum_callback), 0)
+    except Exception:
+        return []
+
+    return monitor_bounds
+
+
 def _apply_cef_monitor_bounds(browser, monitor_bounds: tuple[int, int, int, int] | None) -> None:
     if monitor_bounds is None:
         return
@@ -628,6 +665,21 @@ def main() -> int:
         except (ValueError, IndexError):
             monitor_bounds_arg = ""
         monitor_bounds = _parse_monitor_bounds(monitor_bounds_arg)
+    elif "--monitor" in sys.argv[2:]:
+        try:
+            monitor_arg = sys.argv[sys.argv.index("--monitor") + 1]
+            monitor_index = int(str(monitor_arg).strip())
+        except (ValueError, IndexError):
+            monitor_index = -1
+        monitor_list = _windows_connected_monitor_bounds()
+        if not monitor_list:
+            _safe_print("Monitor seçimi çözümlenemedi: bağlı monitör listesi alınamadı.")
+            return 2
+        if monitor_index < 0 or monitor_index >= len(monitor_list):
+            _safe_print(f"Geçersiz --monitor değeri: {monitor_index}. Geçerli aralık: 0-{len(monitor_list) - 1}")
+            return 2
+        monitor_bounds = monitor_list[monitor_index]
+        _debug_log(f"main monitor selected | index={monitor_index} bounds={monitor_bounds}")
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
