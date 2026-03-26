@@ -1389,10 +1389,11 @@ class BorderlessFullscreenPlayer:
             return [command]
 
         commands: list[list[str]] = []
-        for monitor_bounds in monitor_bounds_list:
+        for monitor_index, monitor_bounds in enumerate(monitor_bounds_list):
             monitor_command = [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
             if self._is_python_widget_command(command):
                 x, y, width, height = monitor_bounds
+                monitor_command.extend(["--monitor", str(monitor_index)])
                 monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
             commands.append(monitor_command)
 
@@ -1435,6 +1436,7 @@ class BorderlessFullscreenPlayer:
             monitor_bounds_list = self._windows_connected_monitor_bounds()
             connected_monitor_count = len(monitor_bounds_list)
             selected_monitor_bounds: tuple[int, int, int, int] | None = None
+            selected_monitor_index: int | None = None
 
             if target_monitor_index == 0:
                 active_monitor_bounds = self._windows_active_monitor_bounds()
@@ -1442,22 +1444,28 @@ class BorderlessFullscreenPlayer:
                     active_x, active_y, active_width, active_height = active_monitor_bounds
                     active_center_x = active_x + (active_width // 2)
                     active_center_y = active_y + (active_height // 2)
-                    for bounds in monitor_bounds_list:
+                    for monitor_index, bounds in enumerate(monitor_bounds_list):
                         x, y, width, height = bounds
                         if x <= active_center_x < (x + width) and y <= active_center_y < (y + height):
                             selected_monitor_bounds = bounds
+                            selected_monitor_index = monitor_index
                             break
                     if selected_monitor_bounds is None:
                         selected_monitor_bounds = active_monitor_bounds
 
             if selected_monitor_bounds is None and target_monitor_index < len(monitor_bounds_list):
                 selected_monitor_bounds = monitor_bounds_list[target_monitor_index]
+                selected_monitor_index = target_monitor_index
 
             if selected_monitor_bounds is not None:
                 monitor_bounds = selected_monitor_bounds
                 monitor_command = [command[0], *self._apply_windows_monitor_position(command[1:], monitor_bounds=monitor_bounds)]
                 if self._is_python_widget_command(command):
                     x, y, width, height = monitor_bounds
+                    if selected_monitor_index is None:
+                        selected_monitor_index = target_monitor_index
+                    if isinstance(selected_monitor_index, int) and selected_monitor_index >= 0:
+                        monitor_command.extend(["--monitor", str(selected_monitor_index)])
                     monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
                 _debug_log(
                     "widget_monitor_command_build | "
