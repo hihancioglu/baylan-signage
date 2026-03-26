@@ -551,6 +551,28 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(popen.call_count, 1)
         self.assertEqual(popen.call_args.args[0][:3], ["mpv", "--screen=1", "--fs"])
 
+    def test_launch_media_processes_uses_active_monitor_for_implicit_primary_target(self):
+        player = self._build_player()
+        fake_process = unittest.mock.Mock()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080), (3840, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_windows_active_monitor_bounds",
+            return_value=(3840, 0, 1920, 1080),
+        ), patch("client.player.subprocess.Popen", return_value=fake_process) as popen:
+            processes = player._launch_media_processes(
+                ["mpv", "--fs", "file.mp4"],
+                target_monitor_index=0,
+            )
+
+        self.assertEqual(len(processes), 1)
+        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(popen.call_args.args[0][:3], ["mpv", "--screen=2", "--fs"])
+
     def test_apply_windows_monitor_position_rewrites_size_and_drops_fullscreen_flags(self):
         flags = ["--kiosk", "--start-maximized", "--window-size=800,600", "--start-fullscreen"]
 

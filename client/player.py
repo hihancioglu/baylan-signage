@@ -1652,8 +1652,20 @@ class BorderlessFullscreenPlayer:
             and self._is_mpv_command(normalized_command)
         ):
             resolved_target_monitor_index = target_monitor_index
+            use_active_monitor_hint = target_monitor_index == 0 and clone_to_all_monitors is None
+            if use_active_monitor_hint and connected_monitor_count > 0:
+                active_monitor_bounds = self._windows_active_monitor_bounds()
+                if active_monitor_bounds is not None:
+                    active_x, active_y, active_width, active_height = active_monitor_bounds
+                    active_center_x = active_x + (active_width // 2)
+                    active_center_y = active_y + (active_height // 2)
+                    for monitor_index, bounds in enumerate(monitor_bounds_list):
+                        x, y, width, height = bounds
+                        if x <= active_center_x < (x + width) and y <= active_center_y < (y + height):
+                            resolved_target_monitor_index = monitor_index
+                            break
             if connected_monitor_count > 0:
-                resolved_target_monitor_index = min(target_monitor_index, connected_monitor_count - 1)
+                resolved_target_monitor_index = min(resolved_target_monitor_index, connected_monitor_count - 1)
             if resolved_target_monitor_index > 0:
                 normalized_command.insert(1, f"--screen={resolved_target_monitor_index}")
 
