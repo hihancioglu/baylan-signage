@@ -1400,6 +1400,10 @@ class MultiMonitorPlayback:
         self._lock = threading.Lock()
 
     @staticmethod
+    def _use_windows_display_ids() -> bool:
+        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
     def _connected_monitor_count() -> int | None:
         if os.name != "nt":
             return None
@@ -1433,7 +1437,7 @@ class MultiMonitorPlayback:
 
     @classmethod
     def _target_monitor_index_for_monitor_no(cls, monitor_no: int) -> int:
-        if os.name == "nt":
+        if os.name == "nt" and cls._use_windows_display_ids():
             monitor_map = cls._windows_monitor_id_to_index_map()
             mapped_index = monitor_map.get(int(monitor_no))
             if mapped_index is not None:
@@ -1446,6 +1450,7 @@ class MultiMonitorPlayback:
         connected_monitor_count = self._connected_monitor_count()
         windows_monitor_map = self._windows_monitor_id_to_index_map()
         primary_monitor_id = self._windows_primary_monitor_id()
+        use_windows_display_ids = self._use_windows_display_ids()
         for monitor_no_text, payload in monitor_playlists.items():
             try:
                 monitor_no = int(monitor_no_text)
@@ -1454,7 +1459,7 @@ class MultiMonitorPlayback:
             if monitor_no < 1:
                 continue
             if os.name == "nt":
-                if windows_monitor_map:
+                if use_windows_display_ids and windows_monitor_map:
                     if monitor_no == primary_monitor_id or monitor_no not in windows_monitor_map:
                         continue
                 elif connected_monitor_count is not None and monitor_no > connected_monitor_count:

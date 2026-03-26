@@ -2483,13 +2483,11 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         media_manager.sync_playlist_entries.assert_called_once()
         self.assertEqual(media_manager.sync_playlist_entries.call_args.args[1], "monitor2-v2")
 
-    def test_multi_monitor_playback_windows_uses_windows_monitor_ids_for_secondary_selection(self):
+    def test_multi_monitor_playback_windows_uses_windows_display_ids_for_secondary_selection(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
-        media_manager.sync_playlist_entries.return_value = [
-            {"local_path": "/tmp/m1.mp4", "duration_sec": None, "media_type": "video"}
-        ]
+        media_manager.sync_playlist_entries.return_value = [{"local_path": "/tmp/m1.mp4", "duration_sec": None, "media_type": "video"}]
         multi_monitor = MultiMonitorPlayback(media_manager)
 
         with patch("client.client.os.name", "nt"), patch.object(
@@ -2499,6 +2497,10 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ), patch.object(
             MultiMonitorPlayback,
             "_windows_primary_monitor_id",
+            return_value=2,
+        ), patch.object(
+            MultiMonitorPlayback,
+            "_connected_monitor_count",
             return_value=2,
         ):
             multi_monitor.update_from_config(
@@ -2544,6 +2546,16 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             return_value={1: 2, 2: 0, 3: 1},
         ):
             self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 1)
+
+    def test_multi_monitor_playback_target_monitor_index_can_disable_windows_monitor_mapping(self):
+        from client.client import MultiMonitorPlayback
+
+        with patch("client.client.os.name", "nt"), patch.dict("client.client.os.environ", {"MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS": "0"}, clear=False), patch.object(
+            MultiMonitorPlayback,
+            "_windows_monitor_id_to_index_map",
+            return_value={1: 2, 2: 0, 3: 1},
+        ):
+            self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 2)
 
     def test_multi_monitor_playback_accepts_widget_only_playlist(self):
         from client.client import MultiMonitorPlayback
