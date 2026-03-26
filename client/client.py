@@ -935,6 +935,79 @@ class GuiRuntime:
         call_button_label = None
         call_feature_active = False
         call_has_active_request = False
+        monitor_debug_windows: dict[int, object] = {}
+
+        def _resolve_monitor_debug_targets() -> list[tuple[int, tuple[int, int, int, int]]]:
+            if os.name != "nt":
+                return [(1, (0, 0, root.winfo_screenwidth(), root.winfo_screenheight()))]
+
+            bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
+            if not bounds:
+                return [(1, (0, 0, root.winfo_screenwidth(), root.winfo_screenheight()))]
+
+            id_to_index = BorderlessFullscreenPlayer._windows_monitor_id_to_index_map()
+            index_to_id = {int(index): int(monitor_id) for monitor_id, index in id_to_index.items()}
+            targets: list[tuple[int, tuple[int, int, int, int]]] = []
+            for monitor_index, monitor_bounds in enumerate(bounds):
+                monitor_id = index_to_id.get(monitor_index, monitor_index + 1)
+                targets.append((int(monitor_id), monitor_bounds))
+            return targets
+
+        def _show_monitor_debug_overlays():
+            nonlocal monitor_debug_windows
+            if not CLIENT_DEBUG_MODE:
+                return
+
+            targets = _resolve_monitor_debug_targets()
+            active_ids = {monitor_id for monitor_id, _ in targets}
+
+            for monitor_id, monitor_bounds in targets:
+                left, top, width, height = monitor_bounds
+                panel_w = min(max(320, int(width * 0.4)), max(320, width - 40))
+                panel_h = min(max(120, int(height * 0.2)), max(120, height - 40))
+                pos_x = int(left + max(0, (width - panel_w) / 2))
+                pos_y = int(top + max(0, (height - panel_h) / 2))
+
+                debug_window = monitor_debug_windows.get(monitor_id)
+                if debug_window is None or not debug_window.winfo_exists():
+                    debug_window = tk.Toplevel(root)
+                    debug_window.overrideredirect(True)
+                    debug_window.configure(bg="black")
+                    debug_window.attributes("-topmost", True)
+                    try:
+                        debug_window.attributes("-alpha", 0.35)
+                    except tk.TclError:
+                        pass
+                    debug_window.title(f"Baylan Monitor Debug {monitor_id}")
+                    label = tk.Label(
+                        debug_window,
+                        text=f"MONITOR ID: {monitor_id}",
+                        fg="white",
+                        bg="black",
+                        font=("Arial", 56, "bold"),
+                        justify="center",
+                    )
+                    label.place(relx=0.5, rely=0.5, anchor="center")
+                    monitor_debug_windows[monitor_id] = debug_window
+                debug_window.geometry(f"{panel_w}x{panel_h}+{pos_x}+{pos_y}")
+                try:
+                    debug_window.attributes("-topmost", True)
+                    debug_window.lift()
+                except tk.TclError:
+                    pass
+
+            stale_ids = [monitor_id for monitor_id in monitor_debug_windows.keys() if monitor_id not in active_ids]
+            for monitor_id in stale_ids:
+                stale_window = monitor_debug_windows.pop(monitor_id, None)
+                if stale_window is not None and stale_window.winfo_exists():
+                    stale_window.destroy()
+
+        def _hide_monitor_debug_overlays():
+            nonlocal monitor_debug_windows
+            for debug_window in monitor_debug_windows.values():
+                if debug_window is not None and debug_window.winfo_exists():
+                    debug_window.destroy()
+            monitor_debug_windows = {}
 
         def _work_order_geometry(screen_w: int, screen_h: int) -> str:
             panel_w = max(640, int(screen_w * 0.7))
@@ -1258,6 +1331,7 @@ class GuiRuntime:
                 _hide_work_order_overlay()
                 _hide_idle_overlay()
                 _hide_call_overlay()
+                _hide_monitor_debug_overlays()
                 root.destroy()
                 return
 
@@ -1301,6 +1375,11 @@ class GuiRuntime:
                 elif event_name == "shutdown":
                     self._shutdown = True
                     break
+
+            if CLIENT_DEBUG_MODE:
+                _show_monitor_debug_overlays()
+            else:
+                _hide_monitor_debug_overlays()
 
             if work_order_window is not None and work_order_window.winfo_exists():
                 try:
