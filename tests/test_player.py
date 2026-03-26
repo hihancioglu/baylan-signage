@@ -1920,6 +1920,32 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertTrue(_is_missing_or_unversioned_build("build-unknown"))
         self.assertFalse(_is_missing_or_unversioned_build("build-20260227093045"))
 
+    def test_resolve_widget_launch_options_forces_clone_path_when_requested(self):
+        from client.client import _resolve_widget_launch_options
+
+        with patch("client.client.os.name", "nt"):
+            target_monitor_index, clone_enabled = _resolve_widget_launch_options(
+                clone_requested=True,
+                requested_target_monitor_index=0,
+                has_multiple_monitors=True,
+            )
+
+        self.assertIsNone(target_monitor_index)
+        self.assertTrue(clone_enabled)
+
+    def test_resolve_widget_launch_options_keeps_target_when_clone_disabled(self):
+        from client.client import _resolve_widget_launch_options
+
+        with patch("client.client.os.name", "nt"):
+            target_monitor_index, clone_enabled = _resolve_widget_launch_options(
+                clone_requested=False,
+                requested_target_monitor_index=1,
+                has_multiple_monitors=True,
+            )
+
+        self.assertEqual(target_monitor_index, 1)
+        self.assertFalse(clone_enabled)
+
     def test_client_updater_update_forces_when_local_version_missing(self):
         from client import client as client_module
 

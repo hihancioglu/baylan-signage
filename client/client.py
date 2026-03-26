@@ -588,13 +588,13 @@ def _resolve_widget_launch_options(
         if isinstance(requested_target_monitor_index, int) and requested_target_monitor_index >= 0
         else None
     )
-    clone_enabled = (
-        bool(clone_requested)
-        and os.name == "nt"
-        and normalized_target_monitor_index is None
-        and has_multiple_monitors
-    )
-    return normalized_target_monitor_index, clone_enabled
+    clone_enabled = bool(clone_requested) and os.name == "nt" and has_multiple_monitors
+    if clone_enabled:
+        # Klon modunda tüm monitörler için ayrı komutlar üretilmesi gerekir.
+        # Hedef monitör index'i verilmiş olsa bile bunu yok sayıp çoklu komut
+        # yoluna düşür.
+        return None, True
+    return normalized_target_monitor_index, False
 
 
 def release_instance_lock() -> None:
