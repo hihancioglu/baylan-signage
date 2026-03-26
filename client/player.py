@@ -1680,6 +1680,7 @@ class BorderlessFullscreenPlayer:
         runtime_controller_allowed = (
             os.name == "nt"
             and self._python_widget_viewer_supported
+            and target_monitor_index is None
         )
         runtime_controller_skipped = not runtime_controller_allowed
         if self._widget_runtime_controller_enabled() and runtime_controller_allowed:
