@@ -577,6 +577,26 @@ def already_running() -> bool:
     return False
 
 
+def _resolve_widget_launch_options(
+    *,
+    clone_requested: bool,
+    requested_target_monitor_index: int | None,
+    has_multiple_monitors: bool,
+) -> tuple[int | None, bool]:
+    normalized_target_monitor_index = (
+        requested_target_monitor_index
+        if isinstance(requested_target_monitor_index, int) and requested_target_monitor_index >= 0
+        else None
+    )
+    clone_enabled = (
+        bool(clone_requested)
+        and os.name == "nt"
+        and normalized_target_monitor_index is None
+        and has_multiple_monitors
+    )
+    return normalized_target_monitor_index, clone_enabled
+
+
 def release_instance_lock() -> None:
     global instance_lock_fd, instance_mutex_handle
     if instance_lock_fd is not None:
@@ -1598,12 +1618,17 @@ class MultiMonitorPlayback:
                 if not widget_url and not widget_config:
                     time.sleep(0.2)
                     continue
+                widget_target_monitor_index, widget_clone_enabled = _resolve_widget_launch_options(
+                    clone_requested=False,
+                    requested_target_monitor_index=monitor_no - 1,
+                    has_multiple_monitors=True,
+                )
                 player.play_widget_blocking(
                     widget_url,
                     int(widget_duration_sec),
                     widget_config=widget_config,
-                    target_monitor_index=monitor_no - 1,
-                    clone_to_all_monitors=False,
+                    target_monitor_index=widget_target_monitor_index,
+                    clone_to_all_monitors=widget_clone_enabled,
                 )
             else:
                 if not media_path:
@@ -2306,12 +2331,12 @@ class PlaybackController:
                                 has_multiple_monitors = len(monitor_bounds_reader()) > 1
                             except Exception:
                                 has_multiple_monitors = False
-                        clone_widget_to_all_monitors = (
-                            self._clone_to_all_monitors
-                            and os.name == "nt"
-                            and has_multiple_monitors
+                        requested_target_monitor_index = self._primary_target_monitor_index()
+                        primary_target_monitor_index, clone_widget_to_all_monitors = _resolve_widget_launch_options(
+                            clone_requested=self._clone_to_all_monitors,
+                            requested_target_monitor_index=requested_target_monitor_index,
+                            has_multiple_monitors=has_multiple_monitors,
                         )
-                        primary_target_monitor_index = self._primary_target_monitor_index()
                         log_debug(
                             "widget_route_decision | "
                             f"direct_url_widget={direct_url_widget} "
