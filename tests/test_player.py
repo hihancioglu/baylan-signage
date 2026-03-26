@@ -383,7 +383,31 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(commands, [["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"]])
         self.assertEqual(build_widget_command.call_args.kwargs.get("allow_python_viewer"), False)
-        build_for_monitors.assert_called_once_with("https://example.com")
+        build_for_monitors.assert_called_once_with("https://example.com", clone_to_all_monitors=True)
+
+    def test_build_widget_commands_for_monitors_clones_when_param_true_even_if_env_disabled(self):
+        with patch.dict("os.environ", {"WIDGET_CLONE_TO_ALL_MONITORS": "0"}, clear=False):
+            player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["msedge", "--kiosk", "--window-position=0,0", "--app=https://example.com"],
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=False,
+        ), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ):
+            commands = player._build_widget_commands_for_monitors(
+                "https://example.com",
+                clone_to_all_monitors=True,
+            )
+
+        self.assertEqual(len(commands), 2)
 
     def test_build_widget_commands_keeps_python_viewer_enabled_for_target_monitor(self):
         player = self._build_player()
