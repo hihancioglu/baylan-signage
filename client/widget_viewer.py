@@ -544,6 +544,9 @@ def _start_with_cef(
             else:
                 switches[cleaned] = ""
 
+    switches.setdefault("force-device-scale-factor", "1")
+    switches.setdefault("high-dpi-support", "1")
+
     cef.Initialize(settings={"context_menu": {"enabled": False}}, switches=switches)
     window_info = cef.WindowInfo()
     window_info.SetAsPopup(0, "Baylan Widget")
@@ -553,6 +556,10 @@ def _start_with_cef(
         window_title="Baylan Widget",
         settings={"background_color": CEF_BLACK_BACKGROUND},
     )
+    try:
+        browser.SetZoomLevel(0)
+    except Exception:
+        _debug_log("cef zoom level reset skipped")
     _apply_cef_monitor_bounds(browser, monitor_bounds)
     if start_hidden:
         _set_cef_window_visible(browser, False)
