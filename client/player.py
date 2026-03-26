@@ -1098,6 +1098,15 @@ class BorderlessFullscreenPlayer:
                 process for process in self._widget_runtime_processes
                 if process and process.poll() is None
             ]
+            if (
+                running_processes
+                and target_monitor_index is None
+                and clone_to_all_monitors is None
+            ):
+                self._widget_runtime_processes = running_processes
+                self._widget_process = running_processes[0]
+                self._extra_processes = running_processes[1:]
+                return True
             if running_processes and len(running_processes) == desired_count:
                 self._widget_process = running_processes[0]
                 return True
