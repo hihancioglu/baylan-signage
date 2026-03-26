@@ -1440,7 +1440,8 @@ class BorderlessFullscreenPlayer:
             selected_monitor_bounds: tuple[int, int, int, int] | None = None
             selected_monitor_index: int | None = None
 
-            if target_monitor_index == 0:
+            use_active_monitor_hint = target_monitor_index == 0 and clone_to_all_monitors is None
+            if use_active_monitor_hint:
                 active_monitor_bounds = self._windows_active_monitor_bounds()
                 if active_monitor_bounds is not None:
                     active_x, active_y, active_width, active_height = active_monitor_bounds

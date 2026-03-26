@@ -435,7 +435,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIn("--monitor-bounds", commands[0])
         self.assertIn("1920,0,1920,1080", commands[0])
 
-    def test_build_widget_commands_prefers_active_monitor_bounds_for_primary_target(self):
+    def test_build_widget_commands_uses_indexed_bounds_for_explicit_primary_target(self):
         player = self._build_player()
 
         with patch("client.player.os.name", "nt"), patch.object(
@@ -460,6 +460,36 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             return_value=True,
         ):
             commands = player._build_widget_commands("https://example.com", target_monitor_index=0, clone_to_all_monitors=False)
+
+        self.assertIn("--monitor-bounds", commands[0])
+        self.assertIn("-1920,-65,1536,960", commands[0])
+
+
+    def test_build_widget_commands_prefers_active_monitor_bounds_for_implicit_primary_target(self):
+        player = self._build_player()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_build_widget_command",
+            return_value=["python", "widget_viewer.py", "https://example.com"],
+        ), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(-1920, -65, 1536, 960), (0, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_windows_active_monitor_bounds",
+            return_value=(0, 0, 1920, 1080),
+        ), patch.object(
+            player,
+            "_apply_windows_monitor_position",
+            side_effect=lambda parts, monitor_bounds=None: parts,
+        ), patch.object(
+            player,
+            "_is_python_widget_command",
+            return_value=True,
+        ):
+            commands = player._build_widget_commands("https://example.com", target_monitor_index=0)
 
         self.assertIn("--monitor-bounds", commands[0])
         self.assertIn("0,0,1920,1080", commands[0])
