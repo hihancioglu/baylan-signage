@@ -1067,20 +1067,28 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
 
 
-    def test_play_widget_blocking_skips_runtime_controller_for_target_monitor(self):
+    def test_play_widget_blocking_uses_runtime_controller_for_target_monitor(self):
         player = self._build_player()
+        player._python_widget_viewer_supported = True
 
-        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+        with patch.object(player, "_build_widget_source", return_value="https://example.com"), patch("client.player.os.name", "nt"), patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
             player, "update_widget_layout"
-        ) as update_layout, patch.object(player, "_build_widget_commands", return_value=[["msedge", "https://example.com"]]), patch(
+        ) as update_layout, patch.object(
+            player,
+            "_build_widget_commands",
+            return_value=[["msedge", "https://example.com"]],
+        ) as build_commands, patch(
             "subprocess.Popen"
         ) as popen_mock, patch.object(player, "_wait_widget_processes_until_stop", return_value=True), patch.object(
+            player, "wait_widget_duration", return_value=True
+        ) as wait_duration, patch.object(
             player, "stop"
         ):
             process = unittest.mock.Mock()
             process.poll.return_value = 0
             process.returncode = 0
             popen_mock.return_value = process
+            update_layout.return_value = True
 
             result = player.play_widget_blocking(
                 "https://example.com",
@@ -1090,8 +1098,10 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        update_layout.assert_not_called()
-        popen_mock.assert_called_once()
+        update_layout.assert_called_once()
+        wait_duration.assert_called_once_with(1)
+        build_commands.assert_not_called()
+        popen_mock.assert_not_called()
 
     def test_play_widget_blocking_holds_duration_when_browser_launcher_exits_immediately(self):
         player = self._build_player()
