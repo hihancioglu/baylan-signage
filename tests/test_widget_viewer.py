@@ -61,6 +61,28 @@ class TestWidgetViewer(unittest.TestCase):
             widget_viewer.CEF_BLACK_BACKGROUND,
         )
 
+    def test_start_with_pywebview_uses_fullscreen_without_monitor_bounds(self):
+        fake_webview = unittest.mock.Mock()
+        fake_webview.create_window.return_value = unittest.mock.Mock()
+
+        with patch.dict("sys.modules", {"webview": fake_webview}):
+            widget_viewer._start_with_pywebview("https://example.com")
+
+        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
+
+    def test_start_with_pywebview_keeps_fullscreen_with_monitor_bounds(self):
+        fake_webview = unittest.mock.Mock()
+        fake_webview.create_window.return_value = unittest.mock.Mock()
+
+        with patch.dict("sys.modules", {"webview": fake_webview}):
+            widget_viewer._start_with_pywebview("https://example.com", monitor_bounds=(1920, 0, 1920, 1080))
+
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["x"], 1920)
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["y"], 0)
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1920)
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
+        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
+
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url("https://example.com")
