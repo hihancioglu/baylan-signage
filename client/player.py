@@ -1358,12 +1358,17 @@ class BorderlessFullscreenPlayer:
         self._last_interrupted = False
         return True
 
-    def _build_widget_commands_for_monitors(self, source: str) -> list[list[str]]:
+    def _build_widget_commands_for_monitors(
+        self,
+        source: str,
+        clone_to_all_monitors: bool | None = None,
+    ) -> list[list[str]]:
         command = self._build_widget_command(source)
         if not command:
             return []
 
-        if not self._should_clone_to_all_monitors() or os.name != "nt":
+        clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        if not clone_enabled or os.name != "nt":
             return [command]
 
         monitor_bounds_list = self._windows_connected_monitor_bounds()
@@ -1433,7 +1438,7 @@ class BorderlessFullscreenPlayer:
 
         if not clone_enabled:
             return [command]
-        return self._build_widget_commands_for_monitors(source)
+        return self._build_widget_commands_for_monitors(source, clone_to_all_monitors=clone_enabled)
 
     def _launch_media_processes(
         self,
