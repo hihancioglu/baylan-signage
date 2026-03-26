@@ -233,7 +233,7 @@ class BorderlessFullscreenPlayer:
 
         return positioned_flags
 
-    def __init__(self):
+    def __init__(self, keep_widget_runtime_warm: bool | None = None):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
         self.static_image_duration_sec = int(os.getenv("STATIC_IMAGE_DURATION_SEC", "86400"))
         default_video_command, default_image_command = self._pick_default_player_commands()
@@ -256,9 +256,13 @@ class BorderlessFullscreenPlayer:
         self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
-        self._keep_widget_runtime_warm = (
+        env_keep_widget_runtime_warm = (
             os.getenv("WIDGET_KEEP_RUNTIME_WARM", "1").strip().lower() in {"1", "true", "yes"}
         )
+        if keep_widget_runtime_warm is None:
+            self._keep_widget_runtime_warm = env_keep_widget_runtime_warm
+        else:
+            self._keep_widget_runtime_warm = bool(keep_widget_runtime_warm)
         self._last_interrupted = False
         self._last_widget_source = ""
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
