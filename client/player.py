@@ -1365,14 +1365,27 @@ class BorderlessFullscreenPlayer:
     ) -> list[list[str]]:
         command = self._build_widget_command(source)
         if not command:
+            _debug_log(
+                "widget_monitor_command_build | "
+                "scope=for_monitors clone_enabled=False connected_monitors=0 generated_commands=0"
+            )
             return []
 
         clone_enabled = self._should_clone_to_all_monitors() if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         if not clone_enabled or os.name != "nt":
+            _debug_log(
+                "widget_monitor_command_build | "
+                f"scope=for_monitors clone_enabled={clone_enabled} connected_monitors=0 generated_commands=1"
+            )
             return [command]
 
         monitor_bounds_list = self._windows_connected_monitor_bounds()
         if len(monitor_bounds_list) <= 1:
+            _debug_log(
+                "widget_monitor_command_build | "
+                f"scope=for_monitors clone_enabled={clone_enabled} "
+                f"connected_monitors={len(monitor_bounds_list)} generated_commands=1"
+            )
             return [command]
 
         commands: list[list[str]] = []
@@ -1383,6 +1396,11 @@ class BorderlessFullscreenPlayer:
                 monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
             commands.append(monitor_command)
 
+        _debug_log(
+            "widget_monitor_command_build | "
+            f"scope=for_monitors clone_enabled={clone_enabled} "
+            f"connected_monitors={len(monitor_bounds_list)} generated_commands={len(commands)}"
+        )
         return commands
 
     def _build_widget_commands(
@@ -1393,6 +1411,7 @@ class BorderlessFullscreenPlayer:
         clone_to_all_monitors: bool | None = None,
     ) -> list[list[str]]:
         clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
+        connected_monitor_count = 0
         allow_python_viewer = True
         if os.name == "nt" and clone_enabled and target_monitor_index is None:
             # Python widget viewer tek pencere başlattığı için çoklu monitör
@@ -1401,6 +1420,11 @@ class BorderlessFullscreenPlayer:
             allow_python_viewer = False
         command = self._build_widget_command(source, allow_python_viewer=allow_python_viewer)
         if not command:
+            _debug_log(
+                "widget_monitor_command_build | "
+                f"scope=build clone_enabled={clone_enabled} "
+                f"connected_monitors={connected_monitor_count} generated_commands=0"
+            )
             return []
 
         if (
@@ -1409,6 +1433,7 @@ class BorderlessFullscreenPlayer:
             and target_monitor_index >= 0
         ):
             monitor_bounds_list = self._windows_connected_monitor_bounds()
+            connected_monitor_count = len(monitor_bounds_list)
             selected_monitor_bounds: tuple[int, int, int, int] | None = None
 
             if target_monitor_index == 0:
@@ -1434,11 +1459,29 @@ class BorderlessFullscreenPlayer:
                 if self._is_python_widget_command(command):
                     x, y, width, height = monitor_bounds
                     monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
+                _debug_log(
+                    "widget_monitor_command_build | "
+                    f"scope=build clone_enabled={clone_enabled} "
+                    f"connected_monitors={connected_monitor_count} generated_commands=1"
+                )
                 return [monitor_command]
 
         if not clone_enabled:
+            _debug_log(
+                "widget_monitor_command_build | "
+                f"scope=build clone_enabled={clone_enabled} "
+                f"connected_monitors={connected_monitor_count} generated_commands=1"
+            )
             return [command]
-        return self._build_widget_commands_for_monitors(source, clone_to_all_monitors=clone_enabled)
+        commands = self._build_widget_commands_for_monitors(source, clone_to_all_monitors=clone_enabled)
+        if os.name == "nt":
+            connected_monitor_count = len(self._windows_connected_monitor_bounds())
+        _debug_log(
+            "widget_monitor_command_build | "
+            f"scope=build clone_enabled={clone_enabled} "
+            f"connected_monitors={connected_monitor_count} generated_commands={len(commands)}"
+        )
+        return commands
 
     def _launch_media_processes(
         self,
