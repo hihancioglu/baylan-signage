@@ -2148,18 +2148,19 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ]
         multi_monitor = MultiMonitorPlayback(media_manager)
 
-        multi_monitor.update_from_config(
-            {
-                "1": {"enabled": True, "videos": []},
-                "3": {
-                    "enabled": True,
-                    "videos": [{"path": "https://example.com/m3.mp4", "media_type": "video"}],
-                    "playlist_version": "v3",
-                    "media_signatures": {},
-                    "loop_mode": "sequential",
-                },
-            }
-        )
+        with patch("client.client.os.name", "posix"):
+            multi_monitor.update_from_config(
+                {
+                    "1": {"enabled": True, "videos": []},
+                    "3": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m3.mp4", "media_type": "video"}],
+                        "playlist_version": "v3",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
 
         self.assertTrue(multi_monitor.has_active_playlist())
         media_manager.sync_playlist_entries.assert_called_once()
