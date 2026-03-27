@@ -399,13 +399,12 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _windows_monitor_id_to_index_map() -> dict[int, int]:
-        bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
-        if not bounds:
-            return {}
-
         # Windows Display Settings kimlikleri (DISPLAY1, DISPLAY2, ...)
         # MONITORINFOEXW::szDevice alanından okunur. Bu kimlikleri
         # uygulama tarafındaki monitor_no ile eşleyerek seçim yapıyoruz.
+        # Eşleme sırasında tek bir enumerasyon sonucunu kullanarak index
+        # üretelim; böylece farklı API çağrıları arasında sıralama kayması
+        # olduğunda (ör. DISPLAY2/DISPLAY3 swap) yanlış map oluşmaz.
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return {}
 
@@ -439,7 +438,8 @@ class BorderlessFullscreenPlayer:
             wintypes.LPARAM,
         )
 
-        windows_id_to_bounds: dict[int, tuple[int, int, int, int]] = {}
+        MONITORINFOF_PRIMARY = 1
+        monitor_entries: list[tuple[int, int, int, int, int, bool]] = []
 
         def _collect_monitor(monitor_handle, _hdc, rect_ptr, _data):
             if not rect_ptr:
@@ -455,12 +455,15 @@ class BorderlessFullscreenPlayer:
                     match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
                     if match:
                         windows_id = int(match.group(1))
-                        windows_id_to_bounds[windows_id] = (
+                        is_primary = bool(int(monitor_info.dwFlags) & MONITORINFOF_PRIMARY)
+                        monitor_entries.append((
                             int(rect.left),
                             int(rect.top),
                             width,
                             height,
-                        )
+                            windows_id,
+                            is_primary,
+                        ))
             except Exception:
                 return 1
             return 1
@@ -470,12 +473,19 @@ class BorderlessFullscreenPlayer:
         except Exception:
             return {}
 
-        bounds_to_index = {monitor_bounds: index for index, monitor_bounds in enumerate(bounds)}
+        if not monitor_entries:
+            return {}
+
+        monitor_entries.sort(key=lambda item: (0 if item[5] else 1, item[1], item[0]))
+
         id_to_index: dict[int, int] = {}
-        for windows_id, monitor_bounds in windows_id_to_bounds.items():
-            index = bounds_to_index.get(monitor_bounds)
-            if index is not None:
-                id_to_index[windows_id] = int(index)
+        seen_rects: set[tuple[int, int, int, int]] = set()
+        for left, top, width, height, windows_id, _is_primary in monitor_entries:
+            rect = (left, top, width, height)
+            if rect in seen_rects:
+                continue
+            seen_rects.add(rect)
+            id_to_index[windows_id] = len(seen_rects) - 1
         return id_to_index
 
     @staticmethod
