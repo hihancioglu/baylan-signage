@@ -875,6 +875,22 @@ class _WindowManager:
         foreground_hwnd = int(get_foreground_window())
         return foreground_hwnd == int(hwnd)
 
+    def foreground_window_title(self) -> str:
+        if not self._enabled:
+            return ""
+        get_foreground_window = getattr(self._user32, "GetForegroundWindow", None)
+        if get_foreground_window is None:
+            return ""
+        hwnd = int(get_foreground_window())
+        if hwnd <= 0:
+            return ""
+        length = int(self._user32.GetWindowTextLengthW(hwnd))
+        if length <= 0:
+            return ""
+        title_buffer = self._ctypes.create_unicode_buffer(length + 1)
+        self._user32.GetWindowTextW(hwnd, title_buffer, length + 1)
+        return str(title_buffer.value or "")
+
 
 class GuiRuntime:
     def __init__(self):
@@ -3522,13 +3538,21 @@ def run_state_cycle():
 
     activity_drop_confirmed = _activity_drop_streak >= max(ACTIVITY_DROP_CONFIRM_COUNT, 1)
     low_idle_confirmed = _low_idle_streak >= 3
-    user_activity_detected = activity_drop_confirmed or low_idle_confirmed
+    activity_reason = "none"
+    if activity_drop_confirmed and low_idle_confirmed:
+        activity_reason = "idle_drop+low_idle"
+    elif activity_drop_confirmed:
+        activity_reason = "idle_drop"
+    elif low_idle_confirmed:
+        activity_reason = "low_idle"
+    user_activity_detected = activity_reason != "none"
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
         f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
         f"drop_streak={_activity_drop_streak} drop_confirmed={activity_drop_confirmed} "
         f"low_idle_streak={_low_idle_streak} low_idle_confirmed={low_idle_confirmed} "
-        f"user_activity={user_activity_detected} idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
+        f"user_activity={user_activity_detected} activity_reason={activity_reason} "
+        f"idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
     )
 
     if not idle_mode_enabled:
@@ -3587,20 +3611,39 @@ def run_state_cycle():
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
+    erp_is_foreground = None
+    foreground_title = ""
     if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
         # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
         # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
         # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
-        if not window_manager.is_window_foreground(ERP_WINDOW_TITLE):
+        erp_is_foreground = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
+        foreground_title = window_manager.foreground_window_title()
+        if not erp_is_foreground:
             log_debug(
                 "state_cycle PLAYING widget activity | "
-                f"erp_not_foreground_detected title={ERP_WINDOW_TITLE!r} action=force_return"
+                f"erp_not_foreground_detected title={ERP_WINDOW_TITLE!r} "
+                f"foreground_title={foreground_title!r} action=force_return activity_reason={activity_reason}"
             )
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
         and user_activity_detected
     ):
+        if active_item_type == "widget":
+            if erp_is_foreground is None:
+                erp_is_foreground = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
+            if not foreground_title:
+                foreground_title = window_manager.foreground_window_title()
+        else:
+            if not foreground_title:
+                foreground_title = window_manager.foreground_window_title()
+        log_debug(
+            "state_cycle PLAYING -> RETURNING trigger | "
+            f"item_type={active_item_type or 'unknown'} played_for_sec={played_for_sec:.3f} "
+            f"idle_sec={idle_sec:.3f} activity_reason={activity_reason} "
+            f"erp_is_foreground={erp_is_foreground} foreground_title={foreground_title!r}"
+        )
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:

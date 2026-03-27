@@ -2273,6 +2273,11 @@ class BorderlessFullscreenPlayer:
                 _debug_log(f"play_blocking finished | returncode={process.returncode} interrupted={interrupted}")
                 return True
 
+            _debug_log(
+                "play_blocking primary failed | "
+                f"returncode={process.returncode} interrupted={interrupted} media_path={media_path} command={command}"
+            )
+
             alternate_command = self._build_alternate_command(
                 media_path,
                 image_duration_sec=image_duration_sec,
