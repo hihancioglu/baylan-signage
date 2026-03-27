@@ -16,7 +16,7 @@ import logging
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
@@ -1011,6 +1011,19 @@ class BorderlessFullscreenPlayer:
         return source
 
     @staticmethod
+    def _normalize_widget_media_source(widget_source: str) -> str:
+        source = str(widget_source or "").strip()
+        if not source:
+            return ""
+
+        if source.startswith(("/", "\\")):
+            base_url = str(os.getenv("MEDIA_SOURCE_BASE_URL") or os.getenv("SERVER_URL") or "").strip()
+            if base_url:
+                return urljoin(f"{base_url.rstrip('/')}/", source.lstrip("/\\"))
+
+        return BorderlessFullscreenPlayer._normalize_widget_source(source)
+
+    @staticmethod
     def _maybe_remap_stale_engine_uri(widget_source: str) -> str:
         """Remap stale _MEI widget_engine file:// URLs to current runtime path."""
         try:
@@ -1121,7 +1134,7 @@ class BorderlessFullscreenPlayer:
                             or normalized_widget.get("path")
                             or ""
                         )
-                        normalized_media_source = self._normalize_widget_source(str(raw_source))
+                        normalized_media_source = self._normalize_widget_media_source(str(raw_source))
                         if normalized_media_source:
                             normalized_widget["url"] = normalized_media_source
                         else:
