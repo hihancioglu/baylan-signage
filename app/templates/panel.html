@@ -1238,6 +1238,49 @@ function updateWidgetPreview(){
     </style></head><body>${body}</body></html>`;
   };
 
+  const normalizeMediaUrl = (rawValue) => {
+    const value = String(rawValue || '').trim();
+    if(!value) return '';
+    if(/^(https?:|file:|blob:|data:)/i.test(value)) return value;
+    if(value.startsWith('//')) return `${window.location.protocol}${value}`;
+    if(value.startsWith('/')) return `${window.location.origin}${value}`;
+    const basePath = window.location.pathname.endsWith('/')
+      ? window.location.pathname
+      : `${window.location.pathname.split('/').slice(0, -1).join('/')}/`;
+    return new URL(value, `${window.location.origin}${basePath}`).toString();
+  };
+
+  const attachPreviewVideoDebugLogs = () => {
+    const previewDoc = previewFrame.contentDocument;
+    if(!previewDoc) return;
+    const videos = Array.from(previewDoc.querySelectorAll('video'));
+    if(!videos.length) return;
+
+    videos.forEach((videoEl, idx) => {
+      const debugCtx = {
+        widgetType: type,
+        index: idx,
+        configuredSrc: videoEl.getAttribute('src') || '',
+        resolvedSrc: videoEl.currentSrc || videoEl.src || ''
+      };
+      console.debug('[widget-preview] video init', debugCtx);
+      ['loadstart', 'loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'error'].forEach((eventName) => {
+        videoEl.addEventListener(eventName, () => {
+          console.debug('[widget-preview] video event', {
+            ...debugCtx,
+            event: eventName,
+            resolvedSrc: videoEl.currentSrc || videoEl.src || '',
+            readyState: videoEl.readyState,
+            networkState: videoEl.networkState,
+            errorCode: videoEl.error ? videoEl.error.code : null
+          });
+        });
+      });
+    });
+  };
+
+  previewFrame.onload = attachPreviewVideoDebugLogs;
+
   const normalizeUrl = (rawValue) => {
     const value = String(rawValue || '').trim();
     if(!value) return '';
@@ -1297,10 +1340,14 @@ function updateWidgetPreview(){
     const cellsHtml = normalizedCells.map((cell) => {
       if(!cell.source || cell.type === 'empty') return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
       if(cell.type === 'video'){
-        return `<div class="dashboard-cell"><video class="live-frame" src="${escapeHtml(cell.source)}" autoplay muted loop playsinline controls></video></div>`;
+        const videoUrl = normalizeMediaUrl(cell.source);
+        if(!videoUrl) return '<div class="dashboard-cell dashboard-cell-empty">Video kaynağı boş</div>';
+        return `<div class="dashboard-cell"><video class="live-frame" src="${escapeHtml(videoUrl)}" autoplay muted loop playsinline controls></video></div>`;
       }
       if(cell.type === 'image'){
-        return `<div class="dashboard-cell"><img class="live-frame" src="${escapeHtml(cell.source)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
+        const imageUrl = normalizeMediaUrl(cell.source);
+        if(!imageUrl) return '<div class="dashboard-cell dashboard-cell-empty">Görsel kaynağı boş</div>';
+        return `<div class="dashboard-cell"><img class="live-frame" src="${escapeHtml(imageUrl)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
       }
       const url = normalizeUrl(cell.source);
       if(!url) return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
