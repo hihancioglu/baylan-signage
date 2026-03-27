@@ -1549,6 +1549,22 @@ class MultiMonitorPlayback:
         windows_monitor_map = self._windows_monitor_id_to_index_map()
         primary_monitor_id = self._windows_primary_monitor_id()
         use_windows_display_ids = self._use_windows_display_ids()
+
+        parsed_monitor_numbers: set[int] = set()
+        for monitor_no_text in monitor_playlists.keys():
+            try:
+                parsed_monitor_numbers.add(int(monitor_no_text))
+            except (TypeError, ValueError):
+                continue
+
+        use_display_id_selection = (
+            os.name == "nt"
+            and use_windows_display_ids
+            and bool(windows_monitor_map)
+            and 1 in parsed_monitor_numbers
+        )
+        windows_map_is_reliable = len(windows_monitor_map) > 1
+
         for monitor_no_text, payload in monitor_playlists.items():
             try:
                 monitor_no = int(monitor_no_text)
@@ -1557,18 +1573,17 @@ class MultiMonitorPlayback:
             if monitor_no < 1:
                 continue
             if os.name == "nt":
-                if use_windows_display_ids and windows_monitor_map:
+                if connected_monitor_count is not None and monitor_no > connected_monitor_count:
+                    continue
+                if use_display_id_selection:
                     # Windows servis/uzak oturumlarında ID haritası bazen
                     # tek monitör (çoğunlukla sadece primary) döndürebiliyor.
                     # Böyle durumlarda haritayı katı şekilde uygulamak
                     # secondary playlist'leri gereksiz yere filtreleyebiliyor.
-                    windows_map_is_reliable = len(windows_monitor_map) > 1
                     if monitor_no == primary_monitor_id:
                         continue
                     if windows_map_is_reliable and monitor_no not in windows_monitor_map:
                         continue
-                elif connected_monitor_count is not None and monitor_no > connected_monitor_count:
-                    continue
                 elif monitor_no < 2:
                     continue
             elif monitor_no < 2:
@@ -1622,11 +1637,17 @@ class MultiMonitorPlayback:
                 local_entries = []
 
             entries = list(local_entries or []) + widget_items
+            target_monitor_index = (
+                self._target_monitor_index_for_monitor_no(monitor_no)
+                if use_display_id_selection
+                else max(0, monitor_no - 1)
+            )
             monitor_states[monitor_no] = {
                 "enabled": bool(enabled and entries),
                 "entries": entries,
                 "loop_mode": loop_mode,
                 "playlist_version": playlist_version,
+                "target_monitor_index": int(target_monitor_index),
             }
 
         players_to_restart: list[BorderlessFullscreenPlayer] = []
@@ -1772,7 +1793,9 @@ class MultiMonitorPlayback:
                 if not widget_url and not widget_config:
                     time.sleep(0.2)
                     continue
-                target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
+                target_monitor_index = monitor_state.get("target_monitor_index")
+                if not isinstance(target_monitor_index, int) or target_monitor_index < 0:
+                    target_monitor_index = max(0, monitor_no - 1)
                 widget_target_monitor_index, widget_clone_enabled = _resolve_widget_launch_options(
                     clone_requested=False,
                     requested_target_monitor_index=target_monitor_index,
@@ -1791,7 +1814,9 @@ class MultiMonitorPlayback:
                     continue
                 duration_sec = item.get("duration_sec")
                 media_duration_sec = duration_sec if isinstance(duration_sec, int) and duration_sec > 0 else None
-                target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
+                target_monitor_index = monitor_state.get("target_monitor_index")
+                if not isinstance(target_monitor_index, int) or target_monitor_index < 0:
+                    target_monitor_index = max(0, monitor_no - 1)
                 log_debug(
                     "monitor_media_launch | "
                     f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
