@@ -36,6 +36,20 @@ def _debug_log(message: str) -> None:
     _safe_print(f"[DEBUG][widget_viewer] {message}")
 
 
+class _WidgetEngineDebugBridge:
+    def debug_log(self, message: str, extra_json: str = "") -> None:
+        message_text = str(message or "").strip()
+        extra_text = str(extra_json or "").strip()
+        if extra_text:
+            _debug_log(f"widget_engine {message_text} | extra={extra_text}")
+        else:
+            _debug_log(f"widget_engine {message_text}")
+
+    # Compatibility alias for camelCase calls.
+    def debugLog(self, message: str, extra_json: str = "") -> None:
+        self.debug_log(message, extra_json)
+
+
 
 def _safe_print(message: str) -> None:
     try:
@@ -543,6 +557,7 @@ def _start_with_pywebview(
     monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
     import webview
+    debug_bridge = _WidgetEngineDebugBridge()
     _debug_log(
         "pywebview create_window request | "
         f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
@@ -569,7 +584,7 @@ def _start_with_pywebview(
         # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
         window_kwargs["fullscreen"] = True
 
-    window = webview.create_window(**window_kwargs)
+    window = webview.create_window(**window_kwargs, js_api=debug_bridge)
 
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
