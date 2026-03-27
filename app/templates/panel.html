@@ -262,7 +262,7 @@
                         </div>
                       </div>
                       <div id="dashboard-iframe-list" class="dashboard-editor-grid" style="--dashboard-columns:2"></div>
-                      <p class="text-secondary small mb-0 mt-2">Normal mod: hücreye tıklayıp içerik ayarla. Birleştirme modu: aynı satırdaki hücreleri seçip birleştir.</p>
+                      <p class="text-secondary small mb-0 mt-2">Normal mod: hücreye tıklayıp içerik ayarla. Birleştirme modu: dikdörtgen bir alan seçip birleştir (örn: 1x3, 2x2).</p>
                     </div>
                   </div>
                 </div>
@@ -1097,14 +1097,18 @@ function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
   const totalCells = Math.max(cols, rows * cols);
   return Array.from({length: totalCells}, (_, index) => {
     const cell = values[index];
-    if(!cell || typeof cell !== 'object') return {type: 'empty', source: '', colSpan: 1};
+    if(!cell || typeof cell !== 'object') return {type: 'empty', source: '', colSpan: 1, rowSpan: 1};
     const rawType = String(cell.type || 'empty').trim().toLowerCase();
     const type = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
     const rawColSpan = Math.floor(Number(cell.colSpan ?? cell.col_span ?? cell.colspan ?? cell.merge_cols ?? 1) || 1);
+    const rawRowSpan = Math.floor(Number(cell.rowSpan ?? cell.row_span ?? cell.rowspan ?? cell.merge_rows ?? 1) || 1);
     const colIndex = index % Math.max(1, cols);
+    const rowIndex = Math.floor(index / Math.max(1, cols));
     const maxSpan = Math.max(1, cols - colIndex);
+    const maxRowSpan = Math.max(1, rows - rowIndex);
     const colSpan = Math.max(1, Math.min(maxSpan, rawColSpan));
-    return {type, source: String(cell.source || '').trim(), colSpan};
+    const rowSpan = Math.max(1, Math.min(maxRowSpan, rawRowSpan));
+    return {type, source: String(cell.source || '').trim(), colSpan, rowSpan};
   });
 }
 
@@ -1127,27 +1131,26 @@ function dashboardVideoOptionsHtml(selectedSource = ''){
 }
 
 function isDashboardCellCovered(cells, index, cols){
-  const colIndex = index % cols;
-  for(let offset = 1; offset <= colIndex; offset += 1){
-    const leftIndex = index - offset;
-    const leftCell = cells[leftIndex];
-    if(!leftCell) continue;
-    if((leftCell.colSpan || 1) > offset) return true;
+  if(index < 0 || cols <= 0) return false;
+  const targetRow = Math.floor(index / cols);
+  const targetCol = index % cols;
+  for(let probe = 0; probe < index; probe += 1){
+    const cell = cells[probe];
+    if(!cell || typeof cell !== 'object') continue;
+    const probeRow = Math.floor(probe / cols);
+    const probeCol = probe % cols;
+    const colSpan = Math.max(1, Number(cell.colSpan || cell.col_span || cell.colspan || cell.merge_cols || 1) || 1);
+    const rowSpan = Math.max(1, Number(cell.rowSpan || cell.row_span || cell.rowspan || cell.merge_rows || 1) || 1);
+    if(targetRow >= probeRow && targetRow < (probeRow + rowSpan) && targetCol >= probeCol && targetCol < (probeCol + colSpan)){
+      return true;
+    }
   }
   return false;
 }
 
 function isCoveredByPreviousSpan(cells, index, cols){
-  if(!Array.isArray(cells) || index <= 0 || cols <= 1) return false;
-  const colIndex = index % cols;
-  for(let offset = 1; offset <= colIndex; offset += 1){
-    const leftIndex = index - offset;
-    const leftCell = cells[leftIndex];
-    if(!leftCell || typeof leftCell !== 'object') continue;
-    const leftSpan = Math.max(1, Number(leftCell.colSpan || leftCell.col_span || leftCell.colspan || leftCell.merge_cols || 1) || 1);
-    if(leftSpan > offset) return true;
-  }
-  return false;
+  if(!Array.isArray(cells)) return false;
+  return isDashboardCellCovered(cells, index, cols);
 }
 
 function dashboardCellLabel(index, cols){
@@ -1179,10 +1182,11 @@ function renderDashboardEditorGrid(){
     if(index === dashboardActiveCellIndex) cellEl.classList.add('active');
     if(dashboardMergeSelection.has(index)) cellEl.classList.add('merge-selected');
     if(cell.colSpan > 1) cellEl.style.gridColumn = `span ${cell.colSpan}`;
+    if(cell.rowSpan > 1) cellEl.style.gridRow = `span ${cell.rowSpan}`;
 
     const typeLabel = cell.type === 'empty' ? 'Boş' : (cell.type === 'iframe' ? 'Iframe/URL' : cell.type.toUpperCase());
     cellEl.innerHTML = `<span class="dashboard-editor-label">${dashboardCellLabel(index, cols)}</span>
-      <strong>${escapeHtml(typeLabel)}${cell.colSpan > 1 ? ` (x${cell.colSpan})` : ''}</strong>
+      <strong>${escapeHtml(typeLabel)}${(cell.colSpan > 1 || cell.rowSpan > 1) ? ` (${cell.rowSpan}x${cell.colSpan})` : ''}</strong>
       <span class="dashboard-editor-value">${escapeHtml(cell.source || 'İçerik yok')}</span>`;
     cellEl.addEventListener('click', () => handleDashboardCellClick(index));
     list.appendChild(cellEl);
@@ -1216,17 +1220,26 @@ function updateDashboardMergeActions(cells, cols){
   if(splitBtn){
     const onlyOneSelected = selected.length === 1;
     const cell = onlyOneSelected ? cells[selected[0]] : null;
-    splitBtn.classList.toggle('d-none', !(dashboardMergeMode && onlyOneSelected && (cell?.colSpan || 1) > 1));
+    const canSplit = dashboardMergeMode && onlyOneSelected && (((cell?.colSpan || 1) > 1) || ((cell?.rowSpan || 1) > 1));
+    splitBtn.classList.toggle('d-none', !canSplit);
   }
 }
 
 function canMergeDashboardSelection(indices, cols){
-  if(!indices.length) return false;
-  const sorted = [...indices].sort((a,b) => a-b);
-  const row = Math.floor(sorted[0] / cols);
-  if(sorted.some(i => Math.floor(i / cols) !== row)) return false;
-  for(let i = 1; i < sorted.length; i += 1){
-    if(sorted[i] !== sorted[i-1] + 1) return false;
+  if(!indices.length || cols <= 0) return false;
+  const selected = new Set(indices);
+  const rowsAndCols = [...selected].map((idx) => ({row: Math.floor(idx / cols), col: idx % cols}));
+  const minRow = Math.min(...rowsAndCols.map((item) => item.row));
+  const maxRow = Math.max(...rowsAndCols.map((item) => item.row));
+  const minCol = Math.min(...rowsAndCols.map((item) => item.col));
+  const maxCol = Math.max(...rowsAndCols.map((item) => item.col));
+  const expectedCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+  if(selected.size !== expectedCount) return false;
+  for(let row = minRow; row <= maxRow; row += 1){
+    for(let col = minCol; col <= maxCol; col += 1){
+      const idx = row * cols + col;
+      if(!selected.has(idx)) return false;
+    }
   }
   return true;
 }
@@ -1254,14 +1267,30 @@ function mergeSelectedDashboardCells(){
   const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
   const selected = Array.from(dashboardMergeSelection).sort((a,b) => a-b);
   if(!canMergeDashboardSelection(selected, cols)){
-    alert('Birleştirme için aynı satırda, bitişik en az 2 hücre seçin.');
+    alert('Birleştirme için dikdörtgen bir alan seçin (örn: 1x3 veya 2x2).');
     return;
   }
-  const start = selected[0];
-  const span = selected.length;
-  cells[start].colSpan = span;
-  for(let i = 1; i < span; i += 1){
-    cells[start + i] = {type: 'empty', source: '', colSpan: 1};
+  if(selected.some((idx) => (cells[idx]?.colSpan || 1) > 1 || (cells[idx]?.rowSpan || 1) > 1)){
+    alert('Önce seçilen birleşik hücreleri ayırın, sonra tekrar birleştirin.');
+    return;
+  }
+  const points = selected.map((idx) => ({idx, row: Math.floor(idx / cols), col: idx % cols}));
+  const minRow = Math.min(...points.map((item) => item.row));
+  const maxRow = Math.max(...points.map((item) => item.row));
+  const minCol = Math.min(...points.map((item) => item.col));
+  const maxCol = Math.max(...points.map((item) => item.col));
+  const start = (minRow * cols) + minCol;
+  const spanCols = (maxCol - minCol) + 1;
+  const spanRows = (maxRow - minRow) + 1;
+  cells[start].colSpan = spanCols;
+  cells[start].rowSpan = spanRows;
+  selected.forEach((idx) => {
+    if(idx === start) return;
+    cells[idx] = {type: 'empty', source: '', colSpan: 1, rowSpan: 1};
+  });
+  if(spanRows === 1 && spanCols === 1){
+    cells[start].colSpan = 1;
+    cells[start].rowSpan = 1;
   }
   dashboardMergeSelection = new Set([start]);
   dashboardActiveCellIndex = start;
@@ -1277,11 +1306,19 @@ function splitSelectedDashboardCell(){
   const selected = Array.from(dashboardMergeSelection);
   if(selected.length !== 1) return;
   const index = selected[0];
-  const span = Math.max(1, Number(cells[index]?.colSpan || 1));
-  if(span <= 1) return;
+  const colSpan = Math.max(1, Number(cells[index]?.colSpan || 1));
+  const rowSpan = Math.max(1, Number(cells[index]?.rowSpan || 1));
+  if(colSpan <= 1 && rowSpan <= 1) return;
   cells[index].colSpan = 1;
-  for(let i = 1; i < span; i += 1){
-    cells[index + i] = {type: 'empty', source: '', colSpan: 1};
+  cells[index].rowSpan = 1;
+  const baseRow = Math.floor(index / cols);
+  const baseCol = index % cols;
+  for(let rowOffset = 0; rowOffset < rowSpan; rowOffset += 1){
+    for(let colOffset = 0; colOffset < colSpan; colOffset += 1){
+      if(rowOffset === 0 && colOffset === 0) continue;
+      const idx = (baseRow + rowOffset) * cols + (baseCol + colOffset);
+      if(idx >= 0 && idx < cells.length) cells[idx] = {type: 'empty', source: '', colSpan: 1, rowSpan: 1};
+    }
   }
   dashboardMergeSelection = new Set([index]);
   setDashboardCells(cells);
@@ -1293,7 +1330,7 @@ function openDashboardCellModal(index){
   const cols = dashboardColumns();
   const rows = dashboardRows();
   const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
-  const cell = cells[index] || {type: 'empty', source: '', colSpan: 1};
+  const cell = cells[index] || {type: 'empty', source: '', colSpan: 1, rowSpan: 1};
   document.getElementById('dashboard-cell-modal-index').value = String(index);
   document.getElementById('dashboard-cell-modal-title').textContent = `${dashboardCellLabel(index, cols)} Ayarları`;
   const modalType = document.getElementById('dashboard-cell-modal-type');
@@ -1331,8 +1368,9 @@ function saveDashboardModalCell(){
   const index = Math.max(0, Number(document.getElementById('dashboard-cell-modal-index').value || 0));
   const type = String(document.getElementById('dashboard-cell-modal-type').value || 'empty');
   const source = String(document.getElementById('dashboard-cell-modal-source').value || '').trim();
-  const existingSpan = Math.max(1, Number(cells[index]?.colSpan || 1));
-  cells[index] = {type, source: type === 'empty' ? '' : source, colSpan: existingSpan};
+  const existingColSpan = Math.max(1, Number(cells[index]?.colSpan || 1));
+  const existingRowSpan = Math.max(1, Number(cells[index]?.rowSpan || 1));
+  cells[index] = {type, source: type === 'empty' ? '' : source, colSpan: existingColSpan, rowSpan: existingRowSpan};
   setDashboardCells(cells);
   renderDashboardEditorGrid();
   syncDashboardToContent();
@@ -1356,11 +1394,12 @@ function syncDashboardBuilderFromContent(content){
       if(!w || typeof w !== 'object') return {type: 'empty', source: ''};
       const widgetType = String(w.type || '').toLowerCase();
       const colSpan = Math.max(1, Number(w.col_span || w.colspan || w.column_span || w.merge_cols || 1) || 1);
-      if(widgetType === 'empty') return {type: 'empty', source: '', colSpan};
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan};
-      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan};
-      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan};
-      return {type: 'empty', source: '', colSpan};
+      const rowSpan = Math.max(1, Number(w.row_span || w.rowspan || w.merge_rows || 1) || 1);
+      if(widgetType === 'empty') return {type: 'empty', source: '', colSpan, rowSpan};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      return {type: 'empty', source: '', colSpan, rowSpan};
     });
 
   document.getElementById('dashboard-columns').value = String(parsedCols);
@@ -1385,7 +1424,10 @@ function syncDashboardToContent(){
     rows,
     widgets: cells.map((cell) => {
       if(!cell.source || cell.type === 'empty') return {type: 'empty'};
-      const mergedCell = cell.colSpan > 1 ? {col_span: cell.colSpan} : {};
+      const mergedCell = {
+        ...(cell.colSpan > 1 ? {col_span: cell.colSpan} : {}),
+        ...(cell.rowSpan > 1 ? {row_span: cell.rowSpan} : {})
+      };
       if(cell.type === 'video') return {type: 'video', url: cell.source, ...mergedCell};
       if(cell.type === 'image') return {type: 'image', url: cell.source, ...mergedCell};
       return {type: 'iframe', url: cell.source, ...mergedCell};
@@ -1523,12 +1565,13 @@ function updateWidgetPreview(){
     const cols = Math.max(1, Number(config.columns) || 1);
     const cells = (config.widgets || []).map((w) => {
       const colSpan = Math.max(1, Number(w?.col_span || w?.colspan || w?.column_span || w?.merge_cols || 1) || 1);
-      if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: '', colSpan};
+      const rowSpan = Math.max(1, Number(w?.row_span || w?.rowspan || w?.merge_rows || 1) || 1);
+      if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: '', colSpan, rowSpan};
       const widgetType = String(w.type || '').toLowerCase();
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan};
-      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan};
-      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan};
-      return {type: 'empty', source: '', colSpan};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      return {type: 'empty', source: '', colSpan, rowSpan};
     });
     const rows = Math.max(1, Number(config.rows) || Math.ceil(Math.max(cells.length, 1) / cols));
     const normalizedCells = normalizeDashboardRowItems(cells, cols, rows);
@@ -1538,7 +1581,10 @@ function updateWidgetPreview(){
     }
     const cellsHtml = normalizedCells.map((cell, index) => {
       if(isCoveredByPreviousSpan(normalizedCells, index, cols)) return '';
-      const spanStyle = cell.colSpan > 1 ? ` style="grid-column:span ${cell.colSpan};"` : '';
+      const spanRules = [];
+      if(cell.colSpan > 1) spanRules.push(`grid-column:span ${cell.colSpan}`);
+      if(cell.rowSpan > 1) spanRules.push(`grid-row:span ${cell.rowSpan}`);
+      const spanStyle = spanRules.length ? ` style="${spanRules.join(';')};"` : '';
       if(!cell.source || cell.type === 'empty') return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
       if(cell.type === 'video'){
         const videoUrl = normalizeMediaUrl(cell.source);
