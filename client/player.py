@@ -415,7 +415,7 @@ class BorderlessFullscreenPlayer:
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return {}
 
-        gdi_name_to_source_id = BorderlessFullscreenPlayer._windows_gdi_device_name_to_source_id_map()
+        gdi_name_to_display_id = BorderlessFullscreenPlayer._windows_gdi_device_name_to_display_id_map()
         enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
         get_monitor_info = getattr(ctypes.windll.user32, "GetMonitorInfoW", None)
         if not enum_display_monitors or not get_monitor_info:
@@ -461,10 +461,10 @@ class BorderlessFullscreenPlayer:
                 if get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
                     device_name = str(monitor_info.szDevice or "")
                     normalized_device_name = device_name.strip().upper()
-                    source_id = gdi_name_to_source_id.get(normalized_device_name)
+                    display_id = gdi_name_to_display_id.get(normalized_device_name)
                     windows_id: int | None = None
-                    if source_id is not None:
-                        windows_id = int(source_id)
+                    if display_id is not None:
+                        windows_id = int(display_id)
                     else:
                         match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
                         if match:
@@ -507,8 +507,8 @@ class BorderlessFullscreenPlayer:
         return id_to_index
 
     @staticmethod
-    def _windows_gdi_device_name_to_source_id_map() -> dict[str, int]:
-        """Map \\\\.\\DISPLAYx => Windows Display Settings source id (+1)."""
+    def _windows_gdi_device_name_to_display_id_map() -> dict[str, int]:
+        """Map \\\\.\\DISPLAYx => Windows Display Settings "Identify" ID."""
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return {}
 
@@ -594,9 +594,11 @@ class BorderlessFullscreenPlayer:
             return {}
 
         gdi_to_source_id: dict[str, int] = {}
+        gdi_to_target_id: dict[str, int] = {}
         seen_sources: set[tuple[int, int, int]] = set()
         for idx in range(int(path_count.value)):
             source_info = paths[idx].sourceInfo
+            target_info = paths[idx].targetInfo
             source_key = (
                 int(source_info.adapterId.HighPart),
                 int(source_info.adapterId.LowPart),
@@ -617,9 +619,13 @@ class BorderlessFullscreenPlayer:
             gdi_name = str(source_name.viewGdiDeviceName or "").strip().upper()
             if not gdi_name:
                 continue
-            # Windows "Identify" ekranındaki numara source id + 1 ile uyumludur.
+            # Bazı sistemlerde Windows "Ekranı tanımla" numarası source id + 1,
+            # bazılarında target id + 1 ile daha uyumlu olabiliyor.
+            gdi_to_target_id[gdi_name] = int(target_info.id) + 1
             gdi_to_source_id[gdi_name] = int(source_info.id) + 1
 
+        if gdi_to_target_id:
+            return gdi_to_target_id
         return gdi_to_source_id
 
     @staticmethod
