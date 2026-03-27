@@ -351,6 +351,58 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], [{"type": "video", "url": "https://cdn.example.com/video.mp4"}])
 
+    def test_build_engine_url_converts_iframe_html_url_to_embed(self):
+        html_doc = "<!doctype html><html><head><title>Dash</title></head><body><video src=\"/media/v.mp4\"></video></body></html>"
+
+        class _FakeHeaders:
+            @staticmethod
+            def get_content_charset(_default=None):
+                return "utf-8"
+
+        class _FakeResponse:
+            headers = _FakeHeaders()
+
+            @staticmethod
+            def read(_size=-1):
+                return html_doc.encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False), patch(
+            "client.widget_viewer.urlopen", return_value=_FakeResponse()
+        ):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "iframe", "url": "https://panel.local/dashboard.html"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"][0]["type"], "embed")
+        self.assertIn('<base href="https://panel.local/">', payload["widgets"][0]["html"])
+        self.assertEqual(payload["widgets"][0]["source_url"], "https://panel.local/dashboard.html")
+
+    def test_build_engine_url_keeps_iframe_when_inline_disabled(self):
+        with patch.dict(
+            "os.environ",
+            {"WIDGET_SINGLE_ENGINE": "1", "WIDGET_INLINE_HTML_FROM_IFRAME": "0"},
+            clear=False,
+        ):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "iframe", "url": "https://panel.local/dashboard.html"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://panel.local/dashboard.html"}])
+
 
 if __name__ == "__main__":
     unittest.main()

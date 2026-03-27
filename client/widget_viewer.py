@@ -8,6 +8,7 @@ import sys
 import threading
 import tempfile
 from pathlib import Path
+from urllib.request import urlopen
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 import re
 
@@ -27,6 +28,8 @@ WEATHER_WIDGET_HREF_PATTERN = re.compile(
     r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>',
     re.IGNORECASE,
 )
+HTML_HEAD_PATTERN = re.compile(r"<head[^>]*>", re.IGNORECASE)
+HTML_DOCTYPE_PATTERN = re.compile(r"<!doctype[^>]*>", re.IGNORECASE)
 
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
@@ -288,6 +291,64 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                 return source
         return _normalize_url(source)
 
+    def _should_inline_iframe_source(source: str) -> bool:
+        if os.getenv("WIDGET_INLINE_HTML_FROM_IFRAME", "1").strip().lower() not in {"1", "true", "yes", "on"}:
+            return False
+        parsed = urlsplit(source)
+        scheme = str(parsed.scheme or "").lower()
+        if scheme in {"http", "https", "file"}:
+            path_part = str(parsed.path or "").lower()
+            return path_part.endswith(".html") or path_part.endswith(".htm")
+        if not scheme:
+            lowered = source.lower()
+            return lowered.endswith(".html") or lowered.endswith(".htm")
+        return False
+
+    def _inject_base_href(html: str, base_href: str) -> str:
+        if "<base" in html.lower():
+            return html
+        base_tag = f'<base href="{base_href}">'
+        match = HTML_HEAD_PATTERN.search(html)
+        if match:
+            insert_at = match.end()
+            return f"{html[:insert_at]}{base_tag}{html[insert_at:]}"
+        doctype_match = HTML_DOCTYPE_PATTERN.search(html)
+        if doctype_match:
+            insert_at = doctype_match.end()
+            return f"{html[:insert_at]}<head>{base_tag}</head>{html[insert_at:]}"
+        return f"<head>{base_tag}</head>{html}"
+
+    def _read_embed_html_from_url(source: str) -> str | None:
+        try:
+            normalized_source = _normalize_url(source)
+        except Exception:
+            normalized_source = str(source or "").strip()
+        if not normalized_source:
+            return None
+        parsed = urlsplit(normalized_source)
+        scheme = str(parsed.scheme or "").lower()
+        content = ""
+        try:
+            if scheme in {"http", "https", "file"}:
+                with urlopen(normalized_source, timeout=8) as response:
+                    charset = getattr(response.headers, "get_content_charset", lambda _d=None: None)(None) or "utf-8"
+                    body = response.read(1024 * 1024)
+                    content = body.decode(charset, errors="replace")
+            else:
+                candidate = Path(source).expanduser()
+                if not candidate.exists():
+                    return None
+                content = candidate.read_text(encoding="utf-8")
+        except Exception as exc:
+            _debug_log(f"_normalize_widget_payload inline iframe read failed | source={source} error={exc}")
+            return None
+
+        if not str(content).strip():
+            return None
+        base_path = parsed.path or ""
+        base_url = urlunsplit((parsed.scheme, parsed.netloc, base_path.rsplit("/", 1)[0] + "/", "", ""))
+        return _inject_base_href(content, base_url)
+
     if isinstance(widgets, list):
         for widget in widgets:
             if not isinstance(widget, dict):
@@ -312,8 +373,18 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                         normalized_widget["html"] = str(raw_url)
                         normalized_widget.pop("url", None)
                 elif str(raw_url).strip():
+                    normalized_url = _normalize_url(str(raw_url))
+                    if _should_inline_iframe_source(normalized_url):
+                        embed_html = _read_embed_html_from_url(normalized_url)
+                        if embed_html:
+                            normalized_widget["type"] = "embed"
+                            normalized_widget["html"] = embed_html
+                            normalized_widget.pop("url", None)
+                            normalized_widget["source_url"] = normalized_url
+                            normalized_widgets.append(normalized_widget)
+                            continue
                     normalized_widget["type"] = "iframe"
-                    normalized_widget["url"] = _normalize_url(str(raw_url))
+                    normalized_widget["url"] = normalized_url
                 else:
                     normalized_widget["type"] = "empty"
                     normalized_widget.pop("url", None)
