@@ -139,6 +139,21 @@
       return fallback;
     }
 
+    function isCellCoveredByColSpan(widgets, index, cols) {
+      if (!Array.isArray(widgets) || index <= 0 || cols <= 1) return false;
+      const colIndex = index % cols;
+      for (let offset = 1; offset <= colIndex; offset += 1) {
+        const leftIndex = index - offset;
+        const leftWidget = widgets[leftIndex];
+        if (!leftWidget || typeof leftWidget !== "object") continue;
+        const leftSpan = parseSpanValue(leftWidget, ["col_span", "colspan", "column_span", "merge_cols"], 1);
+        if (leftSpan > offset) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     function buildIframeFallback(url) {
       const fallback = document.createElement("div");
       fallback.className = "iframe-fallback";
@@ -464,6 +479,9 @@
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
       (config.widgets || []).forEach((w, index) => {
+        if (isCellCoveredByColSpan(config.widgets, index, cols)) {
+          return;
+        }
         const colIndex = index % cols;
         const maxColSpan = Math.max(1, cols - colIndex);
         const colSpan = Math.max(1, Math.min(maxColSpan, parseSpanValue(w, ["col_span", "colspan", "column_span", "merge_cols"], 1)));
