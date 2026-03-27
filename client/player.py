@@ -384,7 +384,11 @@ class BorderlessFullscreenPlayer:
         except Exception:
             return []
 
-        monitor_rects.sort(key=lambda item: (0 if item[4] else 1, item[1], item[0]))
+        # Windows ekran yerleşimi ile aynı görsel sırayı korumak için
+        # monitörleri önce sol (x), sonra üst (y) koordinata göre sırala.
+        # Primary monitörü başa zorlamak, farklı dikey hizalamalarda
+        # Windows'taki ID yerleşimi ile uyumsuz index üretimine yol açabiliyor.
+        monitor_rects.sort(key=lambda item: (item[0], item[1], 0 if item[4] else 1))
 
         unique_monitor_rects: list[tuple[int, int, int, int]] = []
         seen_rects: set[tuple[int, int, int, int]] = set()
@@ -476,7 +480,10 @@ class BorderlessFullscreenPlayer:
         if not monitor_entries:
             return {}
 
-        monitor_entries.sort(key=lambda item: (0 if item[5] else 1, item[1], item[0]))
+        # Eşleme, _windows_connected_monitor_bounds ile aynı geometri bazlı
+        # sırayı kullanmalı; aksi halde DISPLAY2/DISPLAY3 gibi ID'ler
+        # dikey hizası farklı monitörlerde yer değiştirmiş görünebiliyor.
+        monitor_entries.sort(key=lambda item: (item[0], item[1], 0 if item[5] else 1))
 
         id_to_index: dict[int, int] = {}
         seen_rects: set[tuple[int, int, int, int]] = set()
