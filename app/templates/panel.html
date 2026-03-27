@@ -19,16 +19,50 @@
     .playlist-item.active { outline: 2px solid #0ea5e9; }
     .mini-card { border: 1px solid #e2e8f0; border-radius: 12px; }
     .mini-card .card-body { padding: 1rem; }
+    .dashboard-iframe-list-wrap {
+      overflow-x: auto;
+      padding-bottom: .25rem;
+    }
     .dashboard-iframe-row {
       display: grid;
-      gap: .5rem;
-      grid-template-columns: repeat(1, minmax(0, 1fr));
+      gap: .6rem;
+      grid-template-columns: repeat(1, minmax(220px, 1fr));
+      min-width: 100%;
+      width: max-content;
+    }
+    .dashboard-iframe-item {
+      border: 1px solid #dbe3ee;
+      border-radius: .65rem;
+      background: #f8fafc;
+      padding: .5rem;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .45rem;
+      align-items: center;
+      min-width: 220px;
+    }
+    .dashboard-iframe-item .dashboard-iframe-label {
+      grid-column: span 2;
+      font-weight: 600;
+      background: #e2e8f0;
+      border-radius: .45rem;
+      padding: .2rem .5rem;
+    }
+    .dashboard-iframe-item .dashboard-widget-source {
+      grid-column: span 2;
+    }
+    .dashboard-iframe-item .dashboard-cell-source-picker {
+      grid-column: span 2;
+    }
+    .dashboard-iframe-item .dashboard-clear-btn {
+      grid-column: span 2;
+      width: 100%;
     }
     .dashboard-cell-source-picker { min-width: 150px; }
-    .dashboard-cell-merge { max-width: 140px; }
+    .dashboard-cell-merge { min-width: 0; }
     @media (min-width: 992px) {
       .dashboard-iframe-row {
-        grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(0, 1fr));
+        grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(240px, 1fr));
       }
     }
     .widget-preview-stage {
@@ -241,7 +275,10 @@
                           <input id="dashboard-rows" type="number" min="1" value="1" class="form-control" onchange="reflowDashboardIframeRows()" />
                         </div>
                       </div>
-                      <div id="dashboard-iframe-list" class="d-flex flex-column gap-2"></div>
+                      <div class="dashboard-iframe-list-wrap">
+                        <div id="dashboard-iframe-list" class="d-flex flex-column gap-2"></div>
+                      </div>
+                      <p class="text-secondary small mb-0 mt-2">Çok kolonlu düzenlerde hücreleri sıkıştırmak yerine yatay kaydırarak düzenleyebilirsiniz.</p>
                     </div>
                   </div>
                 </div>
@@ -1071,8 +1108,8 @@ function buildDashboardIframeCell(cell = {type: 'empty', source: '', colSpan: 1}
     return `<option value="${value}"${value === normalized.colSpan ? ' selected' : ''}>Birleşim x${value}</option>`;
   }).join('');
   const wrapper = document.createElement('div');
-  wrapper.className = 'dashboard-iframe-item input-group input-group-sm';
-  wrapper.innerHTML = `<span class="input-group-text dashboard-iframe-label">Hücre</span>
+  wrapper.className = 'dashboard-iframe-item';
+  wrapper.innerHTML = `<span class="dashboard-iframe-label">Hücre</span>
     <select class="form-select dashboard-widget-type" onchange="onDashboardCellTypeChange(this)">
       <option value="empty"${normalized.type === 'empty' ? ' selected' : ''}>Boş</option>
       <option value="iframe"${normalized.type === 'iframe' || normalized.type === 'url' ? ' selected' : ''}>Iframe</option>
@@ -1081,7 +1118,7 @@ function buildDashboardIframeCell(cell = {type: 'empty', source: '', colSpan: 1}
     <input class="form-control dashboard-widget-source" placeholder="${normalized.type === 'video' ? '/media/video.mp4 veya https://...' : 'https://...'}" value="${escapeHtml(sourceValue)}" oninput="syncDashboardToContent()" />
     <select class="form-select dashboard-widget-merge dashboard-cell-merge" onchange="onDashboardCellMergeChange(this)">${mergeOptions}</select>
     <select class="form-select dashboard-cell-source-picker ${normalized.type === 'video' ? '' : 'd-none'}" onchange="pickDashboardVideoSource(this)">${dashboardVideoOptionsHtml(sourceValue)}</select>
-    <button class="btn btn-outline-danger" type="button" onclick="removeDashboardIframe(this)">Temizle</button>`;
+    <button class="btn btn-outline-danger dashboard-clear-btn" type="button" onclick="removeDashboardIframe(this)">Temizle</button>`;
   return wrapper;
 }
 
