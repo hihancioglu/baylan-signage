@@ -3546,6 +3546,10 @@ def run_state_cycle():
     elif low_idle_confirmed:
         activity_reason = "low_idle"
     user_activity_detected = activity_reason != "none"
+    widget_user_activity_detected = (
+        activity_drop_confirmed
+        or (activity_reason == "low_idle" and not WIDGET_RETURN_REQUIRES_ERP_FOREGROUND)
+    )
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
         f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
@@ -3613,7 +3617,10 @@ def run_state_cycle():
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
     erp_is_foreground = None
     foreground_title = ""
-    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
+    activity_detected_for_item = (
+        widget_user_activity_detected if active_item_type == "widget" else user_activity_detected
+    )
+    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and activity_detected_for_item:
         # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
         # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
         # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
@@ -3628,7 +3635,7 @@ def run_state_cycle():
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
-        and user_activity_detected
+        and activity_detected_for_item
     ):
         if active_item_type == "widget":
             if erp_is_foreground is None:
