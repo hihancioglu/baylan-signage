@@ -3,12 +3,13 @@ import ctypes
 import ipaddress
 import json
 import logging
+import mimetypes
 import os
 import sys
 import threading
 import tempfile
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 import re
 
@@ -360,6 +361,34 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
         parsed = urlsplit(text)
         candidate = str(parsed.path or text).lower()
         if not MEDIA_EXTENSION_PATTERN.search(candidate):
+            guessed_type = None
+            parsed_scheme = str(parsed.scheme or "").lower()
+
+            if parsed_scheme in {"http", "https"}:
+                try:
+                    request = Request(text, method="HEAD")
+                    with urlopen(request, timeout=5) as response:
+                        guessed_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+                except Exception as exc:
+                    _debug_log(f"_detect_media_type_from_url head_failed | source={text} error={exc}")
+            elif parsed_scheme == "file":
+                try:
+                    file_guess, _encoding = mimetypes.guess_type(unquote(parsed.path or ""))
+                    guessed_type = str(file_guess or "").strip().lower()
+                except Exception:
+                    guessed_type = None
+            else:
+                try:
+                    local_guess, _encoding = mimetypes.guess_type(text)
+                    guessed_type = str(local_guess or "").strip().lower()
+                except Exception:
+                    guessed_type = None
+
+            guessed_type = str(guessed_type or "").strip().lower()
+            if guessed_type.startswith("video/"):
+                return "video"
+            if guessed_type.startswith("image/"):
+                return "image"
             return None
         if re.search(r"\.(jpg|jpeg|png|gif|webp|bmp|svg)(?:$|[?#])", candidate):
             return "image"

@@ -258,6 +258,52 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn(remapped_engine.resolve().as_uri(), result)
         self.assertIn("config_b64=abc", result)
 
+    def test_build_engine_url_infers_video_widget_from_iframe_without_extension_via_content_type(self):
+        class _FakeResponse:
+            def __init__(self):
+                self.headers = {"Content-Type": "video/mp4"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        widget_config = {"widgets": [{"type": "iframe", "url": "https://media.example.com/stream?id=1"}]}
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False), patch(
+            "client.widget_viewer.urlopen",
+            return_value=_FakeResponse(),
+        ):
+            result = widget_viewer._build_engine_url(widget_url=None, widget_config=widget_config)
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"][0]["type"], "video")
+
+    def test_build_engine_url_keeps_iframe_when_content_type_is_text_html(self):
+        class _FakeResponse:
+            def __init__(self):
+                self.headers = {"Content-Type": "text/html; charset=utf-8"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        widget_config = {"widgets": [{"type": "iframe", "url": "https://dashboard.example.com/stream"}]}
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False), patch(
+            "client.widget_viewer.urlopen",
+            return_value=_FakeResponse(),
+        ):
+            result = widget_viewer._build_engine_url(widget_url=None, widget_config=widget_config)
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"][0]["type"], "iframe")
+
     def test_normalize_url_uses_http_for_localhost(self):
         self.assertEqual(widget_viewer._normalize_url("localhost:5080/panel"), "http://localhost:5080/panel")
 
