@@ -458,7 +458,19 @@ def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
     except Exception:
         return []
 
-    return monitor_bounds
+    # Oyuncu tarafındaki sıralamayla uyumlu kalarak monitör indexlerini
+    # Windows yerleşimine göre soldan-sağa (x), sonra yukarıdan-aşağı (y)
+    # sıralıyoruz. Böylece --monitor index'i ile hedef ekran eşleşir.
+    monitor_bounds.sort(key=lambda item: (item[0], item[1]))
+
+    unique_bounds: list[tuple[int, int, int, int]] = []
+    seen_bounds: set[tuple[int, int, int, int]] = set()
+    for bounds in monitor_bounds:
+        if bounds in seen_bounds:
+            continue
+        seen_bounds.add(bounds)
+        unique_bounds.append(bounds)
+    return unique_bounds
 
 
 def _apply_cef_monitor_bounds(browser, monitor_bounds: tuple[int, int, int, int] | None) -> None:
