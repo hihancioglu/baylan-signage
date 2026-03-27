@@ -373,6 +373,35 @@ def _dashboard_widget_payload(content: str) -> dict | None:
         text = str(value or "").strip().lower()
         return bool(text) and text.startswith("<") and ">" in text
 
+    def _extract_span(widget_value: object, *keys: str) -> int | None:
+        for key in keys:
+            value = widget_value.get(key) if isinstance(widget_value, dict) else None
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                parsed = int(value)
+            elif isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = int(raw)
+                except ValueError:
+                    continue
+            else:
+                continue
+            if parsed > 1:
+                return parsed
+        return None
+
+    def _apply_widget_span(widget_obj: dict, source_widget: dict) -> None:
+        col_span = _extract_span(source_widget, "col_span", "colspan", "column_span", "merge_cols")
+        if col_span:
+            widget_obj["col_span"] = col_span
+        row_span = _extract_span(source_widget, "row_span", "rowspan", "merge_rows")
+        if row_span:
+            widget_obj["row_span"] = row_span
+
     for widget in widgets:
         if isinstance(widget, str):
             url = widget.strip()
@@ -396,9 +425,13 @@ def _dashboard_widget_payload(content: str) -> dict | None:
                 normalized_widgets.append({"type": "empty"})
                 continue
             if _looks_like_embed_html(url):
-                normalized_widgets.append({"type": "embed", "html": url})
+                normalized_widget = {"type": "embed", "html": url}
+                _apply_widget_span(normalized_widget, widget)
+                normalized_widgets.append(normalized_widget)
                 continue
-            normalized_widgets.append({"type": "iframe", "url": url})
+            normalized_widget = {"type": "iframe", "url": url}
+            _apply_widget_span(normalized_widget, widget)
+            normalized_widgets.append(normalized_widget)
             continue
 
         if widget_type in {"video", "image"}:
@@ -418,6 +451,7 @@ def _dashboard_widget_payload(content: str) -> dict | None:
                 value = widget.get(num_key)
                 if isinstance(value, (int, float)):
                     normalized_widget[num_key] = value
+            _apply_widget_span(normalized_widget, widget)
             normalized_widgets.append(normalized_widget)
             continue
 
