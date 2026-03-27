@@ -13,6 +13,7 @@ import time
 import threading
 import re
 import logging
+import traceback
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
@@ -2003,6 +2004,41 @@ class BorderlessFullscreenPlayer:
             _debug_log(f"media_launch_clone_started | monitor_index={monitor_index} command={monitor_command}")
         return processes
 
+    @staticmethod
+    def _probe_media_file(media_path: str) -> str:
+        try:
+            media_file = Path(media_path)
+            stats = media_file.stat()
+            size_bytes = int(stats.st_size)
+            modified_at = int(stats.st_mtime)
+            signature = "n/a"
+            if size_bytes > 0:
+                hasher = hashlib.sha256()
+                with media_file.open("rb") as handle:
+                    hasher.update(handle.read(64 * 1024))
+                signature = hasher.hexdigest()[:16]
+            return (
+                "media_probe | "
+                f"path={media_path} size_bytes={size_bytes} mtime_epoch={modified_at} "
+                f"head_sha256={signature}"
+            )
+        except Exception as exc:
+            return f"media_probe_failed | path={media_path} error={exc}"
+
+    @staticmethod
+    def _inject_mpv_debug_log(command: list[str], media_path: str) -> tuple[list[str], str | None]:
+        if not command or not BorderlessFullscreenPlayer._is_mpv_command(command):
+            return list(command), None
+
+        timestamp = int(time.time() * 1000)
+        media_stem = Path(media_path).stem or "media"
+        safe_media_stem = re.sub(r"[^a-zA-Z0-9_.-]", "_", media_stem)[:48]
+        log_file = Path(tempfile.gettempdir()) / f"baylan-mpv-{safe_media_stem}-{timestamp}.log"
+        debug_command = list(command)
+        debug_command.insert(1, f"--log-file={log_file}")
+        debug_command.insert(2, "--msg-level=all=v")
+        return debug_command, str(log_file)
+
     def play_widget_blocking(
         self,
         widget_source: str,
@@ -2218,6 +2254,8 @@ class BorderlessFullscreenPlayer:
             f"media_path={media_path} image_duration_sec={image_duration_sec} start_position_sec={start_position_sec} "
             f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors}"
         )
+        if DEBUG_MODE_ENABLED:
+            _debug_log(self._probe_media_file(media_path))
         if not Path(media_path).exists():
             self._last_interrupted = False
             _safe_print(f"⚠️ medya bulunamadı: {media_path}")
@@ -2261,6 +2299,11 @@ class BorderlessFullscreenPlayer:
             )
             if not command:
                 return False
+
+            if DEBUG_MODE_ENABLED:
+                command, mpv_debug_log_path = self._inject_mpv_debug_log(command, media_path)
+                if mpv_debug_log_path:
+                    _debug_log(f"play_blocking mpv_debug_log | path={mpv_debug_log_path}")
 
             if not self._resolve_executable(command):
                 _safe_print(f"⚠️ player executable bulunamadı: {command[0] if command else 'unknown'}")
@@ -2312,6 +2355,11 @@ class BorderlessFullscreenPlayer:
                 "play_blocking alternate command | "
                 f"failed_returncode={process.returncode} alternate={alternate_command}"
             )
+
+            if DEBUG_MODE_ENABLED:
+                alternate_command, mpv_debug_log_path = self._inject_mpv_debug_log(alternate_command, media_path)
+                if mpv_debug_log_path:
+                    _debug_log(f"play_blocking alternate mpv_debug_log | path={mpv_debug_log_path}")
 
             self._stop_requested = False
             processes = self._launch_media_processes(
@@ -2445,7 +2493,16 @@ class BorderlessFullscreenPlayer:
                 Path(playlist_file).unlink(missing_ok=True)
 
     def stop(self, stop_widget_runtime: bool | None = None):
-        _debug_log(f"stop called | stop_widget_runtime={stop_widget_runtime}")
+        caller_frame = traceback.extract_stack(limit=3)[-2] if DEBUG_MODE_ENABLED else None
+        caller_hint = ""
+        if caller_frame:
+            caller_hint = (
+                f" caller={Path(caller_frame.filename).name}:{caller_frame.lineno}:{caller_frame.name}"
+            )
+        _debug_log(
+            f"stop called | stop_widget_runtime={stop_widget_runtime} "
+            f"thread={threading.current_thread().name}{caller_hint}"
+        )
         self._stop_requested = True
 
         if stop_widget_runtime is None:
