@@ -43,9 +43,32 @@
       if (!debugEnabled) return;
       if (typeof extra === "undefined") {
         console.log(`[widget_engine] ${message}`);
+        if (window.pywebview && window.pywebview.api) {
+          try {
+            if (typeof window.pywebview.api.debug_log === "function") {
+              window.pywebview.api.debug_log(message, "");
+            } else if (typeof window.pywebview.api.debugLog === "function") {
+              window.pywebview.api.debugLog(message, "");
+            }
+          } catch (_err) {
+            // noop
+          }
+        }
         return;
       }
       console.log(`[widget_engine] ${message}`, extra);
+      if (window.pywebview && window.pywebview.api) {
+        try {
+          const serialized = typeof extra === "string" ? extra : JSON.stringify(extra);
+          if (typeof window.pywebview.api.debug_log === "function") {
+            window.pywebview.api.debug_log(message, serialized);
+          } else if (typeof window.pywebview.api.debugLog === "function") {
+            window.pywebview.api.debugLog(message, serialized);
+          }
+        } catch (_err) {
+          // noop
+        }
+      }
     }
 
     function parseConfig() {
@@ -224,7 +247,7 @@
     let lastRenderedSignature = null;
     let runtimeControlActive = false;
 
-    function createMediaWidget(w) {
+    function createMediaWidget(w, widgetIndex = -1) {
       const wrapper = document.createElement("div");
       wrapper.className = "widget media-widget";
       const mediaType = String(w.type || "").toLowerCase();
@@ -253,6 +276,7 @@
       let lastProgressAt = Date.now();
       let lastKnownTime = 0;
       debugLog("video widget init", {
+        widgetIndex,
         url: video.src,
         autoplay: video.autoplay,
         muted: video.muted,
@@ -272,7 +296,7 @@
         if (recoveryCount >= Math.max(0, maxRecoveries)) return;
 
         recoveryCount += 1;
-        debugLog("video recoverFromStall", { url: video.currentSrc || video.src, recoveryCount });
+        debugLog("video recoverFromStall", { widgetIndex, url: video.currentSrc || video.src, recoveryCount });
         const resumeTime = Math.max(0, Number.isFinite(video.currentTime) ? video.currentTime : lastKnownTime);
         const currentSrc = String(video.currentSrc || video.src || "");
         if (!currentSrc) return;
@@ -336,21 +360,28 @@
       video.addEventListener("error", recoverFromStall);
       video.addEventListener("error", () => {
         debugLog("video error", {
+          widgetIndex,
           url: video.currentSrc || video.src,
           code: video.error ? video.error.code : null,
           networkState: video.networkState,
           readyState: video.readyState,
         });
       });
-      video.addEventListener("playing", () => debugLog("video playing", { url: video.currentSrc || video.src }));
-      video.addEventListener("pause", () => debugLog("video pause", { url: video.currentSrc || video.src }));
-      video.addEventListener("canplay", () => debugLog("video canplay", { url: video.currentSrc || video.src }));
+      video.addEventListener("playing", () => debugLog("video playing", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("pause", () => debugLog("video pause", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("canplay", () => debugLog("video canplay", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("loadedmetadata", () => {
         debugLog("video loadedmetadata", {
+          widgetIndex,
           url: video.currentSrc || video.src,
           duration: Number.isFinite(video.duration) ? video.duration : null,
         });
       });
+      video.addEventListener("loadstart", () => debugLog("video loadstart", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("loadeddata", () => debugLog("video loadeddata", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("suspend", () => debugLog("video suspend", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("stalled", () => debugLog("video stalled", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("waiting", () => debugLog("video waiting", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("ended", () => window.clearInterval(stallMonitor), { once: true });
       video.addEventListener("emptied", () => window.clearInterval(stallMonitor), { once: true });
 
@@ -418,7 +449,7 @@
         widgetCount === 1 &&
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
-      (config.widgets || []).forEach((w) => {
+      (config.widgets || []).forEach((w, index) => {
         const widgetType = String((w && w.type) || "").toLowerCase();
         if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
@@ -467,7 +498,7 @@
           return;
         }
         if (widgetType === "video" || widgetType === "image") {
-          container.appendChild(createMediaWidget(w));
+          container.appendChild(createMediaWidget(w, index));
           return;
         }
         if (widgetType === "empty") {
