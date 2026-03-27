@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
@@ -271,6 +272,54 @@ class MediaManager:
         item_type = str(item.get("item_type") or item.get("media_type") or "").strip().lower()
         return item_type or "media"
 
+    @staticmethod
+    def _extract_widget_media_sources(widget_payload: object) -> list[str]:
+        if not isinstance(widget_payload, dict):
+            return []
+        widgets = widget_payload.get("widgets")
+        if not isinstance(widgets, list):
+            return []
+
+        sources: list[str] = []
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type not in {"video", "image"}:
+                continue
+            source = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+            if source:
+                sources.append(source)
+        return sources
+
+    def _localize_widget_media_payload(
+        self,
+        widget_payload: object,
+        signature_seed: str | None,
+        ensure_local_url,
+    ) -> object:
+        if not isinstance(widget_payload, dict):
+            return widget_payload
+
+        localized_payload = deepcopy(widget_payload)
+        widgets = localized_payload.get("widgets")
+        if not isinstance(widgets, list):
+            return localized_payload
+
+        for index, widget in enumerate(widgets):
+            if not isinstance(widget, dict):
+                continue
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type not in {"video", "image"}:
+                continue
+            source = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+            if not source:
+                continue
+            local_token = self._sha256_text(f"{signature_seed or 'widget'}:{index}:{source}")
+            widget["url"] = ensure_local_url(source, local_token)
+
+        return localized_payload
+
     def sync_playlist(
         self,
         playlist_items: list[str],
@@ -307,6 +356,7 @@ class MediaManager:
             normalized_source = self._normalize_source(source)
             item_type = self._normalize_item_type(raw_item if isinstance(raw_item, dict) else None)
             widget_requires_download = bool((raw_item or {}).get("widget_requires_download")) if isinstance(raw_item, dict) else False
+            widget_payload = (raw_item or {}).get("widget_payload") if isinstance(raw_item, dict) else None
             signature = media_signatures.get(source) or media_signatures.get(normalized_source)
             should_download = self._is_url(normalized_source) and (
                 item_type != "widget" or widget_requires_download
@@ -315,6 +365,17 @@ class MediaManager:
                 target = self._url_cache_target(normalized_source, signature)
                 if not target.exists():
                     downloadable_items.append(normalized_source)
+            if item_type == "widget":
+                for widget_media_source in self._extract_widget_media_sources(widget_payload):
+                    normalized_widget_media_source = self._normalize_source(widget_media_source)
+                    if not self._is_url(normalized_widget_media_source):
+                        continue
+                    widget_signature = self._sha256_text(
+                        f"{signature or normalized_source or 'widget'}:{normalized_widget_media_source}"
+                    )
+                    widget_target = self._url_cache_target(normalized_widget_media_source, widget_signature)
+                    if not widget_target.exists():
+                        downloadable_items.append(normalized_widget_media_source)
 
         downloaded_count = 0
         total_download_count = len(downloadable_items)
@@ -355,6 +416,25 @@ class MediaManager:
                 item_type != "widget" or widget_requires_download
             )
 
+            def ensure_local_url(raw_url: str, local_signature: str | None = None) -> str:
+                normalized_url = self._normalize_source(raw_url)
+                if not self._is_url(normalized_url):
+                    return normalized_url
+                target = self._url_cache_target(normalized_url, local_signature)
+                nonlocal downloaded_count
+                if not target.exists():
+                    report_progress("downloading", normalized_url)
+                    self._download_url(normalized_url, target)
+                    downloaded_count += 1
+                    report_progress("downloaded", normalized_url)
+                return str(target)
+
+            localized_widget_payload = self._localize_widget_media_payload(
+                widget_payload,
+                signature_seed=(signature or normalized_source),
+                ensure_local_url=ensure_local_url,
+            )
+
             try:
                 if item_type == "widget" and not normalized_source:
                     local_entry = {
@@ -365,7 +445,7 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
-                        "widget_payload": widget_payload,
+                        "widget_payload": localized_widget_payload,
                         "widget_url": widget_url,
                         "columns": columns,
                     }
@@ -381,7 +461,7 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
-                            "widget_payload": widget_payload,
+                            "widget_payload": localized_widget_payload,
                             "widget_url": widget_url,
                             "columns": columns,
                         }
@@ -405,7 +485,7 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
-                        "widget_payload": widget_payload,
+                        "widget_payload": localized_widget_payload,
                         "widget_url": widget_url,
                         "columns": columns,
                     }
@@ -421,7 +501,7 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
-                            "widget_payload": widget_payload,
+                            "widget_payload": localized_widget_payload,
                             "widget_url": widget_url,
                             "columns": columns,
                         }
@@ -435,7 +515,7 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
-                        "widget_payload": widget_payload,
+                        "widget_payload": localized_widget_payload,
                         "widget_url": widget_url,
                         "columns": columns,
                     }
@@ -451,7 +531,7 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
-                            "widget_payload": widget_payload,
+                            "widget_payload": localized_widget_payload,
                             "widget_url": widget_url,
                             "columns": columns,
                         }
@@ -471,7 +551,7 @@ class MediaManager:
                         "item_type": item_type,
                         "display_name": display_name,
                         "widget_requires_download": widget_requires_download,
-                        "widget_payload": widget_payload,
+                        "widget_payload": localized_widget_payload,
                         "widget_url": widget_url,
                         "columns": columns,
                     }
@@ -487,7 +567,7 @@ class MediaManager:
                             "item_type": item_type,
                             "display_name": display_name,
                             "widget_requires_download": widget_requires_download,
-                            "widget_payload": widget_payload,
+                            "widget_payload": localized_widget_payload,
                             "widget_url": widget_url,
                             "columns": columns,
                         }
