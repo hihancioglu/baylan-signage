@@ -758,6 +758,14 @@ class BorderlessFullscreenPlayer:
                 kwargs["creationflags"] = creation_flags
             env = os.environ.copy()
             env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            if not str(env.get("WIDGET_VIEWER_LOG_PATH", "") or "").strip():
+                executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+                env["WIDGET_VIEWER_LOG_PATH"] = os.path.join(
+                    executable_dir,
+                    "client",
+                    "logs",
+                    "widget_viewer.log",
+                )
             kwargs["env"] = env
         return kwargs
 

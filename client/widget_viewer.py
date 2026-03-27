@@ -2,9 +2,11 @@ import base64
 import ctypes
 import ipaddress
 import json
+import logging
 import os
 import sys
 import threading
+import tempfile
 from pathlib import Path
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 import re
@@ -28,6 +30,51 @@ WEATHER_WIDGET_HREF_PATTERN = re.compile(
 
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
+WIDGET_VIEWER_LOG_NAME = "widget_viewer.log"
+
+
+def _resolve_widget_viewer_log_path() -> Path:
+    explicit = str(os.getenv("WIDGET_VIEWER_LOG_PATH", "") or "").strip()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit))
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates.append(executable_dir / "client" / "logs" / WIDGET_VIEWER_LOG_NAME)
+    candidates.append(executable_dir / "logs" / WIDGET_VIEWER_LOG_NAME)
+    candidates.append(Path(tempfile.gettempdir()) / "baylan-client" / WIDGET_VIEWER_LOG_NAME)
+
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            with open(candidate, "a", encoding="utf-8"):
+                pass
+            return candidate
+        except OSError:
+            continue
+
+    return Path(tempfile.gettempdir()) / WIDGET_VIEWER_LOG_NAME
+
+
+def _setup_widget_viewer_logger() -> logging.Logger:
+    logger = logging.getLogger("baylan.client.widget_viewer")
+    logger.setLevel(logging.DEBUG if DEBUG_MODE_ENABLED else logging.INFO)
+    logger.propagate = False
+    if logger.handlers:
+        return logger
+
+    log_path = _resolve_widget_viewer_log_path()
+    try:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(threadName)s | %(message)s"))
+        logger.addHandler(handler)
+        logger.info("widget_viewer log path: %s", log_path)
+    except OSError:
+        pass
+    return logger
+
+
+WIDGET_VIEWER_LOGGER = _setup_widget_viewer_logger()
 
 
 def _debug_log(message: str) -> None:
@@ -52,8 +99,14 @@ class _WidgetEngineDebugBridge:
 
 
 def _safe_print(message: str) -> None:
+    text = str(message)
+    if text:
+        try:
+            WIDGET_VIEWER_LOGGER.info(text)
+        except Exception:
+            pass
     try:
-        print(message)
+        print(text)
     except OSError:
         pass
 
