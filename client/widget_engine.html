@@ -212,8 +212,9 @@
     function createMediaWidget(w) {
       const wrapper = document.createElement("div");
       wrapper.className = "widget media-widget";
+      const mediaType = String(w.type || "").toLowerCase();
 
-      if (w.type === "image") {
+      if (mediaType === "image") {
         const image = document.createElement("img");
         image.src = String(w.url || "");
         image.alt = "Signage image";
@@ -228,7 +229,7 @@
       video.controls = w.controls === true;
       video.playsInline = true;
       video.loop = w.loop === true;
-      video.preload = String(w.preload || "metadata");
+      video.preload = String(w.preload || "auto");
       video.disablePictureInPicture = true;
 
       const stallTimeoutMs = Number(w.stall_timeout_ms || 10000);
@@ -313,6 +314,22 @@
       video.addEventListener("ended", () => window.clearInterval(stallMonitor), { once: true });
       video.addEventListener("emptied", () => window.clearInterval(stallMonitor), { once: true });
 
+      const requestPlayback = () => {
+        try {
+          const maybePromise = video.play();
+          if (maybePromise && typeof maybePromise.catch === "function") {
+            maybePromise.catch(() => {});
+          }
+        } catch (_err) {
+          // noop
+        }
+      };
+      video.addEventListener("loadedmetadata", requestPlayback);
+      video.addEventListener("canplay", requestPlayback);
+      if (video.autoplay) {
+        requestPlayback();
+      }
+
       const startPositionSec = Number(w.start_position_sec || 0);
       if (Number.isFinite(startPositionSec) && startPositionSec > 0) {
         const seekToStart = () => {
@@ -362,7 +379,8 @@
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
       (config.widgets || []).forEach((w) => {
-        if (w.type === "iframe") {
+        const widgetType = String((w && w.type) || "").toLowerCase();
+        if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
           wrapper.className = "widget iframe-widget";
 
@@ -382,14 +400,14 @@
           container.appendChild(wrapper);
           return;
         }
-        if (w.type === "card") {
+        if (widgetType === "card") {
           const card = document.createElement("div");
           card.className = "widget card";
           card.innerHTML = w.html || "";
           container.appendChild(card);
           return;
         }
-        if (w.type === "embed") {
+        if (widgetType === "embed") {
           const embed = document.createElement("div");
           embed.className = "widget card";
           embed.innerHTML = w.html || "";
@@ -406,11 +424,11 @@
           container.appendChild(embed);
           return;
         }
-        if (w.type === "video" || w.type === "image") {
+        if (widgetType === "video" || widgetType === "image") {
           container.appendChild(createMediaWidget(w));
           return;
         }
-        if (w.type === "empty") {
+        if (widgetType === "empty") {
           const empty = document.createElement("div");
           empty.className = "widget empty-cell";
           container.appendChild(empty);
