@@ -25,6 +25,7 @@
       grid-template-columns: repeat(1, minmax(0, 1fr));
     }
     .dashboard-cell-source-picker { min-width: 150px; }
+    .dashboard-cell-merge { max-width: 140px; }
     @media (min-width: 992px) {
       .dashboard-iframe-row {
         grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(0, 1fr));
@@ -1021,7 +1022,8 @@ function dashboardRows(){
 function collectDashboardCellData(){
   return Array.from(document.querySelectorAll('.dashboard-iframe-item')).map((item) => ({
     type: String(item.querySelector('.dashboard-widget-type')?.value || 'empty').trim().toLowerCase(),
-    source: String(item.querySelector('.dashboard-widget-source')?.value || '').trim()
+    source: String(item.querySelector('.dashboard-widget-source')?.value || '').trim(),
+    colSpan: Math.max(1, Number(item.querySelector('.dashboard-widget-merge')?.value || 1) || 1)
   }));
 }
 
@@ -1030,10 +1032,14 @@ function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
   const totalCells = Math.max(cols, rows * cols);
   return Array.from({length: totalCells}, (_, index) => {
     const cell = values[index];
-    if(!cell || typeof cell !== 'object') return {type: 'empty', source: ''};
+    if(!cell || typeof cell !== 'object') return {type: 'empty', source: '', colSpan: 1};
     const rawType = String(cell.type || 'empty').trim().toLowerCase();
     const type = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
-    return {type, source: String(cell.source || '').trim()};
+    const rawColSpan = Math.floor(Number(cell.colSpan ?? cell.col_span ?? cell.colspan ?? cell.merge_cols ?? 1) || 1);
+    const colIndex = index % Math.max(1, cols);
+    const maxSpan = Math.max(1, cols - colIndex);
+    const colSpan = Math.max(1, Math.min(maxSpan, rawColSpan));
+    return {type, source: String(cell.source || '').trim(), colSpan};
   });
 }
 
@@ -1049,9 +1055,21 @@ function dashboardVideoOptionsHtml(selectedSource = ''){
   return options.join('');
 }
 
-function buildDashboardIframeCell(cell = {type: 'empty', source: ''}){
-  const normalized = normalizeDashboardRowItems([cell], 1, 1)[0];
+function buildDashboardIframeCell(cell = {type: 'empty', source: '', colSpan: 1}, colIndex = 0, cols = 1){
+  const rawType = String(cell?.type || 'empty').trim().toLowerCase();
+  const normalizedType = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
+  const mergeMax = Math.max(1, cols - colIndex);
+  const rawColSpan = Math.floor(Number(cell?.colSpan ?? cell?.col_span ?? cell?.colspan ?? cell?.merge_cols ?? 1) || 1);
+  const normalized = {
+    type: normalizedType,
+    source: String(cell?.source || '').trim(),
+    colSpan: Math.max(1, Math.min(mergeMax, rawColSpan)),
+  };
   const sourceValue = normalized.source;
+  const mergeOptions = Array.from({length: Math.min(3, mergeMax)}, (_, offset) => {
+    const value = offset + 1;
+    return `<option value="${value}"${value === normalized.colSpan ? ' selected' : ''}>Birleşim x${value}</option>`;
+  }).join('');
   const wrapper = document.createElement('div');
   wrapper.className = 'dashboard-iframe-item input-group input-group-sm';
   wrapper.innerHTML = `<span class="input-group-text dashboard-iframe-label">Hücre</span>
@@ -1061,6 +1079,7 @@ function buildDashboardIframeCell(cell = {type: 'empty', source: ''}){
       <option value="video"${normalized.type === 'video' ? ' selected' : ''}>Video</option>
     </select>
     <input class="form-control dashboard-widget-source" placeholder="${normalized.type === 'video' ? '/media/video.mp4 veya https://...' : 'https://...'}" value="${escapeHtml(sourceValue)}" oninput="syncDashboardToContent()" />
+    <select class="form-select dashboard-widget-merge dashboard-cell-merge" onchange="onDashboardCellMergeChange(this)">${mergeOptions}</select>
     <select class="form-select dashboard-cell-source-picker ${normalized.type === 'video' ? '' : 'd-none'}" onchange="pickDashboardVideoSource(this)">${dashboardVideoOptionsHtml(sourceValue)}</select>
     <button class="btn btn-outline-danger" type="button" onclick="removeDashboardIframe(this)">Temizle</button>`;
   return wrapper;
@@ -1082,7 +1101,7 @@ function fillDashboardIframeGrid(cells = []){
 
     for(let colIndex = 0; colIndex < cols; colIndex += 1){
       const idx = (rowIndex * cols) + colIndex;
-      row.appendChild(buildDashboardIframeCell(values[idx]));
+      row.appendChild(buildDashboardIframeCell(values[idx], colIndex, cols));
     }
 
     list.appendChild(row);
@@ -1141,6 +1160,33 @@ function onDashboardCellTypeChange(selectEl){
   syncDashboardToContent();
 }
 
+function onDashboardCellMergeChange(selectEl){
+  const item = selectEl?.closest('.dashboard-iframe-item');
+  if(!item) return;
+  const items = Array.from(document.querySelectorAll('.dashboard-iframe-item'));
+  const index = items.indexOf(item);
+  if(index < 0) return;
+  const cols = dashboardColumns();
+  const colIndex = index % cols;
+  const mergeCount = Math.max(1, Number(selectEl.value || 1) || 1);
+  const maxMerge = Math.max(1, cols - colIndex);
+  const clampedMerge = Math.min(Math.min(3, maxMerge), mergeCount);
+  selectEl.value = String(clampedMerge);
+
+  for(let offset = 1; offset < clampedMerge; offset += 1){
+    const mergedItem = items[index + offset];
+    if(!mergedItem) break;
+    const mergedType = mergedItem.querySelector('.dashboard-widget-type');
+    const mergedSource = mergedItem.querySelector('.dashboard-widget-source');
+    const mergedMerge = mergedItem.querySelector('.dashboard-widget-merge');
+    if(mergedType) mergedType.value = 'empty';
+    if(mergedSource) mergedSource.value = '';
+    if(mergedMerge) mergedMerge.value = '1';
+    onDashboardCellTypeChange(mergedType);
+  }
+  syncDashboardToContent();
+}
+
 function pickDashboardVideoSource(selectEl){
   const item = selectEl?.closest('.dashboard-iframe-item');
   const sourceInput = item?.querySelector('.dashboard-widget-source');
@@ -1161,11 +1207,12 @@ function syncDashboardBuilderFromContent(content){
     .map(w => {
       if(!w || typeof w !== 'object') return {type: 'empty', source: ''};
       const widgetType = String(w.type || '').toLowerCase();
-      if(widgetType === 'empty') return {type: 'empty', source: ''};
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim()};
-      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim()};
-      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim()};
-      return {type: 'empty', source: ''};
+      const colSpan = Math.max(1, Number(w.col_span || w.colspan || w.column_span || w.merge_cols || 1) || 1);
+      if(widgetType === 'empty') return {type: 'empty', source: '', colSpan};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan};
+      return {type: 'empty', source: '', colSpan};
     });
 
   document.getElementById('dashboard-columns').value = String(parsedCols);
@@ -1188,9 +1235,10 @@ function syncDashboardToContent(){
     rows,
     widgets: cells.map((cell) => {
       if(!cell.source || cell.type === 'empty') return {type: 'empty'};
-      if(cell.type === 'video') return {type: 'video', url: cell.source};
-      if(cell.type === 'image') return {type: 'image', url: cell.source};
-      return {type: 'iframe', url: cell.source};
+      const mergedCell = cell.colSpan > 1 ? {col_span: cell.colSpan} : {};
+      if(cell.type === 'video') return {type: 'video', url: cell.source, ...mergedCell};
+      if(cell.type === 'image') return {type: 'image', url: cell.source, ...mergedCell};
+      return {type: 'iframe', url: cell.source, ...mergedCell};
     })
   };
 
@@ -1324,12 +1372,13 @@ function updateWidgetPreview(){
     }
     const cols = Math.max(1, Number(config.columns) || 1);
     const cells = (config.widgets || []).map((w) => {
-      if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: ''};
+      const colSpan = Math.max(1, Number(w?.col_span || w?.colspan || w?.column_span || w?.merge_cols || 1) || 1);
+      if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: '', colSpan};
       const widgetType = String(w.type || '').toLowerCase();
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim()};
-      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim()};
-      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim()};
-      return {type: 'empty', source: ''};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan};
+      return {type: 'empty', source: '', colSpan};
     });
     const rows = Math.max(1, Number(config.rows) || Math.ceil(Math.max(cells.length, 1) / cols));
     const normalizedCells = normalizeDashboardRowItems(cells, cols, rows);
@@ -1338,20 +1387,21 @@ function updateWidgetPreview(){
       return;
     }
     const cellsHtml = normalizedCells.map((cell) => {
-      if(!cell.source || cell.type === 'empty') return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
+      const spanStyle = cell.colSpan > 1 ? ` style="grid-column:span ${cell.colSpan};"` : '';
+      if(!cell.source || cell.type === 'empty') return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
       if(cell.type === 'video'){
         const videoUrl = normalizeMediaUrl(cell.source);
-        if(!videoUrl) return '<div class="dashboard-cell dashboard-cell-empty">Video kaynağı boş</div>';
-        return `<div class="dashboard-cell"><video class="live-frame" src="${escapeHtml(videoUrl)}" autoplay muted loop playsinline controls></video></div>`;
+        if(!videoUrl) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Video kaynağı boş</div>`;
+        return `<div class="dashboard-cell"${spanStyle}><video class="live-frame" src="${escapeHtml(videoUrl)}" autoplay muted loop playsinline controls></video></div>`;
       }
       if(cell.type === 'image'){
         const imageUrl = normalizeMediaUrl(cell.source);
-        if(!imageUrl) return '<div class="dashboard-cell dashboard-cell-empty">Görsel kaynağı boş</div>';
-        return `<div class="dashboard-cell"><img class="live-frame" src="${escapeHtml(imageUrl)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
+        if(!imageUrl) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Görsel kaynağı boş</div>`;
+        return `<div class="dashboard-cell"${spanStyle}><img class="live-frame" src="${escapeHtml(imageUrl)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
       }
       const url = normalizeUrl(cell.source);
-      if(!url) return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
-      return `<div class="dashboard-cell"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
+      if(!url) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
+      return `<div class="dashboard-cell"${spanStyle}><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
     }).join('');
     renderPreviewDoc(`<div class="dashboard-wrap root" style="--cols:${cols};grid-template-rows:repeat(${rows}, minmax(0,1fr));">${cellsHtml}</div>`);
     return;

@@ -481,6 +481,49 @@ class TestConfigPush(unittest.TestCase):
             [{"type": "video", "url": "/media/demo.mp4", "autoplay": True, "muted": True, "loop": True, "controls": False}],
         )
 
+    def test_build_config_dashboard_widget_preserves_iframe_merge_span(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Widget Dashboard Merge Group")
+            playlist = self.main.Playlist(name="Widget Dashboard Merge Playlist", enabled=True, loop_mode="sequential")
+            device = self.main.Device(hostname="pc-widget-dashboard-merge")
+            db.add_all([group, playlist, device])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.add(self.main.GroupPlaylist(group_id=group.id, playlist_id=playlist.id))
+            db.add(
+                self.main.PlaylistItem(
+                    playlist_id=playlist.id,
+                    item_type="widget",
+                    media_type="widget",
+                    widget_id=21,
+                    order_no=0,
+                )
+            )
+            db.commit()
+
+            self.main._save_widgets(
+                db,
+                [
+                    {
+                        "id": 21,
+                        "name": "Dashboard Widget Merge",
+                        "type": "dashboard",
+                        "content": '{"columns":3,"rows":1,"widgets":[{"type":"iframe","url":"https://example.com/merged","col_span":3}]}',
+                    }
+                ],
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cfg = self.main.build_config("pc-widget-dashboard-merge")
+        payload = cfg["videos"][0]["widget_payload"]
+        self.assertEqual(payload["columns"], 3)
+        self.assertEqual(payload["rows"], 1)
+        self.assertEqual(payload["widgets"][0]["col_span"], 3)
+
     def test_build_config_replaces_inventory_id_placeholders_for_widget_urls(self):
         db = self.main.db_session()
         try:

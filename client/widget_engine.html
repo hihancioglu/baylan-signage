@@ -127,6 +127,18 @@
       }
     }
 
+    function parseSpanValue(widget, keys, fallback = 1) {
+      if (!widget || typeof widget !== "object") return fallback;
+      for (const key of keys) {
+        const raw = widget[key];
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed > 1) {
+          return Math.floor(parsed);
+        }
+      }
+      return fallback;
+    }
+
     function buildIframeFallback(url) {
       const fallback = document.createElement("div");
       fallback.className = "iframe-fallback";
@@ -445,15 +457,23 @@
       cleanupMediaElements(container);
       container.innerHTML = "";
       const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
+      const columns = Array.isArray(config.columns) ? config.columns.length : Number(config.columns || 1);
+      const cols = Math.max(1, Number(columns) || 1);
       const singleIframeMode =
         widgetCount === 1 &&
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
       (config.widgets || []).forEach((w, index) => {
+        const colIndex = index % cols;
+        const maxColSpan = Math.max(1, cols - colIndex);
+        const colSpan = Math.max(1, Math.min(maxColSpan, parseSpanValue(w, ["col_span", "colspan", "column_span", "merge_cols"], 1)));
         const widgetType = String((w && w.type) || "").toLowerCase();
         if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
           wrapper.className = "widget iframe-widget";
+          if (colSpan > 1) {
+            wrapper.style.gridColumn = `span ${colSpan}`;
+          }
 
           const frame = document.createElement("iframe");
           frame.className = "widget";
@@ -506,6 +526,9 @@
         if (widgetType === "card") {
           const card = document.createElement("div");
           card.className = "widget card";
+          if (colSpan > 1) {
+            card.style.gridColumn = `span ${colSpan}`;
+          }
           card.innerHTML = w.html || "";
           container.appendChild(card);
           return;
@@ -513,6 +536,9 @@
         if (widgetType === "embed") {
           const embed = document.createElement("div");
           embed.className = "widget card";
+          if (colSpan > 1) {
+            embed.style.gridColumn = `span ${colSpan}`;
+          }
           embed.innerHTML = w.html || "";
           Array.from(embed.querySelectorAll("script")).forEach((scriptNode) => {
             const runnable = document.createElement("script");
@@ -528,12 +554,19 @@
           return;
         }
         if (widgetType === "video" || widgetType === "image") {
-          container.appendChild(createMediaWidget(w, index));
+          const mediaWidget = createMediaWidget(w, index);
+          if (colSpan > 1) {
+            mediaWidget.style.gridColumn = `span ${colSpan}`;
+          }
+          container.appendChild(mediaWidget);
           return;
         }
         if (widgetType === "empty") {
           const empty = document.createElement("div");
           empty.className = "widget empty-cell";
+          if (colSpan > 1) {
+            empty.style.gridColumn = `span ${colSpan}`;
+          }
           container.appendChild(empty);
           return;
         }
