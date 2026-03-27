@@ -16,6 +16,8 @@ CHROME_KIOSK_SWITCHES = {
     "disable-infobars": "",
     "disable-session-crashed-bubble": "",
     "disable-features": "TranslateUI",
+    # Video autoplay in dashboard iframes requires explicit Chromium policy override.
+    "autoplay-policy": "no-user-gesture-required",
 }
 CEF_BLACK_BACKGROUND = 0xFF000000
 WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
