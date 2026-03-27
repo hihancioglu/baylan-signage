@@ -2557,6 +2557,32 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ):
             self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 2)
 
+    def test_windows_display_id_map_sanitizer_rejects_sparse_or_huge_ids(self):
+        from client.player import BorderlessFullscreenPlayer
+
+        self.assertEqual(
+            BorderlessFullscreenPlayer._sanitize_windows_display_id_map(
+                {"\\\\.\\DISPLAY1": 8388689, "\\\\.\\DISPLAY2": 4146, "\\\\.\\DISPLAY3": 24647}
+            ),
+            {},
+        )
+        self.assertEqual(
+            BorderlessFullscreenPlayer._sanitize_windows_display_id_map(
+                {"\\\\.\\DISPLAY1": 1, "\\\\.\\DISPLAY2": 3}
+            ),
+            {},
+        )
+
+    def test_windows_display_id_map_sanitizer_accepts_compact_ids(self):
+        from client.player import BorderlessFullscreenPlayer
+
+        self.assertEqual(
+            BorderlessFullscreenPlayer._sanitize_windows_display_id_map(
+                {"\\\\.\\DISPLAY1": 1, "\\\\.\\DISPLAY2": 2, "\\\\.\\DISPLAY3": 3}
+            ),
+            {"\\\\.\\DISPLAY1": 1, "\\\\.\\DISPLAY2": 2, "\\\\.\\DISPLAY3": 3},
+        )
+
     def test_multi_monitor_playback_accepts_widget_only_playlist(self):
         from client.client import MultiMonitorPlayback
 

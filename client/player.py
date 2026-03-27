@@ -624,9 +624,46 @@ class BorderlessFullscreenPlayer:
             gdi_to_target_id[gdi_name] = int(target_info.id) + 1
             gdi_to_source_id[gdi_name] = int(source_info.id) + 1
 
-        if gdi_to_target_id:
-            return gdi_to_target_id
-        return gdi_to_source_id
+        sanitized_target_map = BorderlessFullscreenPlayer._sanitize_windows_display_id_map(gdi_to_target_id)
+        if sanitized_target_map:
+            return sanitized_target_map
+        return BorderlessFullscreenPlayer._sanitize_windows_display_id_map(gdi_to_source_id)
+
+    @staticmethod
+    def _sanitize_windows_display_id_map(raw_map: dict[str, int]) -> dict[str, int]:
+        """Keep only plausible Windows display IDs.
+
+        QueryDisplayConfig source/target IDs can be large adapter-scoped integers
+        on some systems and are not always the same as "Identify" numbers.
+        Accept only a compact positive integer range (1..N) to avoid exposing
+        bogus IDs such as 8388689.
+        """
+        if not isinstance(raw_map, dict) or not raw_map:
+            return {}
+
+        normalized: dict[str, int] = {}
+        for gdi_name, display_id in raw_map.items():
+            key = str(gdi_name or "").strip().upper()
+            if not key:
+                continue
+            try:
+                parsed_id = int(display_id)
+            except (TypeError, ValueError):
+                continue
+            if parsed_id < 1:
+                continue
+            normalized[key] = parsed_id
+
+        if not normalized:
+            return {}
+
+        unique_ids = sorted(set(normalized.values()))
+        max_id = unique_ids[-1]
+        # Accept only dense/compact IDs in a reasonable range.
+        # Valid examples: [1], [1,2], [1,2,3,4].
+        if max_id > 64 or unique_ids != list(range(1, max_id + 1)):
+            return {}
+        return normalized
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
