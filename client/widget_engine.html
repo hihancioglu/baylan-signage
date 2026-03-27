@@ -460,16 +460,17 @@
           frame.src = w.url;
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay *; fullscreen *; encrypted-media *; picture-in-picture *";
+          frame.allow = "autoplay";
           frame.allowFullscreen = true;
 
-          frame.addEventListener("load", () => {
+          const enforceIframeVideosMuted = () => {
             try {
               const frameDocument = frame.contentDocument;
               if (!frameDocument) return;
               frameDocument.querySelectorAll("video").forEach((videoElement) => {
                 try {
                   videoElement.muted = true;
+                  videoElement.defaultMuted = true;
                   videoElement.autoplay = true;
                   videoElement.playsInline = true;
                   const maybePromise = videoElement.play();
@@ -483,6 +484,13 @@
             } catch (_err) {
               // Cross-origin iframe; autoplay is delegated via Permissions Policy allow attribute.
             }
+          };
+
+          frame.addEventListener("load", () => {
+            enforceIframeVideosMuted();
+            [400, 1200, 2500].forEach((delayMs) => {
+              window.setTimeout(enforceIframeVideosMuted, delayMs);
+            });
           });
 
           wrapper.appendChild(frame);
