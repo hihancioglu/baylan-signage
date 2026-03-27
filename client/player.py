@@ -1112,6 +1112,19 @@ class BorderlessFullscreenPlayer:
                             or normalized_widget.get("content")
                             or ""
                         )
+                    elif widget_type in {"video", "image"}:
+                        raw_source = (
+                            normalized_widget.get("url")
+                            or normalized_widget.get("content")
+                            or normalized_widget.get("source")
+                            or ""
+                        )
+                        normalized_media_source = self._normalize_widget_source(str(raw_source))
+                        if normalized_media_source:
+                            normalized_widget["url"] = normalized_media_source
+                        else:
+                            normalized_widget["type"] = "empty"
+                            normalized_widget.pop("url", None)
                     elif widget_type == "card" and "html" not in normalized_widget:
                         normalized_widget["html"] = str(normalized_widget.get("content") or "")
                     normalized_widgets.append(normalized_widget)

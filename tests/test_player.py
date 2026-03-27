@@ -914,6 +914,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             },
         )
 
+    def test_build_widget_layout_payload_normalizes_video_widget_source_field(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "video", "source": "example.com/media.mp4"}]},
+        )
+
+        self.assertEqual(
+            payload,
+            {"widgets": [{"type": "video", "source": "example.com/media.mp4", "url": "https://example.com/media.mp4"}]},
+        )
+
+    def test_build_widget_layout_payload_marks_video_widget_empty_when_source_missing(self):
+        player = self._build_player()
+
+        payload = player._build_widget_layout_payload(
+            "",
+            widget_config={"widgets": [{"type": "video", "source": ""}]},
+        )
+
+        self.assertEqual(payload, {"widgets": [{"type": "empty", "source": ""}]})
+
     def test_build_widget_source_uses_direct_source_for_single_url_widget(self):
         player = self._build_player()
 
