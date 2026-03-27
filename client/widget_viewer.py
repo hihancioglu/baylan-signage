@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 import re
 
 
@@ -200,6 +200,25 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
             return None
         return href
 
+    def _normalize_media_source(value: object) -> str:
+        source = str(value or "").strip()
+        if not source:
+            return ""
+        if source.lower().startswith(("http://", "https://", "file://")):
+            return source
+        if source.startswith("/"):
+            base_url = str(os.getenv("MEDIA_SOURCE_BASE_URL") or os.getenv("SERVER_URL") or "").strip()
+            if base_url:
+                return urljoin(f"{base_url.rstrip('/')}/", source.lstrip("/"))
+            return source
+        local_path = Path(source).expanduser()
+        if local_path.exists():
+            try:
+                return local_path.resolve().as_uri()
+            except OSError:
+                return source
+        return _normalize_url(source)
+
     if isinstance(widgets, list):
         for widget in widgets:
             if not isinstance(widget, dict):
@@ -235,6 +254,19 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                     or normalized_widget.get("content")
                     or ""
                 )
+            elif widget_type in {"video", "image"}:
+                raw_source = (
+                    normalized_widget.get("url")
+                    or normalized_widget.get("content")
+                    or normalized_widget.get("source")
+                    or ""
+                )
+                normalized_url = _normalize_media_source(raw_source)
+                if normalized_url:
+                    normalized_widget["url"] = normalized_url
+                else:
+                    normalized_widget["type"] = "empty"
+                    normalized_widget.pop("url", None)
             elif widget_type == "card" and "html" not in normalized_widget:
                 normalized_widget["html"] = str(normalized_widget.get("content") or "")
             normalized_widgets.append(normalized_widget)

@@ -24,6 +24,7 @@
       gap: .5rem;
       grid-template-columns: repeat(1, minmax(0, 1fr));
     }
+    .dashboard-cell-source-picker { min-width: 150px; }
     @media (min-width: 992px) {
       .dashboard-iframe-row {
         grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(0, 1fr));
@@ -202,7 +203,7 @@
                     <select id="widget-type" class="form-select" onchange="updateWidgetPreview()">
                       <option value="html">HTML</option>
                       <option value="url">URL</option>
-                      <option value="dashboard">Dashboard (Çoklu Iframe)</option>
+                      <option value="dashboard">Dashboard (Çoklu Iframe/Video)</option>
                     </select>
                   </div>
                   <div class="col-12 col-md-5">
@@ -226,9 +227,9 @@
                   <div class="mini-card">
                     <div class="card-body">
                       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                        <h3 class="h6 mb-0">Dashboard Oluşturucu (Çoklu Iframe)</h3>
+                        <h3 class="h6 mb-0">Dashboard Oluşturucu (Çoklu Iframe/Video)</h3>
                       </div>
-                      <p class="text-secondary small mb-2">Dashboard widget için kolon ve satır sayısını belirleyip iframe URL'lerini ekleyin. Kaydetmeden önce içerik alanına JSON olarak yazılır.</p>
+                      <p class="text-secondary small mb-2">Dashboard widget için kolon ve satır sayısını belirleyip hücre bazında iframe veya medya videosu seçin. Kaydetmeden önce içerik alanına JSON olarak yazılır.</p>
                       <div class="row g-2 align-items-end mb-3">
                         <div class="col-12 col-md-3">
                           <label class="form-label small">Kolon Sayısı</label>
@@ -918,6 +919,18 @@ async function loadMedia(){
     tr.innerHTML = `<td>${escapeHtml(a.name)}</td><td>${mb}</td><td>${escapeHtml(formatUtc3DateTime(a.created_at))}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="previewMedia(${a.id})">Preview</button><button class="btn btn-sm btn-danger" onclick="deleteMedia(${a.id}, '${(a.name || '').replace(/'/g, "\\'")}')">Sistemden Sil</button></div></td>`;
     body.appendChild(tr);
   });
+
+  refreshDashboardVideoPickers();
+}
+
+function refreshDashboardVideoPickers(){
+  Array.from(document.querySelectorAll('.dashboard-cell-source-picker')).forEach((picker) => {
+    const item = picker.closest('.dashboard-iframe-item');
+    const sourceInput = item?.querySelector('.dashboard-widget-source');
+    const selectedSource = String(sourceInput?.value || '').trim();
+    picker.innerHTML = dashboardVideoOptionsHtml(selectedSource);
+    if(selectedSource) picker.value = selectedSource;
+  });
 }
 
 
@@ -1005,31 +1018,61 @@ function dashboardRows(){
   return Math.max(1, Number(document.getElementById('dashboard-rows').value) || 1);
 }
 
-function collectDashboardIframeUrls(){
-  return Array.from(document.querySelectorAll('.dashboard-iframe-url'))
-    .map(el => String(el.value || '').trim());
+function collectDashboardCellData(){
+  return Array.from(document.querySelectorAll('.dashboard-iframe-item')).map((item) => ({
+    type: String(item.querySelector('.dashboard-widget-type')?.value || 'empty').trim().toLowerCase(),
+    source: String(item.querySelector('.dashboard-widget-source')?.value || '').trim()
+  }));
 }
 
-function normalizeDashboardRowItems(urls, cols, rows = dashboardRows()){
-  const values = Array.isArray(urls) ? urls : [];
+function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
+  const values = Array.isArray(cells) ? cells : [];
   const totalCells = Math.max(cols, rows * cols);
-  return Array.from({length: totalCells}, (_, index) => values[index] || '');
+  return Array.from({length: totalCells}, (_, index) => {
+    const cell = values[index];
+    if(!cell || typeof cell !== 'object') return {type: 'empty', source: ''};
+    const rawType = String(cell.type || 'empty').trim().toLowerCase();
+    const type = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
+    return {type, source: String(cell.source || '').trim()};
+  });
 }
 
-function buildDashboardIframeCell(url = ''){
+function dashboardVideoOptionsHtml(selectedSource = ''){
+  const selected = String(selectedSource || '').trim();
+  const videoAssets = (cachedMediaAssets || []).filter(a => String(a.content_type || '').toLowerCase().startsWith('video/'));
+  const options = ['<option value="">Medyadan video seçin</option>'];
+  videoAssets.forEach((asset) => {
+    const sourceUrl = String(asset.url || '').trim();
+    const selectedAttr = selected && selected === sourceUrl ? ' selected' : '';
+    options.push(`<option value="${escapeHtml(sourceUrl)}"${selectedAttr}>${escapeHtml(asset.name || sourceUrl)}</option>`);
+  });
+  return options.join('');
+}
+
+function buildDashboardIframeCell(cell = {type: 'empty', source: ''}){
+  const normalized = normalizeDashboardRowItems([cell], 1, 1)[0];
+  const sourceValue = normalized.source;
   const wrapper = document.createElement('div');
   wrapper.className = 'dashboard-iframe-item input-group input-group-sm';
-  wrapper.innerHTML = `<span class="input-group-text dashboard-iframe-label">Iframe</span><input class="form-control dashboard-iframe-url" placeholder="https://..." value="${escapeHtml(url)}" oninput="syncDashboardToContent()" /><button class="btn btn-outline-danger" type="button" onclick="removeDashboardIframe(this)">Sil</button>`;
+  wrapper.innerHTML = `<span class="input-group-text dashboard-iframe-label">Hücre</span>
+    <select class="form-select dashboard-widget-type" onchange="onDashboardCellTypeChange(this)">
+      <option value="empty"${normalized.type === 'empty' ? ' selected' : ''}>Boş</option>
+      <option value="iframe"${normalized.type === 'iframe' || normalized.type === 'url' ? ' selected' : ''}>Iframe</option>
+      <option value="video"${normalized.type === 'video' ? ' selected' : ''}>Video</option>
+    </select>
+    <input class="form-control dashboard-widget-source" placeholder="${normalized.type === 'video' ? '/media/video.mp4 veya https://...' : 'https://...'}" value="${escapeHtml(sourceValue)}" oninput="syncDashboardToContent()" />
+    <select class="form-select dashboard-cell-source-picker ${normalized.type === 'video' ? '' : 'd-none'}" onchange="pickDashboardVideoSource(this)">${dashboardVideoOptionsHtml(sourceValue)}</select>
+    <button class="btn btn-outline-danger" type="button" onclick="removeDashboardIframe(this)">Temizle</button>`;
   return wrapper;
 }
 
-function fillDashboardIframeGrid(urls = []){
+function fillDashboardIframeGrid(cells = []){
   const cols = dashboardColumns();
   const rows = dashboardRows();
   const list = document.getElementById('dashboard-iframe-list');
   if(!list) return;
 
-  const values = normalizeDashboardRowItems(urls, cols, rows);
+  const values = normalizeDashboardRowItems(cells, cols, rows);
   list.innerHTML = '';
 
   for(let rowIndex = 0; rowIndex < rows; rowIndex += 1){
@@ -1039,7 +1082,7 @@ function fillDashboardIframeGrid(urls = []){
 
     for(let colIndex = 0; colIndex < cols; colIndex += 1){
       const idx = (rowIndex * cols) + colIndex;
-      row.appendChild(buildDashboardIframeCell(values[idx] || ''));
+      row.appendChild(buildDashboardIframeCell(values[idx]));
     }
 
     list.appendChild(row);
@@ -1047,8 +1090,15 @@ function fillDashboardIframeGrid(urls = []){
 }
 
 function removeDashboardIframe(button){
-  const input = button?.closest('.dashboard-iframe-item')?.querySelector('.dashboard-iframe-url');
-  if(input) input.value = '';
+  const item = button?.closest('.dashboard-iframe-item');
+  if(!item) return;
+  const typeSelect = item.querySelector('.dashboard-widget-type');
+  const sourceInput = item.querySelector('.dashboard-widget-source');
+  const mediaPicker = item.querySelector('.dashboard-cell-source-picker');
+  if(typeSelect) typeSelect.value = 'empty';
+  if(sourceInput) sourceInput.value = '';
+  if(mediaPicker) mediaPicker.value = '';
+  onDashboardCellTypeChange(typeSelect);
 
   refreshDashboardIframeLabels();
   syncDashboardToContent();
@@ -1065,8 +1115,36 @@ function refreshDashboardIframeLabels(){
 }
 
 function reflowDashboardIframeRows(){
-  fillDashboardIframeGrid(collectDashboardIframeUrls());
+  fillDashboardIframeGrid(collectDashboardCellData());
   refreshDashboardIframeLabels();
+  syncDashboardToContent();
+}
+
+function onDashboardCellTypeChange(selectEl){
+  const item = selectEl?.closest('.dashboard-iframe-item');
+  if(!item) return;
+  const type = String(selectEl?.value || 'empty').trim().toLowerCase();
+  const sourceInput = item.querySelector('.dashboard-widget-source');
+  const mediaPicker = item.querySelector('.dashboard-cell-source-picker');
+  if(sourceInput){
+    sourceInput.placeholder = type === 'video'
+      ? '/media/video.mp4 veya https://...'
+      : 'https://...';
+    sourceInput.disabled = type === 'empty';
+    if(type === 'empty') sourceInput.value = '';
+  }
+  if(mediaPicker){
+    mediaPicker.innerHTML = dashboardVideoOptionsHtml(sourceInput?.value || '');
+    mediaPicker.classList.toggle('d-none', type !== 'video');
+    mediaPicker.disabled = type !== 'video';
+  }
+  syncDashboardToContent();
+}
+
+function pickDashboardVideoSource(selectEl){
+  const item = selectEl?.closest('.dashboard-iframe-item');
+  const sourceInput = item?.querySelector('.dashboard-widget-source');
+  if(sourceInput) sourceInput.value = String(selectEl.value || '').trim();
   syncDashboardToContent();
 }
 
@@ -1079,17 +1157,20 @@ function syncDashboardBuilderFromContent(content){
   const parsedCols = cols > 0 ? cols : 2;
   const rows = Number(config?.rows || 1);
   const parsedRows = rows > 0 ? rows : 1;
-  const urls = (config?.widgets || [])
+  const cells = (config?.widgets || [])
     .map(w => {
-      if(!w || typeof w !== 'object') return '';
-      if(w.type === 'empty') return '';
-      if(w.type === 'iframe' || w.type === 'url') return String(w.url || w.content || '').trim();
-      return '';
+      if(!w || typeof w !== 'object') return {type: 'empty', source: ''};
+      const widgetType = String(w.type || '').toLowerCase();
+      if(widgetType === 'empty') return {type: 'empty', source: ''};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim()};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim()};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim()};
+      return {type: 'empty', source: ''};
     });
 
   document.getElementById('dashboard-columns').value = String(parsedCols);
   document.getElementById('dashboard-rows').value = String(parsedRows);
-  fillDashboardIframeGrid(urls);
+  fillDashboardIframeGrid(cells);
   refreshDashboardIframeLabels();
   syncDashboardToContent();
 }
@@ -1100,12 +1181,17 @@ function syncDashboardToContent(){
 
   const cols = dashboardColumns();
   const rows = dashboardRows();
-  const urls = normalizeDashboardRowItems(collectDashboardIframeUrls(), cols, rows);
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
 
   const payload = {
     columns: cols,
     rows,
-    widgets: urls.map(url => url ? ({type: 'iframe', url}) : ({type: 'empty'}))
+    widgets: cells.map((cell) => {
+      if(!cell.source || cell.type === 'empty') return {type: 'empty'};
+      if(cell.type === 'video') return {type: 'video', url: cell.source};
+      if(cell.type === 'image') return {type: 'image', url: cell.source};
+      return {type: 'iframe', url: cell.source};
+    })
   };
 
   document.getElementById('widget-content').value = JSON.stringify(payload, null, 2);
@@ -1134,7 +1220,7 @@ function updateWidgetPreview(){
   const previewFrame = document.getElementById('widget-preview-frame');
   const dashboardBuilder = document.getElementById('widget-dashboard-builder');
   dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
-  if(type === 'dashboard' && !document.querySelector('.dashboard-iframe-url')) reflowDashboardIframeRows();
+  if(type === 'dashboard' && !document.querySelector('.dashboard-widget-source')) reflowDashboardIframeRows();
 
   if(!preview || !previewFrame) return;
 
@@ -1195,18 +1281,28 @@ function updateWidgetPreview(){
     }
     const cols = Math.max(1, Number(config.columns) || 1);
     const cells = (config.widgets || []).map((w) => {
-      if(!w || typeof w !== 'object' || w.type === 'empty') return '';
-      if(w.type === 'iframe' || w.type === 'url') return String(w.url || w.content || '').trim();
-      return '';
+      if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: ''};
+      const widgetType = String(w.type || '').toLowerCase();
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim()};
+      if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim()};
+      if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim()};
+      return {type: 'empty', source: ''};
     });
     const rows = Math.max(1, Number(config.rows) || Math.ceil(Math.max(cells.length, 1) / cols));
     const normalizedCells = normalizeDashboardRowItems(cells, cols, rows);
-    if(!normalizedCells.some(Boolean)){
-      renderPreviewDoc('<div class="empty root">Dashboard için en az bir iframe URL ekleyin.</div>');
+    if(!normalizedCells.some(cell => cell.type !== 'empty' && cell.source)){
+      renderPreviewDoc('<div class="empty root">Dashboard için en az bir iframe veya video kaynağı ekleyin.</div>');
       return;
     }
-    const cellsHtml = normalizedCells.map((rawUrl) => {
-      const url = normalizeUrl(rawUrl);
+    const cellsHtml = normalizedCells.map((cell) => {
+      if(!cell.source || cell.type === 'empty') return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
+      if(cell.type === 'video'){
+        return `<div class="dashboard-cell"><video class="live-frame" src="${escapeHtml(cell.source)}" autoplay muted loop playsinline controls></video></div>`;
+      }
+      if(cell.type === 'image'){
+        return `<div class="dashboard-cell"><img class="live-frame" src="${escapeHtml(cell.source)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
+      }
+      const url = normalizeUrl(cell.source);
       if(!url) return '<div class="dashboard-cell dashboard-cell-empty">Boş</div>';
       return `<div class="dashboard-cell"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
     }).join('');
