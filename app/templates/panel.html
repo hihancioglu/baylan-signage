@@ -1137,6 +1137,19 @@ function isDashboardCellCovered(cells, index, cols){
   return false;
 }
 
+function isCoveredByPreviousSpan(cells, index, cols){
+  if(!Array.isArray(cells) || index <= 0 || cols <= 1) return false;
+  const colIndex = index % cols;
+  for(let offset = 1; offset <= colIndex; offset += 1){
+    const leftIndex = index - offset;
+    const leftCell = cells[leftIndex];
+    if(!leftCell || typeof leftCell !== 'object') continue;
+    const leftSpan = Math.max(1, Number(leftCell.colSpan || leftCell.col_span || leftCell.colspan || leftCell.merge_cols || 1) || 1);
+    if(leftSpan > offset) return true;
+  }
+  return false;
+}
+
 function dashboardCellLabel(index, cols){
   const rowIndex = Math.floor(index / cols);
   const colIndex = index % cols;
@@ -1523,7 +1536,8 @@ function updateWidgetPreview(){
       renderPreviewDoc('<div class="empty root">Dashboard için en az bir iframe veya video kaynağı ekleyin.</div>');
       return;
     }
-    const cellsHtml = normalizedCells.map((cell) => {
+    const cellsHtml = normalizedCells.map((cell, index) => {
+      if(isCoveredByPreviousSpan(normalizedCells, index, cols)) return '';
       const spanStyle = cell.colSpan > 1 ? ` style="grid-column:span ${cell.colSpan};"` : '';
       if(!cell.source || cell.type === 'empty') return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
       if(cell.type === 'video'){
