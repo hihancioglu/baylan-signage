@@ -16,6 +16,11 @@ from urllib.request import urlopen
 
 
 class MediaManager:
+    _WIDGET_MEDIA_EXTENSIONS = {
+        ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".m3u8",
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
+    }
+
     def __init__(self, cache_root: str = "client/cache"):
         self.cache_root = Path(cache_root)
         self.versions_root = self.cache_root / "versions"
@@ -285,8 +290,6 @@ class MediaManager:
             if not isinstance(widget, dict):
                 continue
             widget_type = str(widget.get("type") or "").strip().lower()
-            if widget_type not in {"video", "image"}:
-                continue
             source = str(
                 widget.get("url")
                 or widget.get("content")
@@ -295,9 +298,23 @@ class MediaManager:
                 or widget.get("source_url")
                 or ""
             ).strip()
-            if source:
+            if source and MediaManager._is_media_asset_source(source, widget_type):
                 sources.append(source)
         return sources
+
+    @classmethod
+    def _is_media_asset_source(cls, source: str, widget_type: str | None = None) -> bool:
+        normalized_type = str(widget_type or "").strip().lower()
+        if normalized_type in {"video", "image"}:
+            return True
+
+        candidate = str(source or "").strip()
+        if not candidate:
+            return False
+
+        parsed = urlparse(candidate)
+        extension = Path(parsed.path or candidate).suffix.lower()
+        return extension in cls._WIDGET_MEDIA_EXTENSIONS
 
     def _localize_widget_media_payload(
         self,
@@ -317,8 +334,6 @@ class MediaManager:
             if not isinstance(widget, dict):
                 continue
             widget_type = str(widget.get("type") or "").strip().lower()
-            if widget_type not in {"video", "image"}:
-                continue
             source = str(
                 widget.get("url")
                 or widget.get("content")
@@ -328,6 +343,8 @@ class MediaManager:
                 or ""
             ).strip()
             if not source:
+                continue
+            if not self._is_media_asset_source(source, widget_type):
                 continue
             local_token = self._sha256_text(f"{signature_seed or 'widget'}:{index}:{source}")
             widget["url"] = ensure_local_url(source, local_token)

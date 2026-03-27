@@ -246,6 +246,48 @@ class TestMediaManagerSourceResolution(unittest.TestCase):
             self.assertEqual(opened_urls, ["https://cdn.example.com/playlist-item.mp4"])
             self.assertTrue(Path(entries[0]["local_path"]).exists())
 
+    def test_sync_playlist_entries_localizes_dashboard_iframe_media_urls(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict("os.environ", {"SERVER_URL": "http://panel.local:5080"}, clear=False):
+                manager = MediaManager(cache_root=tmpdir)
+            opened_urls = []
+
+            class DummyResponse(BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            def fake_urlopen(url, timeout=30):
+                opened_urls.append(url)
+                return DummyResponse(b"video-bytes")
+
+            with patch("client.media_manager.urlopen", side_effect=fake_urlopen):
+                entries = manager.sync_playlist_entries(
+                    [{
+                        "item_type": "widget",
+                        "media_type": "widget",
+                        "duration_sec": 15,
+                        "widget_payload": {
+                            "widgets": [
+                                {"type": "iframe", "url": "/media/dashboard-loop.mp4"},
+                                {"type": "iframe", "url": "https://example.com"},
+                            ]
+                        },
+                    }],
+                    "v-dashboard-iframe-media",
+                    {},
+                )
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(opened_urls, ["http://panel.local:5080/media/dashboard-loop.mp4"])
+            payload = entries[0]["widget_payload"]
+            self.assertIsInstance(payload, dict)
+            first_widget_url = payload["widgets"][0]["url"]
+            self.assertTrue(Path(first_widget_url).exists())
+            self.assertEqual(payload["widgets"][1]["url"], "https://example.com")
+
 class TestMediaManagerManifestWrite(unittest.TestCase):
     def test_sync_playlist_entries_handles_manifest_write_permission_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
