@@ -30,6 +30,10 @@ WEATHER_WIDGET_HREF_PATTERN = re.compile(
 )
 HTML_HEAD_PATTERN = re.compile(r"<head[^>]*>", re.IGNORECASE)
 HTML_DOCTYPE_PATTERN = re.compile(r"<!doctype[^>]*>", re.IGNORECASE)
+MEDIA_EXTENSION_PATTERN = re.compile(
+    r"\.(mp4|m4v|webm|mov|mkv|m3u8|mpd|jpg|jpeg|png|gif|webp|bmp|svg)(?:$|[?#])",
+    re.IGNORECASE,
+)
 
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
@@ -349,6 +353,18 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
         base_url = urlunsplit((parsed.scheme, parsed.netloc, base_path.rsplit("/", 1)[0] + "/", "", ""))
         return _inject_base_href(content, base_url)
 
+    def _detect_media_type_from_url(source: object) -> str | None:
+        text = str(source or "").strip()
+        if not text:
+            return None
+        parsed = urlsplit(text)
+        candidate = str(parsed.path or text).lower()
+        if not MEDIA_EXTENSION_PATTERN.search(candidate):
+            return None
+        if re.search(r"\.(jpg|jpeg|png|gif|webp|bmp|svg)(?:$|[?#])", candidate):
+            return "image"
+        return "video"
+
     if isinstance(widgets, list):
         for widget in widgets:
             if not isinstance(widget, dict):
@@ -374,6 +390,12 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                         normalized_widget.pop("url", None)
                 elif str(raw_url).strip():
                     normalized_url = _normalize_url(str(raw_url))
+                    inferred_media_type = _detect_media_type_from_url(normalized_url)
+                    if inferred_media_type:
+                        normalized_widget["type"] = inferred_media_type
+                        normalized_widget["url"] = normalized_url
+                        normalized_widgets.append(normalized_widget)
+                        continue
                     if _should_inline_iframe_source(normalized_url):
                         embed_html = _read_embed_html_from_url(normalized_url)
                         if embed_html:
