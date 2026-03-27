@@ -19,52 +19,33 @@
     .playlist-item.active { outline: 2px solid #0ea5e9; }
     .mini-card { border: 1px solid #e2e8f0; border-radius: 12px; }
     .mini-card .card-body { padding: 1rem; }
-    .dashboard-iframe-list-wrap {
-      overflow-x: auto;
-      padding-bottom: .25rem;
-    }
-    .dashboard-iframe-row {
+    .dashboard-editor-grid {
       display: grid;
       gap: .6rem;
-      grid-template-columns: repeat(1, minmax(220px, 1fr));
-      min-width: 100%;
-      width: max-content;
+      grid-template-columns: repeat(var(--dashboard-columns, 1), minmax(0, 1fr));
+      background: #0f172a;
+      padding: .75rem;
+      border-radius: .75rem;
+      min-height: 260px;
     }
-    .dashboard-iframe-item {
-      border: 1px solid #dbe3ee;
-      border-radius: .65rem;
-      background: #f8fafc;
-      padding: .5rem;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: .45rem;
-      align-items: center;
-      min-width: 220px;
+    .dashboard-editor-cell {
+      border: 1px solid #1e293b;
+      border-radius: .55rem;
+      min-height: 90px;
+      background: #111827;
+      color: #cbd5e1;
+      padding: .55rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: .4rem;
+      justify-content: space-between;
     }
-    .dashboard-iframe-item .dashboard-iframe-label {
-      grid-column: span 2;
-      font-weight: 600;
-      background: #e2e8f0;
-      border-radius: .45rem;
-      padding: .2rem .5rem;
-    }
-    .dashboard-iframe-item .dashboard-widget-source {
-      grid-column: span 2;
-    }
-    .dashboard-iframe-item .dashboard-cell-source-picker {
-      grid-column: span 2;
-    }
-    .dashboard-iframe-item .dashboard-clear-btn {
-      grid-column: span 2;
-      width: 100%;
-    }
-    .dashboard-cell-source-picker { min-width: 150px; }
-    .dashboard-cell-merge { min-width: 0; }
-    @media (min-width: 992px) {
-      .dashboard-iframe-row {
-        grid-template-columns: repeat(var(--dashboard-columns, 2), minmax(240px, 1fr));
-      }
-    }
+    .dashboard-editor-cell:hover { border-color: #38bdf8; }
+    .dashboard-editor-cell.active { border-color: #38bdf8; box-shadow: 0 0 0 1px rgba(56,189,248,.5); }
+    .dashboard-editor-cell.merge-selected { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34,197,94,.5); }
+    .dashboard-editor-label { font-size: .72rem; color: #94a3b8; }
+    .dashboard-editor-value { font-size: .82rem; color: #e2e8f0; word-break: break-word; }
     .widget-preview-stage {
       width: 100%;
       max-width: 960px;
@@ -264,21 +245,24 @@
                       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                         <h3 class="h6 mb-0">Dashboard Oluşturucu (Çoklu Iframe/Video)</h3>
                       </div>
-                      <p class="text-secondary small mb-2">Dashboard widget için kolon ve satır sayısını belirleyip hücre bazında iframe veya medya videosu seçin. Kaydetmeden önce içerik alanına JSON olarak yazılır.</p>
+                      <p class="text-secondary small mb-2">Sadece kolon/satır girin. Hücreye tıklayınca ayar penceresi açılır. Birleştirme modu ile hücreleri seçip tek tıkla birleştirebilir veya ayırabilirsiniz.</p>
                       <div class="row g-2 align-items-end mb-3">
-                        <div class="col-12 col-md-3">
-                          <label class="form-label small">Kolon Sayısı</label>
+                        <div class="col-6 col-md-2">
+                          <label class="form-label small">Kolon</label>
                           <input id="dashboard-columns" type="number" min="1" value="2" class="form-control" onchange="reflowDashboardIframeRows()" />
                         </div>
-                        <div class="col-12 col-md-3">
-                          <label class="form-label small">Satır Sayısı</label>
+                        <div class="col-6 col-md-2">
+                          <label class="form-label small">Satır</label>
                           <input id="dashboard-rows" type="number" min="1" value="1" class="form-control" onchange="reflowDashboardIframeRows()" />
                         </div>
+                        <div class="col-12 col-md-8 d-flex flex-wrap gap-2">
+                          <button type="button" class="btn btn-outline-primary" id="dashboard-merge-mode-btn" onclick="toggleDashboardMergeMode()">Birleştirme Modu: Kapalı</button>
+                          <button type="button" class="btn btn-outline-success" id="dashboard-merge-btn" onclick="mergeSelectedDashboardCells()" disabled>Seçili Hücreleri Birleştir</button>
+                          <button type="button" class="btn btn-outline-warning d-none" id="dashboard-split-btn" onclick="splitSelectedDashboardCell()">Seçili Hücreyi Ayır</button>
+                        </div>
                       </div>
-                      <div class="dashboard-iframe-list-wrap">
-                        <div id="dashboard-iframe-list" class="d-flex flex-column gap-2"></div>
-                      </div>
-                      <p class="text-secondary small mb-0 mt-2">Çok kolonlu düzenlerde hücreleri sıkıştırmak yerine yatay kaydırarak düzenleyebilirsiniz.</p>
+                      <div id="dashboard-iframe-list" class="dashboard-editor-grid" style="--dashboard-columns:2"></div>
+                      <p class="text-secondary small mb-0 mt-2">Normal mod: hücreye tıklayıp içerik ayarla. Birleştirme modu: aynı satırdaki hücreleri seçip birleştir.</p>
                     </div>
                   </div>
                 </div>
@@ -364,6 +348,43 @@
                 <div class="modal-body" id="media-preview-body"></div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <div class="modal fade" id="dashboard-cell-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="dashboard-cell-modal-title">Hücre Ayarları</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <input type="hidden" id="dashboard-cell-modal-index" />
+                  <div class="mb-3">
+                    <label class="form-label">İçerik Türü</label>
+                    <select id="dashboard-cell-modal-type" class="form-select" onchange="onDashboardModalTypeChange()">
+                      <option value="empty">Boş</option>
+                      <option value="iframe">Iframe / URL</option>
+                      <option value="video">Video</option>
+                      <option value="image">Görsel</option>
+                    </select>
+                  </div>
+                  <div class="mb-3" id="dashboard-cell-modal-source-wrap">
+                    <label class="form-label">Kaynak</label>
+                    <input id="dashboard-cell-modal-source" class="form-control" placeholder="https://... veya /media/..." />
+                  </div>
+                  <div class="mb-0 d-none" id="dashboard-cell-modal-video-wrap">
+                    <label class="form-label">Medyadan Video Seç</label>
+                    <select id="dashboard-cell-modal-video" class="form-select" onchange="pickDashboardModalVideoSource()"></select>
+                  </div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-outline-danger me-auto" onclick="clearDashboardModalCell()">Temizle</button>
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                  <button type="button" class="btn btn-primary" onclick="saveDashboardModalCell()">Kaydet</button>
                 </div>
               </div>
             </div>
@@ -962,13 +983,12 @@ async function loadMedia(){
 }
 
 function refreshDashboardVideoPickers(){
-  Array.from(document.querySelectorAll('.dashboard-cell-source-picker')).forEach((picker) => {
-    const item = picker.closest('.dashboard-iframe-item');
-    const sourceInput = item?.querySelector('.dashboard-widget-source');
-    const selectedSource = String(sourceInput?.value || '').trim();
-    picker.innerHTML = dashboardVideoOptionsHtml(selectedSource);
-    if(selectedSource) picker.value = selectedSource;
-  });
+  const modalPicker = document.getElementById('dashboard-cell-modal-video');
+  if(modalPicker){
+    const currentSource = String(document.getElementById('dashboard-cell-modal-source')?.value || '').trim();
+    modalPicker.innerHTML = dashboardVideoOptionsHtml(currentSource);
+    if(currentSource) modalPicker.value = currentSource;
+  }
 }
 
 
@@ -1048,6 +1068,10 @@ function dashboardColumnLabel(colIndex, cols){
   return `Kolon ${colIndex + 1}`;
 }
 
+let dashboardMergeMode = false;
+let dashboardActiveCellIndex = 0;
+let dashboardMergeSelection = new Set();
+
 function dashboardColumns(){
   return Math.max(1, Number(document.getElementById('dashboard-columns').value) || 1);
 }
@@ -1057,11 +1081,15 @@ function dashboardRows(){
 }
 
 function collectDashboardCellData(){
-  return Array.from(document.querySelectorAll('.dashboard-iframe-item')).map((item) => ({
-    type: String(item.querySelector('.dashboard-widget-type')?.value || 'empty').trim().toLowerCase(),
-    source: String(item.querySelector('.dashboard-widget-source')?.value || '').trim(),
-    colSpan: Math.max(1, Number(item.querySelector('.dashboard-widget-merge')?.value || 1) || 1)
-  }));
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return [];
+  const payload = String(list.dataset.dashboardCells || '[]');
+  try {
+    const parsed = JSON.parse(payload);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch(_err){
+    return [];
+  }
 }
 
 function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
@@ -1080,6 +1108,12 @@ function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
   });
 }
 
+function setDashboardCells(cells = []){
+  const list = document.getElementById('dashboard-iframe-list');
+  if(!list) return;
+  list.dataset.dashboardCells = JSON.stringify(cells);
+}
+
 function dashboardVideoOptionsHtml(selectedSource = ''){
   const selected = String(selectedSource || '').trim();
   const videoAssets = (cachedMediaAssets || []).filter(a => String(a.content_type || '').toLowerCase().startsWith('video/'));
@@ -1092,150 +1126,214 @@ function dashboardVideoOptionsHtml(selectedSource = ''){
   return options.join('');
 }
 
-function buildDashboardIframeCell(cell = {type: 'empty', source: '', colSpan: 1}, colIndex = 0, cols = 1){
-  const rawType = String(cell?.type || 'empty').trim().toLowerCase();
-  const normalizedType = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
-  const mergeMax = Math.max(1, cols - colIndex);
-  const rawColSpan = Math.floor(Number(cell?.colSpan ?? cell?.col_span ?? cell?.colspan ?? cell?.merge_cols ?? 1) || 1);
-  const normalized = {
-    type: normalizedType,
-    source: String(cell?.source || '').trim(),
-    colSpan: Math.max(1, Math.min(mergeMax, rawColSpan)),
-  };
-  const sourceValue = normalized.source;
-  const mergeOptions = Array.from({length: Math.min(3, mergeMax)}, (_, offset) => {
-    const value = offset + 1;
-    return `<option value="${value}"${value === normalized.colSpan ? ' selected' : ''}>Birleşim x${value}</option>`;
-  }).join('');
-  const wrapper = document.createElement('div');
-  wrapper.className = 'dashboard-iframe-item';
-  wrapper.innerHTML = `<span class="dashboard-iframe-label">Hücre</span>
-    <select class="form-select dashboard-widget-type" onchange="onDashboardCellTypeChange(this)">
-      <option value="empty"${normalized.type === 'empty' ? ' selected' : ''}>Boş</option>
-      <option value="iframe"${normalized.type === 'iframe' || normalized.type === 'url' ? ' selected' : ''}>Iframe</option>
-      <option value="video"${normalized.type === 'video' ? ' selected' : ''}>Video</option>
-    </select>
-    <input class="form-control dashboard-widget-source" placeholder="${normalized.type === 'video' ? '/media/video.mp4 veya https://...' : 'https://...'}" value="${escapeHtml(sourceValue)}" oninput="syncDashboardToContent()" />
-    <select class="form-select dashboard-widget-merge dashboard-cell-merge" onchange="onDashboardCellMergeChange(this)">${mergeOptions}</select>
-    <select class="form-select dashboard-cell-source-picker ${normalized.type === 'video' ? '' : 'd-none'}" onchange="pickDashboardVideoSource(this)">${dashboardVideoOptionsHtml(sourceValue)}</select>
-    <button class="btn btn-outline-danger dashboard-clear-btn" type="button" onclick="removeDashboardIframe(this)">Temizle</button>`;
-  return wrapper;
+function isDashboardCellCovered(cells, index, cols){
+  const colIndex = index % cols;
+  for(let offset = 1; offset <= colIndex; offset += 1){
+    const leftIndex = index - offset;
+    const leftCell = cells[leftIndex];
+    if(!leftCell) continue;
+    if((leftCell.colSpan || 1) > offset) return true;
+  }
+  return false;
 }
 
-function fillDashboardIframeGrid(cells = []){
+function dashboardCellLabel(index, cols){
+  const rowIndex = Math.floor(index / cols);
+  const colIndex = index % cols;
+  return `${rowIndex + 1}. Satır ${dashboardColumnLabel(colIndex, cols)}`;
+}
+
+function renderDashboardEditorGrid(){
   const cols = dashboardColumns();
   const rows = dashboardRows();
   const list = document.getElementById('dashboard-iframe-list');
   if(!list) return;
 
-  const values = normalizeDashboardRowItems(cells, cols, rows);
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  setDashboardCells(cells);
+
   list.innerHTML = '';
+  list.style.setProperty('--dashboard-columns', String(cols));
 
-  for(let rowIndex = 0; rowIndex < rows; rowIndex += 1){
-    const row = document.createElement('div');
-    row.className = 'dashboard-iframe-row';
-    row.style.setProperty('--dashboard-columns', String(cols));
+  for(let index = 0; index < cells.length; index += 1){
+    if(isDashboardCellCovered(cells, index, cols)) continue;
 
-    for(let colIndex = 0; colIndex < cols; colIndex += 1){
-      const idx = (rowIndex * cols) + colIndex;
-      row.appendChild(buildDashboardIframeCell(values[idx], colIndex, cols));
-    }
+    const cell = cells[index];
+    const cellEl = document.createElement('button');
+    cellEl.type = 'button';
+    cellEl.className = 'dashboard-editor-cell';
+    cellEl.dataset.index = String(index);
+    if(index === dashboardActiveCellIndex) cellEl.classList.add('active');
+    if(dashboardMergeSelection.has(index)) cellEl.classList.add('merge-selected');
+    if(cell.colSpan > 1) cellEl.style.gridColumn = `span ${cell.colSpan}`;
 
-    list.appendChild(row);
+    const typeLabel = cell.type === 'empty' ? 'Boş' : (cell.type === 'iframe' ? 'Iframe/URL' : cell.type.toUpperCase());
+    cellEl.innerHTML = `<span class="dashboard-editor-label">${dashboardCellLabel(index, cols)}</span>
+      <strong>${escapeHtml(typeLabel)}${cell.colSpan > 1 ? ` (x${cell.colSpan})` : ''}</strong>
+      <span class="dashboard-editor-value">${escapeHtml(cell.source || 'İçerik yok')}</span>`;
+    cellEl.addEventListener('click', () => handleDashboardCellClick(index));
+    list.appendChild(cellEl);
+  }
+
+  updateDashboardMergeActions(cells, cols);
+}
+
+function handleDashboardCellClick(index){
+  dashboardActiveCellIndex = index;
+  if(dashboardMergeMode){
+    if(dashboardMergeSelection.has(index)) dashboardMergeSelection.delete(index);
+    else dashboardMergeSelection.add(index);
+    renderDashboardEditorGrid();
+    return;
+  }
+  openDashboardCellModal(index);
+}
+
+function updateDashboardMergeActions(cells, cols){
+  const mergeBtn = document.getElementById('dashboard-merge-btn');
+  const splitBtn = document.getElementById('dashboard-split-btn');
+  const modeBtn = document.getElementById('dashboard-merge-mode-btn');
+  const selected = Array.from(dashboardMergeSelection);
+
+  if(modeBtn) modeBtn.textContent = `Birleştirme Modu: ${dashboardMergeMode ? 'Açık' : 'Kapalı'}`;
+  if(mergeBtn){
+    const canMerge = dashboardMergeMode && selected.length >= 2 && canMergeDashboardSelection(selected, cols);
+    mergeBtn.disabled = !canMerge;
+  }
+  if(splitBtn){
+    const onlyOneSelected = selected.length === 1;
+    const cell = onlyOneSelected ? cells[selected[0]] : null;
+    splitBtn.classList.toggle('d-none', !(dashboardMergeMode && onlyOneSelected && (cell?.colSpan || 1) > 1));
   }
 }
 
-function removeDashboardIframe(button){
-  const item = button?.closest('.dashboard-iframe-item');
-  if(!item) return;
-  const typeSelect = item.querySelector('.dashboard-widget-type');
-  const sourceInput = item.querySelector('.dashboard-widget-source');
-  const mediaPicker = item.querySelector('.dashboard-cell-source-picker');
-  if(typeSelect) typeSelect.value = 'empty';
-  if(sourceInput) sourceInput.value = '';
-  if(mediaPicker) mediaPicker.value = '';
-  onDashboardCellTypeChange(typeSelect);
-
-  refreshDashboardIframeLabels();
-  syncDashboardToContent();
-}
-
-function refreshDashboardIframeLabels(){
-  const cols = dashboardColumns();
-  const labels = Array.from(document.querySelectorAll('.dashboard-iframe-label'));
-  labels.forEach((label, index) => {
-    const rowIndex = Math.floor(index / cols);
-    const colIndex = index % cols;
-    label.textContent = `${rowIndex + 1}. Satır ${dashboardColumnLabel(colIndex, cols)}`;
-  });
+function canMergeDashboardSelection(indices, cols){
+  if(!indices.length) return false;
+  const sorted = [...indices].sort((a,b) => a-b);
+  const row = Math.floor(sorted[0] / cols);
+  if(sorted.some(i => Math.floor(i / cols) !== row)) return false;
+  for(let i = 1; i < sorted.length; i += 1){
+    if(sorted[i] !== sorted[i-1] + 1) return false;
+  }
+  return true;
 }
 
 function reflowDashboardIframeRows(){
-  fillDashboardIframeGrid(collectDashboardCellData());
-  refreshDashboardIframeLabels();
-  syncDashboardToContent();
-}
-
-function onDashboardCellTypeChange(selectEl){
-  const item = selectEl?.closest('.dashboard-iframe-item');
-  if(!item) return;
-  const type = String(selectEl?.value || 'empty').trim().toLowerCase();
-  const sourceInput = item.querySelector('.dashboard-widget-source');
-  const mediaPicker = item.querySelector('.dashboard-cell-source-picker');
-  if(sourceInput){
-    sourceInput.placeholder = type === 'video'
-      ? '/media/video.mp4 veya https://...'
-      : 'https://...';
-    sourceInput.disabled = type === 'empty';
-    if(type === 'empty') sourceInput.value = '';
-  }
-  if(mediaPicker){
-    mediaPicker.innerHTML = dashboardVideoOptionsHtml(sourceInput?.value || '');
-    mediaPicker.classList.toggle('d-none', type !== 'video');
-    mediaPicker.disabled = type !== 'video';
-  }
-  syncDashboardToContent();
-}
-
-function onDashboardCellMergeChange(selectEl){
-  const item = selectEl?.closest('.dashboard-iframe-item');
-  if(!item) return;
-  const items = Array.from(document.querySelectorAll('.dashboard-iframe-item'));
-  const index = items.indexOf(item);
-  if(index < 0) return;
   const cols = dashboardColumns();
-  const colIndex = index % cols;
-  const mergeCount = Math.max(1, Number(selectEl.value || 1) || 1);
-  const maxMerge = Math.max(1, cols - colIndex);
-  const clampedMerge = Math.min(Math.min(3, maxMerge), mergeCount);
-  selectEl.value = String(clampedMerge);
-
-  for(let offset = 1; offset < clampedMerge; offset += 1){
-    const mergedItem = items[index + offset];
-    if(!mergedItem) break;
-    const mergedType = mergedItem.querySelector('.dashboard-widget-type');
-    const mergedSource = mergedItem.querySelector('.dashboard-widget-source');
-    const mergedMerge = mergedItem.querySelector('.dashboard-widget-merge');
-    if(mergedType) mergedType.value = 'empty';
-    if(mergedSource) mergedSource.value = '';
-    if(mergedMerge) mergedMerge.value = '1';
-    onDashboardCellTypeChange(mergedType);
-  }
+  const rows = dashboardRows();
+  const nextCells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  dashboardMergeSelection = new Set([...dashboardMergeSelection].filter((idx) => idx < (cols * rows)));
+  dashboardActiveCellIndex = Math.min(dashboardActiveCellIndex, (cols * rows) - 1);
+  setDashboardCells(nextCells);
+  renderDashboardEditorGrid();
   syncDashboardToContent();
 }
 
-function pickDashboardVideoSource(selectEl){
-  const item = selectEl?.closest('.dashboard-iframe-item');
-  const sourceInput = item?.querySelector('.dashboard-widget-source');
-  if(sourceInput) sourceInput.value = String(selectEl.value || '').trim();
+function toggleDashboardMergeMode(){
+  dashboardMergeMode = !dashboardMergeMode;
+  if(!dashboardMergeMode) dashboardMergeSelection.clear();
+  renderDashboardEditorGrid();
+}
+
+function mergeSelectedDashboardCells(){
+  const cols = dashboardColumns();
+  const rows = dashboardRows();
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  const selected = Array.from(dashboardMergeSelection).sort((a,b) => a-b);
+  if(!canMergeDashboardSelection(selected, cols)){
+    alert('Birleştirme için aynı satırda, bitişik en az 2 hücre seçin.');
+    return;
+  }
+  const start = selected[0];
+  const span = selected.length;
+  cells[start].colSpan = span;
+  for(let i = 1; i < span; i += 1){
+    cells[start + i] = {type: 'empty', source: '', colSpan: 1};
+  }
+  dashboardMergeSelection = new Set([start]);
+  dashboardActiveCellIndex = start;
+  setDashboardCells(cells);
+  renderDashboardEditorGrid();
   syncDashboardToContent();
+}
+
+function splitSelectedDashboardCell(){
+  const cols = dashboardColumns();
+  const rows = dashboardRows();
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  const selected = Array.from(dashboardMergeSelection);
+  if(selected.length !== 1) return;
+  const index = selected[0];
+  const span = Math.max(1, Number(cells[index]?.colSpan || 1));
+  if(span <= 1) return;
+  cells[index].colSpan = 1;
+  for(let i = 1; i < span; i += 1){
+    cells[index + i] = {type: 'empty', source: '', colSpan: 1};
+  }
+  dashboardMergeSelection = new Set([index]);
+  setDashboardCells(cells);
+  renderDashboardEditorGrid();
+  syncDashboardToContent();
+}
+
+function openDashboardCellModal(index){
+  const cols = dashboardColumns();
+  const rows = dashboardRows();
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  const cell = cells[index] || {type: 'empty', source: '', colSpan: 1};
+  document.getElementById('dashboard-cell-modal-index').value = String(index);
+  document.getElementById('dashboard-cell-modal-title').textContent = `${dashboardCellLabel(index, cols)} Ayarları`;
+  const modalType = document.getElementById('dashboard-cell-modal-type');
+  const normalizedType = cell.type === 'url' ? 'iframe' : cell.type;
+  modalType.value = ['empty', 'iframe', 'video', 'image'].includes(normalizedType) ? normalizedType : 'empty';
+  document.getElementById('dashboard-cell-modal-source').value = cell.source || '';
+  const videoSelect = document.getElementById('dashboard-cell-modal-video');
+  videoSelect.innerHTML = dashboardVideoOptionsHtml(cell.source || '');
+  if(cell.source) videoSelect.value = cell.source;
+  onDashboardModalTypeChange();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('dashboard-cell-modal')).show();
+}
+
+function onDashboardModalTypeChange(){
+  const type = String(document.getElementById('dashboard-cell-modal-type').value || 'empty');
+  const sourceInput = document.getElementById('dashboard-cell-modal-source');
+  const sourceWrap = document.getElementById('dashboard-cell-modal-source-wrap');
+  const videoWrap = document.getElementById('dashboard-cell-modal-video-wrap');
+  sourceInput.disabled = type === 'empty';
+  if(type === 'empty') sourceInput.value = '';
+  sourceInput.placeholder = type === 'video' ? '/media/video.mp4 veya https://...' : 'https://... veya /media/...';
+  sourceWrap.classList.toggle('d-none', type === 'empty');
+  videoWrap.classList.toggle('d-none', type !== 'video');
+}
+
+function pickDashboardModalVideoSource(){
+  const source = document.getElementById('dashboard-cell-modal-video').value || '';
+  document.getElementById('dashboard-cell-modal-source').value = source;
+}
+
+function saveDashboardModalCell(){
+  const cols = dashboardColumns();
+  const rows = dashboardRows();
+  const cells = normalizeDashboardRowItems(collectDashboardCellData(), cols, rows);
+  const index = Math.max(0, Number(document.getElementById('dashboard-cell-modal-index').value || 0));
+  const type = String(document.getElementById('dashboard-cell-modal-type').value || 'empty');
+  const source = String(document.getElementById('dashboard-cell-modal-source').value || '').trim();
+  const existingSpan = Math.max(1, Number(cells[index]?.colSpan || 1));
+  cells[index] = {type, source: type === 'empty' ? '' : source, colSpan: existingSpan};
+  setDashboardCells(cells);
+  renderDashboardEditorGrid();
+  syncDashboardToContent();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('dashboard-cell-modal')).hide();
+}
+
+function clearDashboardModalCell(){
+  document.getElementById('dashboard-cell-modal-type').value = 'empty';
+  document.getElementById('dashboard-cell-modal-source').value = '';
+  onDashboardModalTypeChange();
 }
 
 function syncDashboardBuilderFromContent(content){
   const config = extractDashboardConfig(content);
-  const list = document.getElementById('dashboard-iframe-list');
-  if(!list) return;
-
   const cols = Number(config?.columns || 2);
   const parsedCols = cols > 0 ? cols : 2;
   const rows = Number(config?.rows || 1);
@@ -1254,8 +1352,10 @@ function syncDashboardBuilderFromContent(content){
 
   document.getElementById('dashboard-columns').value = String(parsedCols);
   document.getElementById('dashboard-rows').value = String(parsedRows);
-  fillDashboardIframeGrid(cells);
-  refreshDashboardIframeLabels();
+  dashboardMergeSelection.clear();
+  dashboardActiveCellIndex = 0;
+  setDashboardCells(normalizeDashboardRowItems(cells, parsedCols, parsedRows));
+  renderDashboardEditorGrid();
   syncDashboardToContent();
 }
 
@@ -1305,7 +1405,7 @@ function updateWidgetPreview(){
   const previewFrame = document.getElementById('widget-preview-frame');
   const dashboardBuilder = document.getElementById('widget-dashboard-builder');
   dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
-  if(type === 'dashboard' && !document.querySelector('.dashboard-widget-source')) reflowDashboardIframeRows();
+  if(type === 'dashboard' && !collectDashboardCellData().length) reflowDashboardIframeRows();
 
   if(!preview || !previewFrame) return;
 
