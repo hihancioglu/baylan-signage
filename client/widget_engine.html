@@ -33,6 +33,21 @@
 <body>
   <div id="widgets"></div>
   <script>
+    const debugEnabled = (() => {
+      const params = new URLSearchParams(window.location.search);
+      const raw = String(params.get("debug") || "").trim().toLowerCase();
+      return raw === "1" || raw === "true" || raw === "yes";
+    })();
+
+    function debugLog(message, extra) {
+      if (!debugEnabled) return;
+      if (typeof extra === "undefined") {
+        console.log(`[widget_engine] ${message}`);
+        return;
+      }
+      console.log(`[widget_engine] ${message}`, extra);
+    }
+
     function parseConfig() {
       const params = new URLSearchParams(window.location.search);
       const configB64 = params.get("config_b64");
@@ -237,6 +252,13 @@
       let recoveryCount = 0;
       let lastProgressAt = Date.now();
       let lastKnownTime = 0;
+      debugLog("video widget init", {
+        url: video.src,
+        autoplay: video.autoplay,
+        muted: video.muted,
+        loop: video.loop,
+        preload: video.preload,
+      });
 
       const markProgress = () => {
         lastProgressAt = Date.now();
@@ -250,6 +272,7 @@
         if (recoveryCount >= Math.max(0, maxRecoveries)) return;
 
         recoveryCount += 1;
+        debugLog("video recoverFromStall", { url: video.currentSrc || video.src, recoveryCount });
         const resumeTime = Math.max(0, Number.isFinite(video.currentTime) ? video.currentTime : lastKnownTime);
         const currentSrc = String(video.currentSrc || video.src || "");
         if (!currentSrc) return;
@@ -311,6 +334,23 @@
       });
       video.addEventListener("stalled", recoverFromStall);
       video.addEventListener("error", recoverFromStall);
+      video.addEventListener("error", () => {
+        debugLog("video error", {
+          url: video.currentSrc || video.src,
+          code: video.error ? video.error.code : null,
+          networkState: video.networkState,
+          readyState: video.readyState,
+        });
+      });
+      video.addEventListener("playing", () => debugLog("video playing", { url: video.currentSrc || video.src }));
+      video.addEventListener("pause", () => debugLog("video pause", { url: video.currentSrc || video.src }));
+      video.addEventListener("canplay", () => debugLog("video canplay", { url: video.currentSrc || video.src }));
+      video.addEventListener("loadedmetadata", () => {
+        debugLog("video loadedmetadata", {
+          url: video.currentSrc || video.src,
+          duration: Number.isFinite(video.duration) ? video.duration : null,
+        });
+      });
       video.addEventListener("ended", () => window.clearInterval(stallMonitor), { once: true });
       video.addEventListener("emptied", () => window.clearInterval(stallMonitor), { once: true });
 

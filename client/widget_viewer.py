@@ -232,6 +232,7 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                     normalized_widget.get("url")
                     or normalized_widget.get("content")
                     or normalized_widget.get("source")
+                    or normalized_widget.get("path")
                     or ""
                 )
                 if _looks_like_embed_html(raw_url):
@@ -261,14 +262,22 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                     normalized_widget.get("url")
                     or normalized_widget.get("content")
                     or normalized_widget.get("source")
+                    or normalized_widget.get("path")
                     or ""
                 )
                 normalized_url = _normalize_media_source(raw_source)
                 if normalized_url:
                     normalized_widget["url"] = normalized_url
+                    _debug_log(
+                        f"_normalize_widget_payload media widget normalized | "
+                        f"type={widget_type} source={str(raw_source)[:180]} url={normalized_url}"
+                    )
                 else:
                     normalized_widget["type"] = "empty"
                     normalized_widget.pop("url", None)
+                    _debug_log(
+                        f"_normalize_widget_payload media widget empty | type={widget_type} source={str(raw_source)[:180]}"
+                    )
             elif widget_type == "card" and "html" not in normalized_widget:
                 normalized_widget["html"] = str(normalized_widget.get("content") or "")
             normalized_widgets.append(normalized_widget)
@@ -366,7 +375,8 @@ def _build_engine_url(widget_url: str | None = None, widget_config: dict | None 
     engine_uri = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
     _debug_log(f"_build_engine_url engine_uri={engine_uri} widget_count={len(payload.get('widgets') or [])}")
     encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
-    return f"{engine_uri}?config_b64={encoded}"
+    debug_suffix = "&debug=1" if DEBUG_MODE_ENABLED else ""
+    return f"{engine_uri}?config_b64={encoded}{debug_suffix}"
 
 
 def _runtime_message_reader(dispatch):
@@ -533,6 +543,10 @@ def _start_with_pywebview(
     monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
     import webview
+    _debug_log(
+        "pywebview create_window request | "
+        f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
+    )
 
     window_kwargs: dict = {
         "title": "Baylan Widget",

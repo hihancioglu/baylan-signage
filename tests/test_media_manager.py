@@ -304,6 +304,25 @@ class TestMediaManagerManifestWrite(unittest.TestCase):
         with patch("builtins.print", side_effect=OSError(6, "Invalid handle")):
             MediaManager._safe_print("hello")
 
+class TestMediaManagerWidgetSources(unittest.TestCase):
+    def test_extract_widget_media_sources_supports_path_field(self):
+        payload = {
+            "widgets": [
+                {"type": "video", "path": "https://cdn.example.com/from-path.mp4"},
+                {"type": "image", "source_url": "https://cdn.example.com/from-source-url.jpg"},
+            ]
+        }
+
+        sources = MediaManager._extract_widget_media_sources(payload)
+
+        self.assertEqual(
+            sources,
+            [
+                "https://cdn.example.com/from-path.mp4",
+                "https://cdn.example.com/from-source-url.jpg",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -287,7 +287,14 @@ class MediaManager:
             widget_type = str(widget.get("type") or "").strip().lower()
             if widget_type not in {"video", "image"}:
                 continue
-            source = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+            source = str(
+                widget.get("url")
+                or widget.get("content")
+                or widget.get("source")
+                or widget.get("path")
+                or widget.get("source_url")
+                or ""
+            ).strip()
             if source:
                 sources.append(source)
         return sources
@@ -312,7 +319,14 @@ class MediaManager:
             widget_type = str(widget.get("type") or "").strip().lower()
             if widget_type not in {"video", "image"}:
                 continue
-            source = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+            source = str(
+                widget.get("url")
+                or widget.get("content")
+                or widget.get("source")
+                or widget.get("path")
+                or widget.get("source_url")
+                or ""
+            ).strip()
             if not source:
                 continue
             local_token = self._sha256_text(f"{signature_seed or 'widget'}:{index}:{source}")
