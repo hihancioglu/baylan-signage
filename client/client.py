@@ -240,6 +240,11 @@ MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
 WIDGET_ACTIVITY_GRACE_SEC = float(os.getenv("WIDGET_ACTIVITY_GRACE_SEC", "1.5"))
 WIDGET_RETURN_REQUIRES_ERP_FOREGROUND = _env_bool("WIDGET_RETURN_REQUIRES_ERP_FOREGROUND", True)
+WIDGET_RUNTIME_WINDOW_TITLES = tuple(
+    part.strip().lower()
+    for part in os.getenv("WIDGET_RUNTIME_WINDOW_TITLES", "Baylan Widget").split("|")
+    if part.strip()
+)
 STATE_LOG_PATH = _resolve_windows_writable_path(os.getenv("STATE_LOG_PATH"), "state_transitions.jsonl")
 ERP_WINDOW_TITLE = os.getenv("ERP_WINDOW_TITLE", "ERP")
 ERP_WINDOW_MATCH_MODE = os.getenv("ERP_WINDOW_MATCH_MODE", "contains").strip().lower()
@@ -2723,6 +2728,13 @@ class PlaybackController:
 
 
 window_manager = _WindowManager()
+
+
+def _is_widget_runtime_foreground_title(window_title: str) -> bool:
+    normalized_title = " ".join((window_title or "").strip().lower().split())
+    if not normalized_title:
+        return False
+    return any(marker in normalized_title for marker in WIDGET_RUNTIME_WINDOW_TITLES)
 if IS_WIDGET_VIEWER_PROCESS:
     gui_runtime = None
     playback = None
@@ -3613,12 +3625,22 @@ def run_state_cycle():
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
     erp_is_foreground = None
     foreground_title = ""
+    if active_item_type == "widget" and user_activity_detected:
+        foreground_title = window_manager.foreground_window_title()
+        if activity_reason == "low_idle" and _is_widget_runtime_foreground_title(foreground_title):
+            user_activity_detected = False
+            activity_reason = "suppressed_low_idle_widget_foreground"
+            log_debug(
+                "state_cycle PLAYING widget activity suppressed | "
+                f"foreground_title={foreground_title!r} reason=widget_runtime_foreground_low_idle"
+            )
     if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
         # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
         # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
         # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
         erp_is_foreground = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
-        foreground_title = window_manager.foreground_window_title()
+        if not foreground_title:
+            foreground_title = window_manager.foreground_window_title()
         if not erp_is_foreground:
             log_debug(
                 "state_cycle PLAYING widget activity | "
