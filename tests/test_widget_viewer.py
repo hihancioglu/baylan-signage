@@ -317,6 +317,34 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], [{"type": "embed", "html": embed_html}])
 
+    def test_build_engine_url_normalizes_dashboard_video_relative_media_path(self):
+        with patch.dict(
+            "os.environ",
+            {"WIDGET_SINGLE_ENGINE": "1", "SERVER_URL": "http://panel.local:5080"},
+            clear=False,
+        ):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "video", "url": "/media/video.mp4"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "video", "url": "http://panel.local:5080/media/video.mp4"}])
+
+    def test_build_engine_url_preserves_dashboard_video_absolute_url(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
+            result = widget_viewer._build_engine_url(
+                widget_url=None,
+                widget_config={"widgets": [{"type": "video", "url": "https://cdn.example.com/video.mp4"}]},
+            )
+
+        parsed = urlparse(result)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+        self.assertEqual(payload["widgets"], [{"type": "video", "url": "https://cdn.example.com/video.mp4"}])
+
 
 if __name__ == "__main__":
     unittest.main()
