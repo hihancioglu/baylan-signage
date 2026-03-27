@@ -389,6 +389,8 @@
           frame.src = w.url;
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
+          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+          frame.allowFullscreen = true;
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));

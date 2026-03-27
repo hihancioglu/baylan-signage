@@ -55,6 +55,12 @@ class TestWidgetViewer(unittest.TestCase):
         with patch.dict("sys.modules", {"cefpython3": unittest.mock.Mock(cefpython=fake_cef)}):
             widget_viewer._start_with_cef("https://example.com", runtime_ipc=False)
 
+        initialize_call = fake_cef.Initialize.call_args
+        self.assertEqual(
+            initialize_call.kwargs["switches"].get("autoplay-policy"),
+            "no-user-gesture-required",
+        )
+
         create_call = fake_cef.CreateBrowserSync.call_args
         self.assertEqual(
             create_call.kwargs["settings"]["background_color"],
