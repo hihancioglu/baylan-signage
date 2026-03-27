@@ -404,7 +404,10 @@ class BorderlessFullscreenPlayer:
     @staticmethod
     def _windows_monitor_id_to_index_map() -> dict[int, int]:
         # Windows Display Settings kimlikleri (DISPLAY1, DISPLAY2, ...)
-        # MONITORINFOEXW::szDevice alanından okunur. Bu kimlikleri
+        # MONITORINFOEXW::szDevice alanından okunur. Ancak Windows "Ekranı
+        # tanımla" numaraları bazı kurulumlarda DISPLAYx ile birebir
+        # olmayabildiği için önce QueryDisplayConfig source id eşlemesini
+        # deneriz. Bu kimlikleri
         # uygulama tarafındaki monitor_no ile eşleyerek seçim yapıyoruz.
         # Eşleme sırasında tek bir enumerasyon sonucunu kullanarak index
         # üretelim; böylece farklı API çağrıları arasında sıralama kayması
@@ -412,6 +415,7 @@ class BorderlessFullscreenPlayer:
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return {}
 
+        gdi_name_to_source_id = BorderlessFullscreenPlayer._windows_gdi_device_name_to_source_id_map()
         enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
         get_monitor_info = getattr(ctypes.windll.user32, "GetMonitorInfoW", None)
         if not enum_display_monitors or not get_monitor_info:
@@ -456,9 +460,16 @@ class BorderlessFullscreenPlayer:
             try:
                 if get_monitor_info(monitor_handle, ctypes.byref(monitor_info)):
                     device_name = str(monitor_info.szDevice or "")
-                    match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
-                    if match:
-                        windows_id = int(match.group(1))
+                    normalized_device_name = device_name.strip().upper()
+                    source_id = gdi_name_to_source_id.get(normalized_device_name)
+                    windows_id: int | None = None
+                    if source_id is not None:
+                        windows_id = int(source_id)
+                    else:
+                        match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
+                        if match:
+                            windows_id = int(match.group(1))
+                    if windows_id is not None:
                         is_primary = bool(int(monitor_info.dwFlags) & MONITORINFOF_PRIMARY)
                         monitor_entries.append((
                             int(rect.left),
@@ -494,6 +505,122 @@ class BorderlessFullscreenPlayer:
             seen_rects.add(rect)
             id_to_index[windows_id] = len(seen_rects) - 1
         return id_to_index
+
+    @staticmethod
+    def _windows_gdi_device_name_to_source_id_map() -> dict[str, int]:
+        """Map \\\\.\\DISPLAYx => Windows Display Settings source id (+1)."""
+        if os.name != "nt" or not hasattr(ctypes, "windll"):
+            return {}
+
+        user32 = ctypes.windll.user32
+        get_buffer_sizes = getattr(user32, "GetDisplayConfigBufferSizes", None)
+        query_display_config = getattr(user32, "QueryDisplayConfig", None)
+        display_config_get_device_info = getattr(user32, "DisplayConfigGetDeviceInfo", None)
+        if not get_buffer_sizes or not query_display_config or not display_config_get_device_info:
+            return {}
+
+        QDC_ONLY_ACTIVE_PATHS = 0x00000002
+        DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1
+        CCHDEVICENAME = 32
+
+        class LUID(ctypes.Structure):
+            _fields_ = [
+                ("LowPart", wintypes.DWORD),
+                ("HighPart", wintypes.LONG),
+            ]
+
+        class DISPLAYCONFIG_PATH_SOURCE_INFO(ctypes.Structure):
+            _fields_ = [
+                ("adapterId", LUID),
+                ("id", wintypes.UINT),
+                ("modeInfoIdx", wintypes.UINT),
+                ("statusFlags", wintypes.UINT),
+            ]
+
+        class DISPLAYCONFIG_PATH_TARGET_INFO(ctypes.Structure):
+            _fields_ = [
+                ("adapterId", LUID),
+                ("id", wintypes.UINT),
+                ("modeInfoIdx", wintypes.UINT),
+                ("outputTechnology", wintypes.UINT),
+                ("rotation", wintypes.UINT),
+                ("scaling", wintypes.UINT),
+                ("refreshRateNumerator", wintypes.UINT),
+                ("refreshRateDenominator", wintypes.UINT),
+                ("scanLineOrdering", wintypes.UINT),
+                ("targetAvailable", wintypes.BOOL),
+                ("statusFlags", wintypes.UINT),
+            ]
+
+        class DISPLAYCONFIG_PATH_INFO(ctypes.Structure):
+            _fields_ = [
+                ("sourceInfo", DISPLAYCONFIG_PATH_SOURCE_INFO),
+                ("targetInfo", DISPLAYCONFIG_PATH_TARGET_INFO),
+                ("flags", wintypes.UINT),
+            ]
+
+        class DISPLAYCONFIG_DEVICE_INFO_HEADER(ctypes.Structure):
+            _fields_ = [
+                ("type", wintypes.UINT),
+                ("size", wintypes.UINT),
+                ("adapterId", LUID),
+                ("id", wintypes.UINT),
+            ]
+
+        class DISPLAYCONFIG_SOURCE_DEVICE_NAME(ctypes.Structure):
+            _fields_ = [
+                ("header", DISPLAYCONFIG_DEVICE_INFO_HEADER),
+                ("viewGdiDeviceName", ctypes.c_wchar * CCHDEVICENAME),
+            ]
+
+        path_count = wintypes.UINT(0)
+        mode_count = wintypes.UINT(0)
+        if int(get_buffer_sizes(QDC_ONLY_ACTIVE_PATHS, ctypes.byref(path_count), ctypes.byref(mode_count))) != 0:
+            return {}
+        if int(path_count.value) <= 0:
+            return {}
+
+        paths = (DISPLAYCONFIG_PATH_INFO * int(path_count.value))()
+        # Mode array zorunlu parametre; boyutunu API'nin verdiği kadar ayırıyoruz.
+        mode_info_raw = (ctypes.c_ubyte * max(1, int(mode_count.value) * 64))()
+        if int(query_display_config(
+            QDC_ONLY_ACTIVE_PATHS,
+            ctypes.byref(path_count),
+            paths,
+            ctypes.byref(mode_count),
+            mode_info_raw,
+            None,
+        )) != 0:
+            return {}
+
+        gdi_to_source_id: dict[str, int] = {}
+        seen_sources: set[tuple[int, int, int]] = set()
+        for idx in range(int(path_count.value)):
+            source_info = paths[idx].sourceInfo
+            source_key = (
+                int(source_info.adapterId.HighPart),
+                int(source_info.adapterId.LowPart),
+                int(source_info.id),
+            )
+            if source_key in seen_sources:
+                continue
+            seen_sources.add(source_key)
+
+            source_name = DISPLAYCONFIG_SOURCE_DEVICE_NAME()
+            source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME
+            source_name.header.size = ctypes.sizeof(DISPLAYCONFIG_SOURCE_DEVICE_NAME)
+            source_name.header.adapterId = source_info.adapterId
+            source_name.header.id = source_info.id
+            if int(display_config_get_device_info(ctypes.byref(source_name.header))) != 0:
+                continue
+
+            gdi_name = str(source_name.viewGdiDeviceName or "").strip().upper()
+            if not gdi_name:
+                continue
+            # Windows "Identify" ekranındaki numara source id + 1 ile uyumludur.
+            gdi_to_source_id[gdi_name] = int(source_info.id) + 1
+
+        return gdi_to_source_id
 
     @staticmethod
     def _prefer_python_widget_viewer() -> bool:
