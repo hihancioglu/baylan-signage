@@ -460,8 +460,30 @@
           frame.src = w.url;
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+          frame.allow = "autoplay *; fullscreen *; encrypted-media *; picture-in-picture *";
           frame.allowFullscreen = true;
+
+          frame.addEventListener("load", () => {
+            try {
+              const frameDocument = frame.contentDocument;
+              if (!frameDocument) return;
+              frameDocument.querySelectorAll("video").forEach((videoElement) => {
+                try {
+                  videoElement.muted = true;
+                  videoElement.autoplay = true;
+                  videoElement.playsInline = true;
+                  const maybePromise = videoElement.play();
+                  if (maybePromise && typeof maybePromise.catch === "function") {
+                    maybePromise.catch(() => {});
+                  }
+                } catch (_err) {
+                  // noop
+                }
+              });
+            } catch (_err) {
+              // Cross-origin iframe; autoplay is delegated via Permissions Policy allow attribute.
+            }
+          });
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
