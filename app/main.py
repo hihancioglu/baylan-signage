@@ -401,6 +401,26 @@ def _dashboard_widget_payload(content: str) -> dict | None:
             normalized_widgets.append({"type": "iframe", "url": url})
             continue
 
+        if widget_type in {"video", "image"}:
+            url = str(widget.get("url") or widget.get("content") or widget.get("source") or "").strip()
+            if not url:
+                normalized_widgets.append({"type": "empty"})
+                continue
+            normalized_widget = {"type": widget_type, "url": url}
+            for bool_key in ("autoplay", "muted", "loop", "controls"):
+                if bool_key in widget and isinstance(widget.get(bool_key), bool):
+                    normalized_widget[bool_key] = widget.get(bool_key)
+            for str_key in ("preload",):
+                value = widget.get(str_key)
+                if isinstance(value, str) and value.strip():
+                    normalized_widget[str_key] = value.strip()
+            for num_key in ("start_position_sec",):
+                value = widget.get(num_key)
+                if isinstance(value, (int, float)):
+                    normalized_widget[num_key] = value
+            normalized_widgets.append(normalized_widget)
+            continue
+
         if widget_type in {"card", "html"}:
             html = str(widget.get("html") or widget.get("content") or "")
             normalized_widgets.append({"type": "card", "html": html})
