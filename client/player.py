@@ -1093,6 +1093,7 @@ class BorderlessFullscreenPlayer:
                             normalized_widget.get("url")
                             or normalized_widget.get("content")
                             or normalized_widget.get("source")
+                            or normalized_widget.get("path")
                             or ""
                         )
                         if _looks_like_embed_html(raw_url):
@@ -1117,6 +1118,7 @@ class BorderlessFullscreenPlayer:
                             normalized_widget.get("url")
                             or normalized_widget.get("content")
                             or normalized_widget.get("source")
+                            or normalized_widget.get("path")
                             or ""
                         )
                         normalized_media_source = self._normalize_widget_source(str(raw_source))
