@@ -1421,19 +1421,41 @@ class BorderlessFullscreenPlayer:
                 process for process in self._widget_runtime_processes
                 if process and process.poll() is None
             ]
+            _debug_log(
+                "widget runtime ensure begin | "
+                f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors} "
+                f"desired_targets={runtime_targets} desired_count={desired_count} "
+                f"running_pids={[getattr(process, 'pid', None) for process in running_processes]}"
+            )
             if (
                 running_processes
                 and target_monitor_index is None
                 and clone_to_all_monitors is None
             ):
+                _debug_log(
+                    "widget runtime ensure reuse | "
+                    "reason=default_request_with_running_process "
+                    f"running_count={len(running_processes)}"
+                )
                 self._widget_runtime_processes = running_processes
                 self._widget_process = running_processes[0]
                 self._extra_processes = running_processes[1:]
                 return True
             if running_processes and len(running_processes) == desired_count:
+                _debug_log(
+                    "widget runtime ensure reuse | "
+                    "reason=running_count_matches_desired_count "
+                    f"running_count={len(running_processes)} desired_count={desired_count}"
+                )
                 self._widget_process = running_processes[0]
                 return True
 
+            if running_processes:
+                _debug_log(
+                    "widget runtime ensure restart | "
+                    "reason=running_processes_need_reset "
+                    f"running_count={len(running_processes)} desired_count={desired_count}"
+                )
             for process in list(self._widget_runtime_processes):
                 if process and process.poll() is None:
                     self._terminate_process(process, timeout_sec=2, force_tree=True)
@@ -1510,6 +1532,11 @@ class BorderlessFullscreenPlayer:
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
         message_type = str(message.get("type") or "").strip().lower()
+        _debug_log(
+            "widget runtime message request | "
+            f"type={message_type or '<unknown>'} target_monitor_index={target_monitor_index} "
+            f"clone_to_all_monitors={clone_to_all_monitors}"
+        )
         if not self.start_widget_engine_if_needed(
             target_monitor_index=target_monitor_index,
             clone_to_all_monitors=clone_to_all_monitors,
