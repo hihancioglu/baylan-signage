@@ -760,11 +760,20 @@ class BorderlessFullscreenPlayer:
             env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
             if not str(env.get("WIDGET_VIEWER_LOG_PATH", "") or "").strip():
                 executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+                log_file_name = "widget_viewer.log"
+                if "--monitor" in command:
+                    try:
+                        monitor_arg = command[command.index("--monitor") + 1]
+                        monitor_index = int(str(monitor_arg).strip())
+                    except (ValueError, IndexError):
+                        monitor_index = -1
+                    if monitor_index >= 0:
+                        log_file_name = f"widget_viewer_m{monitor_index}.log"
                 env["WIDGET_VIEWER_LOG_PATH"] = os.path.join(
                     executable_dir,
                     "client",
                     "logs",
-                    "widget_viewer.log",
+                    log_file_name,
                 )
             kwargs["env"] = env
         return kwargs
