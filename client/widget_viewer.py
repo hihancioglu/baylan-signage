@@ -811,18 +811,18 @@ def _start_with_pywebview(
             if payload is None:
                 return
 
-            if not shown_once:
-                shown_once = True
-                try:
-                    window.show()
-                except Exception:
-                    pass
             js = _build_runtime_update_script(payload, signature=signature)
             try:
                 _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
                 window.evaluate_js(js)
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
+            if not shown_once:
+                shown_once = True
+                try:
+                    window.show()
+                except Exception:
+                    pass
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
@@ -905,11 +905,11 @@ def _start_with_cef(
 
             def _post_js():
                 nonlocal shown_once
+                _debug_log(f"cef ExecuteJavascript | message_type={message_type} signature={signature}")
+                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
                 if not shown_once:
                     shown_once = True
                     _set_cef_window_visible(browser, True)
-                _debug_log(f"cef ExecuteJavascript | message_type={message_type} signature={signature}")
-                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
 
             cef.PostTask(cef.TID_UI, _post_js)
 
