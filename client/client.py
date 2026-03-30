@@ -1519,6 +1519,10 @@ class MultiMonitorPlayback:
         return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
+    def _secondary_monitor_widgets_enabled() -> bool:
+        return os.getenv("SECONDARY_MONITOR_WIDGETS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
     def _connected_monitor_count() -> int | None:
         if os.name != "nt":
             return None
@@ -1794,6 +1798,13 @@ class MultiMonitorPlayback:
                     self._players[monitor_no] = player
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
+                if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
+                    log_debug(
+                        "monitor_widget_launch skipped | "
+                        f"monitor_no={monitor_no} reason=secondary_widgets_disabled"
+                    )
+                    time.sleep(0.2)
+                    continue
                 widget_url = str(item.get("widget_url") or item.get("path") or "").strip()
                 widget_payload = item.get("widget_payload")
                 widget_config = self._normalize_widget_config(widget_payload)
