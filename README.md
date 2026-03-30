@@ -95,6 +95,8 @@ Notlar:
 
 Aktivasyon için:
 - `client/build_agent.ps1` script'ini çalıştırın; tek artifact üretilir: `dist/BaylanSignageAgent.exe`.
+- CEF (`cefpython3`) ile paketleme için Python `3.10.x` interpreter/venv kullanın. Script çalışırken aktif Python yolunu ve versiyonunu loglar.
+- `No Python at ...Python311...` benzeri hata alırsanız mevcut venv bozulmuştur (eski interpreter'a bağlı). Venv'i Python 3.10 ile yeniden oluşturup build'i tekrar çalıştırın.
 - Runtime'da widget process çağrısı `BaylanSignageAgent.exe --widget <url>` şeklindedir.
 - Widget viewer backend'i için en az bir bağımlılık kullanılabilir olmalıdır: `cefpython3` veya `pywebview`.
 - CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa agent PyInstaller çağrısına `--collect-all cefpython3` ekler.
