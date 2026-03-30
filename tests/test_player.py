@@ -2708,23 +2708,24 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         media_manager.sync_playlist_entries.return_value = []
         multi_monitor = MultiMonitorPlayback(media_manager)
 
-        multi_monitor.update_from_config(
-            {
-                "2": {
-                    "enabled": True,
-                    "videos": [
-                        {
-                            "item_type": "widget",
-                            "widget_url": "https://example.com/widget",
-                            "duration_sec": 20,
-                        }
-                    ],
-                    "playlist_version": "widget-v2",
-                    "media_signatures": {},
-                    "loop_mode": "sequential",
+        with patch("client.client.os.name", "posix"):
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "enabled": True,
+                        "videos": [
+                            {
+                                "item_type": "widget",
+                                "widget_url": "https://example.com/widget",
+                                "duration_sec": 20,
+                            }
+                        ],
+                        "playlist_version": "widget-v2",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    }
                 }
-            }
-        )
+            )
 
         self.assertTrue(multi_monitor.has_active_playlist())
         state = multi_monitor._monitor_states[2]
@@ -2740,16 +2741,17 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ]
         multi_monitor = MultiMonitorPlayback(media_manager)
 
-        multi_monitor.update_from_config(
-            {
-                "2": {
-                    "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
-                    "playlist_version": "v2",
-                    "media_signatures": {},
-                    "loop_mode": "sequential",
+        with patch("client.client.os.name", "posix"):
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
+                        "playlist_version": "v2",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    }
                 }
-            }
-        )
+            )
 
         self.assertTrue(multi_monitor.has_active_playlist())
         media_manager.sync_playlist_entries.assert_called_once()
