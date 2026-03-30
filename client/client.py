@@ -1818,6 +1818,14 @@ class MultiMonitorPlayback:
                     requested_target_monitor_index=target_monitor_index,
                     has_multiple_monitors=True,
                 )
+                log_debug(
+                    "monitor_widget_launch | "
+                    f"monitor_no={monitor_no} requested_target_monitor_index={target_monitor_index} "
+                    f"resolved_target_monitor_index={widget_target_monitor_index} clone_to_all_monitors={widget_clone_enabled} "
+                    f"widget_url={'<set>' if widget_url else '<empty>'} "
+                    f"widget_count={len((widget_config or {}).get('widgets') or [])} "
+                    f"duration_sec={widget_duration_sec}"
+                )
                 player.play_widget_blocking(
                     widget_url,
                     int(widget_duration_sec),
