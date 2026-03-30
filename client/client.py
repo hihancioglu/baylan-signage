@@ -1529,14 +1529,7 @@ class MultiMonitorPlayback:
         bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
         if not bounds:
             return None
-        count = max(1, len(bounds))
-        # Windows servis/uzak oturum senaryolarında monitör enumerasyonu
-        # güvenilir olmayıp tek ekran döndürebiliyor. Bu durumda çoklu
-        # monitör playlist'lerini hatalı biçimde devre dışı bırakmamak için
-        # filtreyi uygulamayalım.
-        if count <= 1:
-            return None
-        return count
+        return max(1, len(bounds))
 
     @staticmethod
     def _windows_monitor_id_to_index_map() -> dict[int, int]:
