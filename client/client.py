@@ -1905,11 +1905,13 @@ class PlaybackController:
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
+        # Tüm monitörlerde ayrı viewer süreci sıcak tutulur; böylece idle'a
+        # geçildiği anda hedef monitörde başlatma gecikmesi yaşanmaz.
         if (
             os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
             and not _is_widget_viewer_process()
         ):
-            self.player.start_widget_engine_if_needed()
+            self.player.start_widget_engine_if_needed(clone_to_all_monitors=True)
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
