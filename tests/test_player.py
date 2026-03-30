@@ -2535,6 +2535,35 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertFalse(multi_monitor.has_active_playlist())
         media_manager.sync_playlist_entries.assert_not_called()
 
+    def test_multi_monitor_playback_ignores_secondary_playlist_when_only_one_monitor_connected(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = [
+            {"local_path": "/tmp/m2.mp4", "duration_sec": None, "media_type": "video"}
+        ]
+        multi_monitor = MultiMonitorPlayback(media_manager)
+
+        with patch("client.client.os.name", "nt"), patch.object(
+            MultiMonitorPlayback,
+            "_connected_monitor_count",
+            return_value=1,
+        ):
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/m2.mp4", "media_type": "video"}],
+                        "playlist_version": "v2",
+                        "media_signatures": {},
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+        self.assertFalse(multi_monitor.has_active_playlist())
+        media_manager.sync_playlist_entries.assert_not_called()
+
     def test_multi_monitor_playback_keeps_second_monitor_when_two_monitors_connected(self):
         from client.client import MultiMonitorPlayback
 
