@@ -823,9 +823,6 @@ def _start_with_pywebview(
         f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
     )
 
-    target_fullscreen = True
-    use_hidden_launch_workaround = bool(runtime_ipc and start_hidden and os.name == "nt")
-
     window_kwargs: dict = {
         "title": "Baylan Widget",
         "url": widget_url,
@@ -847,22 +844,6 @@ def _start_with_pywebview(
         # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
         window_kwargs["fullscreen"] = True
 
-    # Bazı Windows/pywebview kombinasyonlarında hidden+fullscreen pencere kısa süreli
-    # görünür olup siyah ekran flicker üretebiliyor. Runtime IPC ile hidden başlangıçta
-    # pencereyi geçici olarak off-screen küçük başlatıp, ilk layout mesajında hedef
-    # geometri + fullscreen'e taşıyoruz.
-    if use_hidden_launch_workaround:
-        window_kwargs["hidden"] = False
-        window_kwargs["fullscreen"] = False
-        window_kwargs["x"] = -32000
-        window_kwargs["y"] = -32000
-        window_kwargs["width"] = 1
-        window_kwargs["height"] = 1
-        _debug_log(
-            "pywebview hidden launch workaround active | "
-            f"target_monitor_bounds={monitor_bounds} target_fullscreen={target_fullscreen}"
-        )
-
     create_started_at = time.perf_counter()
     window = webview.create_window(**window_kwargs, js_api=debug_bridge)
     _debug_log(
@@ -874,25 +855,9 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
-        backgrounded_offscreen = False
-        in_fullscreen_mode = bool(window_kwargs.get("fullscreen", False))
-
-        def _restore_window_for_show() -> None:
-            try:
-                if monitor_bounds is not None:
-                    x, y, width, height = monitor_bounds
-                    window.move(x, y)
-                    window.resize(width, height)
-                nonlocal in_fullscreen_mode, backgrounded_offscreen
-                if target_fullscreen and not in_fullscreen_mode:
-                    window.toggle_fullscreen()
-                    in_fullscreen_mode = True
-                backgrounded_offscreen = False
-            except Exception as exc:
-                _debug_log(f"pywebview restore for show failed | error={exc}")
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once, backgrounded_offscreen, in_fullscreen_mode
+            nonlocal shown_once
             _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
@@ -902,19 +867,7 @@ def _start_with_pywebview(
                 return
             if message.get("type") == "background":
                 try:
-                    if os.name == "nt":
-                        if target_fullscreen and in_fullscreen_mode:
-                            try:
-                                window.toggle_fullscreen()
-                                in_fullscreen_mode = False
-                            except Exception as exc:
-                                _debug_log(f"pywebview background fullscreen exit failed | error={exc}")
-                        window.resize(1, 1)
-                        window.move(-32000, -32000)
-                        window.hide()
-                        backgrounded_offscreen = True
-                    else:
-                        window.hide()
+                    window.hide()
                 except Exception as exc:
                     _debug_log(f"pywebview background transition failed | error={exc}")
                     try:
@@ -946,8 +899,6 @@ def _start_with_pywebview(
             if not shown_once:
                 shown_once = True
                 try:
-                    if use_hidden_launch_workaround or backgrounded_offscreen:
-                        _restore_window_for_show()
                     window.show()
                 except Exception:
                     pass
