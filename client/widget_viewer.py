@@ -716,7 +716,12 @@ def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
     return unique_bounds
 
 
-def _apply_cef_monitor_bounds(browser, monitor_bounds: tuple[int, int, int, int] | None) -> None:
+def _apply_cef_monitor_bounds(
+    browser,
+    monitor_bounds: tuple[int, int, int, int] | None,
+    *,
+    show_window: bool = True,
+) -> None:
     if monitor_bounds is None:
         return
     try:
@@ -730,7 +735,10 @@ def _apply_cef_monitor_bounds(browser, monitor_bounds: tuple[int, int, int, int]
     try:
         SWP_NOZORDER = 0x0004
         SWP_SHOWWINDOW = 0x0040
-        ctypes.windll.user32.SetWindowPos(handle, 0, x, y, width, height, SWP_NOZORDER | SWP_SHOWWINDOW)
+        flags = SWP_NOZORDER
+        if show_window:
+            flags |= SWP_SHOWWINDOW
+        ctypes.windll.user32.SetWindowPos(handle, 0, x, y, width, height, flags)
     except Exception:
         pass
 
@@ -866,7 +874,7 @@ def _start_with_cef(
         browser.SetZoomLevel(0)
     except Exception:
         _debug_log("cef zoom level reset skipped")
-    _apply_cef_monitor_bounds(browser, monitor_bounds)
+    _apply_cef_monitor_bounds(browser, monitor_bounds, show_window=not start_hidden)
     if start_hidden:
         _set_cef_window_visible(browser, False)
 
