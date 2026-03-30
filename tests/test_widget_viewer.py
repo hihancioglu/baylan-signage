@@ -67,6 +67,24 @@ class TestWidgetViewer(unittest.TestCase):
             widget_viewer.CEF_BLACK_BACKGROUND,
         )
 
+
+    def test_parse_runtime_options_reads_flags_in_single_pass(self):
+        options = widget_viewer._parse_runtime_options(
+            ["widget_viewer.py", "https://example.com", "--runtime-ipc", "--start-hidden", "--monitor-bounds", "10,20,1920,1080"]
+        )
+
+        self.assertTrue(options.runtime_ipc)
+        self.assertTrue(options.start_hidden)
+        self.assertEqual(options.monitor_bounds, (10, 20, 1920, 1080))
+
+    def test_parse_runtime_options_resolves_monitor_index(self):
+        with patch("client.widget_viewer._windows_connected_monitor_bounds", return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]):
+            options = widget_viewer._parse_runtime_options(
+                ["widget_viewer.py", "https://example.com", "--monitor", "1"]
+            )
+
+        self.assertEqual(options.monitor_bounds, (1920, 0, 1920, 1080))
+
     def test_start_with_pywebview_uses_fullscreen_without_monitor_bounds(self):
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = unittest.mock.Mock()

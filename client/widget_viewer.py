@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 import re
+from dataclasses import dataclass
 
 
 CHROME_KIOSK_SWITCHES = {
@@ -83,7 +84,14 @@ def _setup_widget_viewer_logger() -> logging.Logger:
     return logger
 
 
-WIDGET_VIEWER_LOGGER = _setup_widget_viewer_logger()
+_WIDGET_VIEWER_LOGGER: logging.Logger | None = None
+
+
+def _get_widget_viewer_logger() -> logging.Logger:
+    global _WIDGET_VIEWER_LOGGER
+    if _WIDGET_VIEWER_LOGGER is None:
+        _WIDGET_VIEWER_LOGGER = _setup_widget_viewer_logger()
+    return _WIDGET_VIEWER_LOGGER
 
 
 def _debug_log(message: str) -> None:
@@ -111,7 +119,7 @@ def _safe_print(message: str) -> None:
     text = str(message)
     if text:
         try:
-            WIDGET_VIEWER_LOGGER.info(text)
+            _get_widget_viewer_logger().info(text)
         except Exception:
             pass
     try:
@@ -743,6 +751,62 @@ def _apply_cef_monitor_bounds(
         pass
 
 
+
+
+@dataclass(frozen=True)
+class _RuntimeOptions:
+    runtime_ipc: bool = False
+    start_hidden: bool = False
+    monitor_bounds: tuple[int, int, int, int] | None = None
+
+
+def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
+    runtime_ipc = False
+    start_hidden = False
+    monitor_bounds_arg: str | None = None
+    monitor_index: int | None = None
+
+    idx = 2
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--runtime-ipc":
+            runtime_ipc = True
+        elif token == "--start-hidden":
+            start_hidden = True
+        elif token == "--monitor-bounds":
+            if idx + 1 < len(argv):
+                monitor_bounds_arg = argv[idx + 1]
+                idx += 1
+            else:
+                monitor_bounds_arg = ""
+        elif token == "--monitor":
+            if idx + 1 < len(argv):
+                try:
+                    monitor_index = int(str(argv[idx + 1]).strip())
+                except ValueError:
+                    monitor_index = -1
+                idx += 1
+            else:
+                monitor_index = -1
+        idx += 1
+
+    monitor_bounds = _parse_monitor_bounds(monitor_bounds_arg)
+    if monitor_bounds is None and monitor_index is not None:
+        monitor_list = _windows_connected_monitor_bounds()
+        if not monitor_list:
+            raise ValueError("Monitor seçimi çözümlenemedi: bağlı monitör listesi alınamadı.")
+        if monitor_index < 0 or monitor_index >= len(monitor_list):
+            raise ValueError(f"Geçersiz --monitor değeri: {monitor_index}. Geçerli aralık: 0-{len(monitor_list) - 1}")
+        monitor_bounds = monitor_list[monitor_index]
+        _debug_log(f"runtime options monitor selected | index={monitor_index} bounds={monitor_bounds}")
+
+    return _RuntimeOptions(
+        runtime_ipc=runtime_ipc,
+        start_hidden=start_hidden,
+        monitor_bounds=monitor_bounds,
+    )
+
+
 def _start_with_pywebview(
     widget_url: str,
     runtime_ipc: bool = False,
@@ -965,32 +1029,19 @@ def main() -> int:
         _safe_print("Kullanım: widget_viewer.py <widget_url>")
         return 2
 
-    runtime_ipc = "--runtime-ipc" in sys.argv[2:]
-    _debug_log(f"main start | argv={sys.argv} runtime_ipc={runtime_ipc}")
-    start_hidden = "--start-hidden" in sys.argv[2:]
-    _debug_log(f"main flags | start_hidden={start_hidden}")
-    monitor_bounds = None
-    if "--monitor-bounds" in sys.argv[2:]:
-        try:
-            monitor_bounds_arg = sys.argv[sys.argv.index("--monitor-bounds") + 1]
-        except (ValueError, IndexError):
-            monitor_bounds_arg = ""
-        monitor_bounds = _parse_monitor_bounds(monitor_bounds_arg)
-    elif "--monitor" in sys.argv[2:]:
-        try:
-            monitor_arg = sys.argv[sys.argv.index("--monitor") + 1]
-            monitor_index = int(str(monitor_arg).strip())
-        except (ValueError, IndexError):
-            monitor_index = -1
-        monitor_list = _windows_connected_monitor_bounds()
-        if not monitor_list:
-            _safe_print("Monitor seçimi çözümlenemedi: bağlı monitör listesi alınamadı.")
-            return 2
-        if monitor_index < 0 or monitor_index >= len(monitor_list):
-            _safe_print(f"Geçersiz --monitor değeri: {monitor_index}. Geçerli aralık: 0-{len(monitor_list) - 1}")
-            return 2
-        monitor_bounds = monitor_list[monitor_index]
-        _debug_log(f"main monitor selected | index={monitor_index} bounds={monitor_bounds}")
+    try:
+        runtime_options = _parse_runtime_options(sys.argv)
+    except ValueError as exc:
+        _safe_print(str(exc))
+        return 2
+
+    runtime_ipc = runtime_options.runtime_ipc
+    start_hidden = runtime_options.start_hidden
+    monitor_bounds = runtime_options.monitor_bounds
+    _debug_log(
+        f"main start | argv={sys.argv} runtime_ipc={runtime_ipc} "
+        f"start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
+    )
 
     try:
         widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
