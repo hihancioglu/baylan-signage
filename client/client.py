@@ -235,6 +235,7 @@ PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
 ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
+LOW_IDLE_ACTIVITY_ENABLED = _env_bool("LOW_IDLE_ACTIVITY_ENABLED", True)
 OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
@@ -1518,6 +1519,10 @@ class MultiMonitorPlayback:
         return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
+    def _secondary_monitor_widgets_enabled() -> bool:
+        return os.getenv("SECONDARY_MONITOR_WIDGETS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
     def _connected_monitor_count() -> int | None:
         if os.name != "nt":
             return None
@@ -1793,6 +1798,13 @@ class MultiMonitorPlayback:
                     self._players[monitor_no] = player
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
+                if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
+                    log_debug(
+                        "monitor_widget_launch skipped | "
+                        f"monitor_no={monitor_no} reason=secondary_widgets_disabled"
+                    )
+                    time.sleep(0.2)
+                    continue
                 widget_url = str(item.get("widget_url") or item.get("path") or "").strip()
                 widget_payload = item.get("widget_payload")
                 widget_config = self._normalize_widget_config(widget_payload)
@@ -1816,6 +1828,14 @@ class MultiMonitorPlayback:
                     clone_requested=False,
                     requested_target_monitor_index=target_monitor_index,
                     has_multiple_monitors=True,
+                )
+                log_debug(
+                    "monitor_widget_launch | "
+                    f"monitor_no={monitor_no} requested_target_monitor_index={target_monitor_index} "
+                    f"resolved_target_monitor_index={widget_target_monitor_index} clone_to_all_monitors={widget_clone_enabled} "
+                    f"widget_url={'<set>' if widget_url else '<empty>'} "
+                    f"widget_count={len((widget_config or {}).get('widgets') or [])} "
+                    f"duration_sec={widget_duration_sec}"
                 )
                 player.play_widget_blocking(
                     widget_url,
@@ -3541,7 +3561,7 @@ def run_state_cycle():
     elif isinstance(previous_idle_sec, (int, float)) and idle_sec >= previous_idle_sec:
         _activity_drop_streak = 0
 
-    if idle_sec <= ACTIVITY_RESUME_SEC:
+    if LOW_IDLE_ACTIVITY_ENABLED and idle_sec <= ACTIVITY_RESUME_SEC:
         _low_idle_streak += 1
     else:
         _low_idle_streak = 0
