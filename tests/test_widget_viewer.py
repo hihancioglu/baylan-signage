@@ -77,6 +77,22 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertTrue(options.start_hidden)
         self.assertEqual(options.monitor_bounds, (10, 20, 1920, 1080))
 
+    def test_parse_runtime_options_supports_equals_syntax(self):
+        options = widget_viewer._parse_runtime_options(
+            [
+                "widget_viewer.py",
+                "https://example.com",
+                "--runtime-ipc",
+                "--start-hidden",
+                "--monitor=1",
+                "--monitor-bounds=30,40,1280,720",
+            ]
+        )
+
+        self.assertTrue(options.runtime_ipc)
+        self.assertTrue(options.start_hidden)
+        self.assertEqual(options.monitor_bounds, (30, 40, 1280, 720))
+
     def test_parse_runtime_options_resolves_monitor_index(self):
         with patch("client.widget_viewer._windows_connected_monitor_bounds", return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]):
             options = widget_viewer._parse_runtime_options(

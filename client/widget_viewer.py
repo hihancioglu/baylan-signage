@@ -779,6 +779,8 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
                 idx += 1
             else:
                 monitor_bounds_arg = ""
+        elif token.startswith("--monitor-bounds="):
+            monitor_bounds_arg = token.split("=", 1)[1]
         elif token == "--monitor":
             if idx + 1 < len(argv):
                 try:
@@ -787,6 +789,11 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
                     monitor_index = -1
                 idx += 1
             else:
+                monitor_index = -1
+        elif token.startswith("--monitor="):
+            try:
+                monitor_index = int(str(token.split("=", 1)[1]).strip())
+            except ValueError:
                 monitor_index = -1
         idx += 1
 
