@@ -2302,7 +2302,17 @@ class PlaybackController:
 
         monitor_playlists = config.get("monitor_playlists") if isinstance(config, dict) else {}
         primary_payload = monitor_playlists.get("1") if isinstance(monitor_playlists, dict) else None
-        selected_payload = primary_payload if isinstance(primary_payload, dict) else config
+        selected_payload = config
+        if isinstance(primary_payload, dict):
+            primary_enabled = bool(primary_payload.get("enabled", True))
+            primary_items = primary_payload.get("videos") or []
+            # Bazı konfigürasyonlarda monitor_playlists["1"] boş/disabled gelirken
+            # üst seviye payload gerçek ana playlist'i taşıyabiliyor
+            # (özellikle Windows display ID eşlemelerinde). Bu durumda
+            # monitor 1'i gereksiz fallback'e düşürmemek için yalnızca
+            # oynatılabilir içerik varsa monitor_playlists["1"] tercih edilir.
+            if primary_enabled or primary_items:
+                selected_payload = primary_payload
 
         enabled = bool(selected_payload.get("enabled", True))
         videos = selected_payload.get("videos") or []

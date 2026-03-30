@@ -2439,6 +2439,45 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         player.stop.assert_called_once()
 
+    def test_update_from_config_prefers_top_level_payload_when_monitor1_playlist_is_empty(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.player = unittest.mock.Mock()
+
+        with patch.object(
+            controller.media_manager,
+            "sync_playlist_entries",
+            return_value=[{"local_path": "/tmp/widget"}],
+        ) as sync_mock:
+            controller.update_from_config(
+                {
+                    "enabled": True,
+                    "videos": [{"item_type": "widget", "widget_url": "https://example.com/widget"}],
+                    "playlist_version": "v-main",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                    "monitor_playlists": {
+                        "1": {
+                            "enabled": False,
+                            "videos": [],
+                            "playlist_version": "v-empty",
+                            "media_signatures": {},
+                            "loop_mode": "sequential",
+                        }
+                    },
+                }
+            )
+
+        self.assertFalse(controller._fallback_only_mode)
+        self.assertEqual(controller._version, "v-main")
+        sync_mock.assert_called_once()
+        self.assertEqual(
+            sync_mock.call_args.args[1],
+            "v-main",
+        )
+
     def test_multi_monitor_playback_detects_active_playlist_on_third_monitor(self):
         from client.client import MultiMonitorPlayback
 
