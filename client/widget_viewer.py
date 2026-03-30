@@ -524,11 +524,7 @@ def _gui_candidates() -> list[str | None]:
     )
     candidates: list[str | None] = []
 
-    # Windows cihazlarda pywebview "auto" modu önce farklı GUI denemesi
-    # yapabildiği için kısa süreli siyah ekran/yeniden açılma etkisi yaratabiliyor.
-    # Bu yüzden varsayılan olarak auto yerine doğrudan GUI sırasını deniyoruz.
-    auto_default = "0" if os.name == "nt" else "1"
-    if os.getenv("PYWEBVIEW_TRY_AUTO", auto_default).strip().lower() in {"1", "true", "yes"}:
+    if os.getenv("PYWEBVIEW_TRY_AUTO", "1").strip().lower() in {"1", "true", "yes"}:
         candidates.append(None)
 
     for gui in configured.split(","):
