@@ -875,22 +875,24 @@ def _start_with_pywebview(
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
         backgrounded_offscreen = False
+        in_fullscreen_mode = bool(window_kwargs.get("fullscreen", False))
 
-        def _prepare_window_for_show() -> None:
-            if not use_hidden_launch_workaround:
-                return
+        def _restore_window_for_show() -> None:
             try:
                 if monitor_bounds is not None:
                     x, y, width, height = monitor_bounds
                     window.move(x, y)
                     window.resize(width, height)
-                if target_fullscreen:
+                nonlocal in_fullscreen_mode, backgrounded_offscreen
+                if target_fullscreen and not in_fullscreen_mode:
                     window.toggle_fullscreen()
+                    in_fullscreen_mode = True
+                backgrounded_offscreen = False
             except Exception as exc:
-                _debug_log(f"pywebview hidden launch workaround failed | error={exc}")
+                _debug_log(f"pywebview restore for show failed | error={exc}")
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once, backgrounded_offscreen
+            nonlocal shown_once, backgrounded_offscreen, in_fullscreen_mode
             _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
@@ -901,13 +903,15 @@ def _start_with_pywebview(
             if message.get("type") == "background":
                 try:
                     if os.name == "nt":
-                        if target_fullscreen:
+                        if target_fullscreen and in_fullscreen_mode:
                             try:
                                 window.toggle_fullscreen()
+                                in_fullscreen_mode = False
                             except Exception as exc:
                                 _debug_log(f"pywebview background fullscreen exit failed | error={exc}")
                         window.resize(1, 1)
                         window.move(-32000, -32000)
+                        window.hide()
                         backgrounded_offscreen = True
                     else:
                         window.hide()
@@ -942,15 +946,8 @@ def _start_with_pywebview(
             if not shown_once:
                 shown_once = True
                 try:
-                    _prepare_window_for_show()
-                    if backgrounded_offscreen:
-                        if monitor_bounds is not None:
-                            x, y, width, height = monitor_bounds
-                            window.move(x, y)
-                            window.resize(width, height)
-                        if target_fullscreen:
-                            window.toggle_fullscreen()
-                        backgrounded_offscreen = False
+                    if use_hidden_launch_workaround or backgrounded_offscreen:
+                        _restore_window_for_show()
                     window.show()
                 except Exception:
                     pass
