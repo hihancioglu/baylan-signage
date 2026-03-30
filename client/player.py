@@ -1400,7 +1400,7 @@ class BorderlessFullscreenPlayer:
             command.extend(["--monitor", str(monitor_index)])
         if monitor_bounds is not None:
             x, y, width, height = monitor_bounds
-            command.append(f"--monitor-bounds={x},{y},{width},{height}")
+            command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
         return command
 
     def start_widget_engine_if_needed(
@@ -1875,7 +1875,7 @@ class BorderlessFullscreenPlayer:
             if self._is_python_widget_command(command):
                 x, y, width, height = monitor_bounds
                 monitor_command.extend(["--monitor", str(monitor_index)])
-                monitor_command.append(f"--monitor-bounds={x},{y},{width},{height}")
+                monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
             commands.append(monitor_command)
 
         _debug_log(
@@ -1957,7 +1957,7 @@ class BorderlessFullscreenPlayer:
                         selected_monitor_index = target_monitor_index
                     if isinstance(selected_monitor_index, int) and selected_monitor_index >= 0:
                         monitor_command.extend(["--monitor", str(selected_monitor_index)])
-                    monitor_command.append(f"--monitor-bounds={x},{y},{width},{height}")
+                    monitor_command.extend(["--monitor-bounds", f"{x},{y},{width},{height}"])
                 _debug_log(
                     "widget_monitor_command_build | "
                     f"scope=build clone_enabled={clone_enabled} "
