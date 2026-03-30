@@ -874,6 +874,7 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
+        backgrounded_offscreen = False
 
         def _prepare_window_for_show() -> None:
             if not use_hidden_launch_workaround:
@@ -889,7 +890,7 @@ def _start_with_pywebview(
                 _debug_log(f"pywebview hidden launch workaround failed | error={exc}")
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once
+            nonlocal shown_once, backgrounded_offscreen
             _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
@@ -899,9 +900,23 @@ def _start_with_pywebview(
                 return
             if message.get("type") == "background":
                 try:
-                    window.hide()
-                except Exception:
-                    pass
+                    if os.name == "nt":
+                        if target_fullscreen:
+                            try:
+                                window.toggle_fullscreen()
+                            except Exception as exc:
+                                _debug_log(f"pywebview background fullscreen exit failed | error={exc}")
+                        window.resize(1, 1)
+                        window.move(-32000, -32000)
+                        backgrounded_offscreen = True
+                    else:
+                        window.hide()
+                except Exception as exc:
+                    _debug_log(f"pywebview background transition failed | error={exc}")
+                    try:
+                        window.hide()
+                    except Exception:
+                        pass
                 shown_once = False
                 return
             message_type = str(message.get("type") or "").strip().lower()
@@ -928,6 +943,14 @@ def _start_with_pywebview(
                 shown_once = True
                 try:
                     _prepare_window_for_show()
+                    if backgrounded_offscreen:
+                        if monitor_bounds is not None:
+                            x, y, width, height = monitor_bounds
+                            window.move(x, y)
+                            window.resize(width, height)
+                        if target_fullscreen:
+                            window.toggle_fullscreen()
+                        backgrounded_offscreen = False
                     window.show()
                 except Exception:
                     pass
