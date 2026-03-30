@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import tempfile
+import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
@@ -511,11 +512,15 @@ def _viewer_backend_order() -> list[str]:
 def _gui_candidates() -> list[str | None]:
     configured = os.getenv(
         "PYWEBVIEW_GUI_PRIORITY",
-        "cef,edgechromium,qt,gtk,winforms,mshtml",
+        "edgechromium,qt,gtk,winforms,mshtml,cef",
     )
     candidates: list[str | None] = []
 
-    if os.getenv("PYWEBVIEW_TRY_AUTO", "1").strip().lower() in {"1", "true", "yes"}:
+    # Windows cihazlarda pywebview "auto" modu önce farklı GUI denemesi
+    # yapabildiği için kısa süreli siyah ekran/yeniden açılma etkisi yaratabiliyor.
+    # Bu yüzden varsayılan olarak auto yerine doğrudan GUI sırasını deniyoruz.
+    auto_default = "0" if os.name == "nt" else "1"
+    if os.getenv("PYWEBVIEW_TRY_AUTO", auto_default).strip().lower() in {"1", "true", "yes"}:
         candidates.append(None)
 
     for gui in configured.split(","):
@@ -530,6 +535,7 @@ def _gui_candidates() -> list[str | None]:
 
 def _start_with_fallback(webview_module) -> None:
     errors: list[str] = []
+    launch_started_at = time.perf_counter()
     for gui in _gui_candidates():
         try:
             kwargs = {"private_mode": True}
@@ -538,10 +544,14 @@ def _start_with_fallback(webview_module) -> None:
                 _safe_print(f"Widget viewer GUI deneniyor: {gui}")
             else:
                 _safe_print("Widget viewer GUI deneniyor: auto")
+            _debug_log(f"pywebview.start begin | gui={gui or 'auto'} kwargs={kwargs}")
             webview_module.start(**kwargs)
+            elapsed_ms = int((time.perf_counter() - launch_started_at) * 1000)
+            _debug_log(f"pywebview.start success | gui={gui or 'auto'} elapsed_ms={elapsed_ms}")
             return
         except Exception as exc:
             gui_name = gui or "auto"
+            _debug_log(f"pywebview.start failed | gui={gui_name} error={exc}")
             errors.append(f"{gui_name}: {exc}")
 
     raise RuntimeError("; ".join(errors))
@@ -759,7 +769,13 @@ def _start_with_pywebview(
         # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
         window_kwargs["fullscreen"] = True
 
+    create_started_at = time.perf_counter()
     window = webview.create_window(**window_kwargs, js_api=debug_bridge)
+    _debug_log(
+        "pywebview create_window success | "
+        f"elapsed_ms={int((time.perf_counter() - create_started_at) * 1000)} "
+        f"start_hidden={start_hidden} fullscreen={window_kwargs.get('fullscreen')}"
+    )
 
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
@@ -911,6 +927,7 @@ def main() -> int:
     runtime_ipc = "--runtime-ipc" in sys.argv[2:]
     _debug_log(f"main start | argv={sys.argv} runtime_ipc={runtime_ipc}")
     start_hidden = "--start-hidden" in sys.argv[2:]
+    _debug_log(f"main flags | start_hidden={start_hidden}")
     monitor_bounds = None
     if "--monitor-bounds" in sys.argv[2:]:
         try:
@@ -947,6 +964,7 @@ def main() -> int:
         return 2
 
     errors: list[str] = []
+    launch_started_at = time.perf_counter()
     for backend in _viewer_backend_order():
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
@@ -965,6 +983,7 @@ def main() -> int:
                     start_hidden=start_hidden,
                     monitor_bounds=monitor_bounds,
                 )
+            _debug_log(f"main backend success | backend={backend} total_elapsed_ms={int((time.perf_counter() - launch_started_at) * 1000)}")
             return 0
         except Exception as exc:
             _debug_log(f"backend failed | backend={backend} error={exc}")
