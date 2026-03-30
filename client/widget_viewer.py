@@ -756,6 +756,9 @@ def _start_with_pywebview(
         f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
     )
 
+    target_fullscreen = True
+    use_hidden_launch_workaround = bool(runtime_ipc and start_hidden and os.name == "nt")
+
     window_kwargs: dict = {
         "title": "Baylan Widget",
         "url": widget_url,
@@ -777,6 +780,22 @@ def _start_with_pywebview(
         # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
         window_kwargs["fullscreen"] = True
 
+    # Bazı Windows/pywebview kombinasyonlarında hidden+fullscreen pencere kısa süreli
+    # görünür olup siyah ekran flicker üretebiliyor. Runtime IPC ile hidden başlangıçta
+    # pencereyi geçici olarak off-screen küçük başlatıp, ilk layout mesajında hedef
+    # geometri + fullscreen'e taşıyoruz.
+    if use_hidden_launch_workaround:
+        window_kwargs["hidden"] = False
+        window_kwargs["fullscreen"] = False
+        window_kwargs["x"] = -32000
+        window_kwargs["y"] = -32000
+        window_kwargs["width"] = 1
+        window_kwargs["height"] = 1
+        _debug_log(
+            "pywebview hidden launch workaround active | "
+            f"target_monitor_bounds={monitor_bounds} target_fullscreen={target_fullscreen}"
+        )
+
     create_started_at = time.perf_counter()
     window = webview.create_window(**window_kwargs, js_api=debug_bridge)
     _debug_log(
@@ -788,6 +807,19 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
+
+        def _prepare_window_for_show() -> None:
+            if not use_hidden_launch_workaround:
+                return
+            try:
+                if monitor_bounds is not None:
+                    x, y, width, height = monitor_bounds
+                    window.move(x, y)
+                    window.resize(width, height)
+                if target_fullscreen:
+                    window.toggle_fullscreen()
+            except Exception as exc:
+                _debug_log(f"pywebview hidden launch workaround failed | error={exc}")
 
         def dispatch(message: dict) -> None:
             nonlocal shown_once
@@ -828,6 +860,7 @@ def _start_with_pywebview(
             if not shown_once:
                 shown_once = True
                 try:
+                    _prepare_window_for_show()
                     window.show()
                 except Exception:
                     pass
