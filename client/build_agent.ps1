@@ -91,7 +91,6 @@ $clientPyInstallerArgs = @(
     "--clean"
     "--onefile"
     "--noconsole"
-    "--strip"
     "--noupx"
     "--runtime-tmpdir"
     $RuntimeTmpDir
