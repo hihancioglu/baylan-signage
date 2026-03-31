@@ -7,6 +7,7 @@ import mimetypes
 import os
 import sys
 import threading
+import queue
 import tempfile
 import time
 from pathlib import Path
@@ -16,16 +17,6 @@ import re
 from dataclasses import dataclass
 
 
-CHROME_KIOSK_SWITCHES = {
-    "kiosk": "",
-    "disable-translate": "",
-    "disable-infobars": "",
-    "disable-session-crashed-bubble": "",
-    "disable-features": "TranslateUI",
-    # Video autoplay in dashboard iframes requires explicit Chromium policy override.
-    "autoplay-policy": "no-user-gesture-required",
-}
-CEF_BLACK_BACKGROUND = 0xFF000000
 WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 WEATHER_WIDGET_HREF_PATTERN = re.compile(
     r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>',
@@ -507,58 +498,8 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
     return payload
 
 
-def _viewer_backend_order() -> list[str]:
-    preferred = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
-    if preferred in {"cef", "pywebview"}:
-        return [preferred]
-    # Windows'ta ikinci ekran/harici GPU kombinasyonlarında CEF siyah ekran
-    # davranışı gösterebildiği için varsayılan otomatik sırada pywebview'i
-    # öne alıyoruz. CEF yine fallback olarak denenir.
-    return ["pywebview", "cef"]
-
-
-def _gui_candidates() -> list[str | None]:
-    configured = os.getenv(
-        "PYWEBVIEW_GUI_PRIORITY",
-        "edgechromium,qt,gtk,winforms,mshtml,cef",
-    )
-    candidates: list[str | None] = []
-
-    if os.getenv("PYWEBVIEW_TRY_AUTO", "1").strip().lower() in {"1", "true", "yes"}:
-        candidates.append(None)
-
-    for gui in configured.split(","):
-        normalized = gui.strip().lower()
-        if not normalized:
-            continue
-        if normalized not in candidates:
-            candidates.append(normalized)
-
-    return candidates or [None]
-
-
-def _start_with_fallback(webview_module) -> None:
-    errors: list[str] = []
-    launch_started_at = time.perf_counter()
-    for gui in _gui_candidates():
-        try:
-            kwargs = {"private_mode": True}
-            if gui:
-                kwargs["gui"] = gui
-                _safe_print(f"Widget viewer GUI deneniyor: {gui}")
-            else:
-                _safe_print("Widget viewer GUI deneniyor: auto")
-            _debug_log(f"pywebview.start begin | gui={gui or 'auto'} kwargs={kwargs}")
-            webview_module.start(**kwargs)
-            elapsed_ms = int((time.perf_counter() - launch_started_at) * 1000)
-            _debug_log(f"pywebview.start success | gui={gui or 'auto'} elapsed_ms={elapsed_ms}")
-            return
-        except Exception as exc:
-            gui_name = gui or "auto"
-            _debug_log(f"pywebview.start failed | gui={gui_name} error={exc}")
-            errors.append(f"{gui_name}: {exc}")
-
-    raise RuntimeError("; ".join(errors))
+def _viewer_backend_name() -> str:
+    return "pyside6-qtwebengine"
 
 
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
@@ -636,25 +577,6 @@ def _build_runtime_update_script(payload: object, signature: str | None = None) 
 
 
 
-def _set_cef_window_visible(browser, visible: bool) -> None:
-    try:
-        handle = int(browser.GetOuterWindowHandle())
-    except Exception:
-        return
-
-    if handle <= 0:
-        return
-
-    try:
-        import ctypes
-
-        SW_HIDE = 0
-        SW_SHOW = 5
-        ctypes.windll.user32.ShowWindow(handle, SW_SHOW if visible else SW_HIDE)
-    except Exception:
-        pass
-
-
 def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | None:
     text = str(raw_value or "").strip()
     if not text:
@@ -720,35 +642,6 @@ def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
     return unique_bounds
 
 
-def _apply_cef_monitor_bounds(
-    browser,
-    monitor_bounds: tuple[int, int, int, int] | None,
-    *,
-    show_window: bool = True,
-) -> None:
-    if monitor_bounds is None:
-        return
-    try:
-        handle = int(browser.GetOuterWindowHandle())
-    except Exception:
-        return
-    if handle <= 0:
-        return
-
-    x, y, width, height = monitor_bounds
-    try:
-        SWP_NOZORDER = 0x0004
-        SWP_SHOWWINDOW = 0x0040
-        flags = SWP_NOZORDER
-        if show_window:
-            flags |= SWP_SHOWWINDOW
-        ctypes.windll.user32.SetWindowPos(handle, 0, x, y, width, height, flags)
-    except Exception:
-        pass
-
-
-
-
 @dataclass(frozen=True)
 class _RuntimeOptions:
     runtime_ipc: bool = False
@@ -810,217 +703,98 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
     )
 
 
-def _start_with_pywebview(
+def _start_with_pyside6(
     widget_url: str,
     runtime_ipc: bool = False,
     start_hidden: bool = False,
     monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
-    import webview
-    debug_bridge = _WidgetEngineDebugBridge()
+    from PySide6.QtCore import Qt, QTimer, QUrl
+    from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
     _debug_log(
-        "pywebview create_window request | "
+        "pyside6 launch request | "
         f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
     )
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = QWidget()
+    window.setWindowTitle("Baylan Widget")
+    window.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+    window.setStyleSheet("background-color: #000000;")
 
-    window_kwargs: dict = {
-        "title": "Baylan Widget",
-        "url": widget_url,
-        "frameless": True,
-        "on_top": True,
-        "hidden": start_hidden,
-        "background_color": "#000000",
-        "text_select": False,
-    }
-    if monitor_bounds is None:
-        window_kwargs["fullscreen"] = True
-    else:
+    layout = QVBoxLayout(window)
+    layout.setContentsMargins(0, 0, 0, 0)
+    view = QWebEngineView(window)
+    layout.addWidget(view)
+    view.setUrl(QUrl(widget_url))
+
+    shown_once = not start_hidden
+    if monitor_bounds is not None:
         x, y, width, height = monitor_bounds
-        window_kwargs["x"] = x
-        window_kwargs["y"] = y
-        window_kwargs["width"] = width
-        window_kwargs["height"] = height
-        # Keep true fullscreen even on explicitly targeted monitors.
-        # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
-        window_kwargs["fullscreen"] = True
+        window.setGeometry(x, y, width, height)
 
-    create_started_at = time.perf_counter()
-    window = webview.create_window(**window_kwargs, js_api=debug_bridge)
-    _debug_log(
-        "pywebview create_window success | "
-        f"elapsed_ms={int((time.perf_counter() - create_started_at) * 1000)} "
-        f"start_hidden={start_hidden} fullscreen={window_kwargs.get('fullscreen')}"
-    )
+    if not start_hidden:
+        if monitor_bounds is None:
+            window.showFullScreen()
+        else:
+            window.show()
 
     if runtime_ipc:
-        _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
-        shown_once = not start_hidden
-        backgrounded = False
+        _debug_log(f"pyside6 runtime ipc enabled | start_hidden={start_hidden}")
+        event_queue: queue.Queue[dict] = queue.Queue()
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once, backgrounded
-            _debug_log(f"pywebview dispatch message={message.get('type')}")
-            if message.get("type") == "stop":
-                try:
-                    webview.destroy_window()
-                except Exception:
-                    pass
-                return
-            if message.get("type") == "background":
-                try:
-                    window.hide()
-                except Exception as exc:
-                    _debug_log(f"pywebview background transition failed | error={exc}")
-                    try:
-                        window.hide()
-                    except Exception:
-                        pass
-                if os.name == "nt":
-                    try:
-                        window.toggle_fullscreen()
-                    except Exception:
-                        pass
-                    try:
-                        window.move(-32000, -32000)
-                        window.resize(1, 1)
-                    except Exception:
-                        pass
-                shown_once = False
-                backgrounded = True
-                return
-            message_type = str(message.get("type") or "").strip().lower()
-            raw_payload = message.get("payload")
-            signature = None
-            payload = None
-            if message_type == "layout_update":
-                if isinstance(raw_payload, dict):
-                    signature = raw_payload.get("signature")
-                    payload = raw_payload.get("config")
-            elif message_type == "playlist_sync":
-                payload = {"__playlist_sync": raw_payload}
+            event_queue.put(message)
 
-            if payload is None:
-                return
-
-            js = _build_runtime_update_script(payload, signature=signature)
-            try:
-                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
-                window.evaluate_js(js)
-            except Exception as exc:
-                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
-            if not shown_once:
-                shown_once = True
-                if os.name == "nt" and backgrounded:
-                    if monitor_bounds is not None:
-                        x, y, width, height = monitor_bounds
-                        try:
-                            window.move(x, y)
-                            window.resize(width, height)
-                        except Exception:
-                            pass
-                    try:
-                        window.toggle_fullscreen()
-                    except Exception:
-                        pass
-                try:
-                    window.show()
-                except Exception:
-                    pass
-                backgrounded = False
-
-        threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
-
-    _start_with_fallback(webview)
-
-
-def _start_with_cef(
-    widget_url: str,
-    runtime_ipc: bool = False,
-    start_hidden: bool = False,
-    monitor_bounds: tuple[int, int, int, int] | None = None,
-) -> None:
-    from cefpython3 import cefpython as cef
-
-    switches = dict(CHROME_KIOSK_SWITCHES)
-    custom_switches = os.getenv("CEF_EXTRA_SWITCHES", "").strip()
-    if custom_switches:
-        for raw_switch in custom_switches.split(","):
-            cleaned = raw_switch.strip().lstrip("-")
-            if not cleaned:
-                continue
-            if "=" in cleaned:
-                key, value = cleaned.split("=", 1)
-                switches[key] = value
-            else:
-                switches[cleaned] = ""
-
-    switches.setdefault("force-device-scale-factor", "1")
-    switches.setdefault("high-dpi-support", "1")
-
-    cef.Initialize(settings={"context_menu": {"enabled": False}}, switches=switches)
-    window_info = cef.WindowInfo()
-    window_info.SetAsPopup(0, "Baylan Widget")
-    browser = cef.CreateBrowserSync(
-        window_info=window_info,
-        url=widget_url,
-        window_title="Baylan Widget",
-        settings={"background_color": CEF_BLACK_BACKGROUND},
-    )
-    try:
-        browser.SetZoomLevel(0)
-    except Exception:
-        _debug_log("cef zoom level reset skipped")
-    _apply_cef_monitor_bounds(browser, monitor_bounds, show_window=not start_hidden)
-    if start_hidden:
-        _set_cef_window_visible(browser, False)
-
-    if runtime_ipc:
-        _debug_log(f"cef runtime ipc enabled | start_hidden={start_hidden}")
-        shown_once = not start_hidden
-
-        def dispatch(message: dict) -> None:
+        def process_pending_messages() -> None:
             nonlocal shown_once
-            _debug_log(f"cef dispatch message={message.get('type')}")
-            if message.get("type") == "stop":
-                cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
-                return
-            if message.get("type") == "background":
-                shown_once = False
+            while True:
+                try:
+                    message = event_queue.get_nowait()
+                except queue.Empty:
+                    break
 
-                def _hide_window():
-                    _set_cef_window_visible(browser, False)
+                _debug_log(f"pyside6 dispatch message={message.get('type')}")
+                if message.get("type") == "stop":
+                    app.quit()
+                    return
+                if message.get("type") == "background":
+                    shown_once = False
+                    window.hide()
+                    continue
 
-                cef.PostTask(cef.TID_UI, _hide_window)
-                return
-
-            message_type = str(message.get("type") or "").strip().lower()
-            raw_payload = message.get("payload")
-            signature = None
-            payload = None
-            if message_type == "layout_update":
-                if isinstance(raw_payload, dict):
+                message_type = str(message.get("type") or "").strip().lower()
+                raw_payload = message.get("payload")
+                signature = None
+                payload = None
+                if message_type == "layout_update" and isinstance(raw_payload, dict):
                     signature = raw_payload.get("signature")
                     payload = raw_payload.get("config")
-            elif message_type == "playlist_sync":
-                payload = {"__playlist_sync": raw_payload}
+                elif message_type == "playlist_sync":
+                    payload = {"__playlist_sync": raw_payload}
 
-            if payload is None:
-                return
+                if payload is None:
+                    continue
 
-            def _post_js():
-                nonlocal shown_once
-                _debug_log(f"cef ExecuteJavascript | message_type={message_type} signature={signature}")
-                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
+                js = _build_runtime_update_script(payload, signature=signature)
+                view.page().runJavaScript(js)
                 if not shown_once:
                     shown_once = True
-                    _set_cef_window_visible(browser, True)
-
-            cef.PostTask(cef.TID_UI, _post_js)
+                    if monitor_bounds is None:
+                        window.showFullScreen()
+                    else:
+                        x, y, width, height = monitor_bounds
+                        window.setGeometry(x, y, width, height)
+                        window.show()
+                    window.raise_()
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
+        timer = QTimer(window)
+        timer.timeout.connect(process_pending_messages)
+        timer.start(100)
 
-    cef.MessageLoop()
-    cef.Shutdown()
+    app.exec()
 
 
 def main() -> int:
@@ -1054,35 +828,21 @@ def main() -> int:
         _safe_print(f"Geçersiz widget URL: {exc}")
         return 2
 
-    errors: list[str] = []
-    launch_started_at = time.perf_counter()
-    for backend in _viewer_backend_order():
-        try:
-            _safe_print(f"Widget viewer backend deneniyor: {backend}")
-            _debug_log(f"backend try={backend} widget_url={widget_url}")
-            if backend == "cef":
-                _start_with_cef(
-                    widget_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=monitor_bounds,
-                )
-            else:
-                _start_with_pywebview(
-                    widget_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=monitor_bounds,
-                )
-            _debug_log(f"main backend success | backend={backend} total_elapsed_ms={int((time.perf_counter() - launch_started_at) * 1000)}")
-            return 0
-        except Exception as exc:
-            _debug_log(f"backend failed | backend={backend} error={exc}")
-            errors.append(f"{backend}: {exc}")
-
-    _safe_print(f"Widget viewer başlatılamadı: {'; '.join(errors)}")
-    _debug_log(f"main exit failure | errors={errors}")
-    return 1
+    backend = _viewer_backend_name()
+    _safe_print(f"Widget viewer backend deneniyor: {backend}")
+    _debug_log(f"backend try={backend} widget_url={widget_url}")
+    try:
+        _start_with_pyside6(
+            widget_url,
+            runtime_ipc=runtime_ipc,
+            start_hidden=start_hidden,
+            monitor_bounds=monitor_bounds,
+        )
+        return 0
+    except Exception as exc:
+        _safe_print(f"Widget viewer başlatılamadı: {backend}: {exc}")
+        _debug_log(f"main exit failure | backend={backend} error={exc}")
+        return 1
 
 
 if __name__ == "__main__":
