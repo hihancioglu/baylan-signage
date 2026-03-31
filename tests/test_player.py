@@ -1392,6 +1392,24 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(args[4], "source")
         self.assertEqual(args[5], "https://widgets.example.com/screen?id=42")
 
+    def test_stop_widget_runtime_stops_all_running_runtime_processes_when_primary_exited(self):
+        player = self._build_player()
+        exited_primary = unittest.mock.Mock()
+        exited_primary.poll.return_value = 0
+        running_secondary = unittest.mock.Mock()
+        running_secondary.poll.return_value = None
+        player._widget_process = exited_primary
+        player._widget_runtime_processes = [exited_primary, running_secondary]
+
+        with patch.object(player, "stop_widget_engine") as stop_widget_engine, patch.object(
+            player,
+            "_stop_detached_widget_browser_processes",
+        ) as cleanup_detached:
+            player.stop(stop_widget_runtime=True)
+
+        stop_widget_engine.assert_called_once_with()
+        cleanup_detached.assert_not_called()
+
     def test_background_widget_engine_returns_false_when_not_running(self):
         player = self._build_player()
         self.assertFalse(player.background_widget_engine())
