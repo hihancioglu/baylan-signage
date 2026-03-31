@@ -1822,7 +1822,7 @@ class MultiMonitorPlayback:
             with self._lock:
                 player = self._players.get(monitor_no)
                 if player is None:
-                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=False)
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
                     self._players[monitor_no] = player
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
