@@ -1442,6 +1442,17 @@ class BorderlessFullscreenPlayer:
                 return True
 
             if running_processes and desired_count > 0 and len(running_processes) > desired_count:
+                if self._keep_widget_runtime_warm:
+                    _debug_log(
+                        "widget runtime ensure reuse | "
+                        "reason=keep_runtime_warm_avoid_shrink "
+                        f"running_count={len(running_processes)} desired_count={desired_count} "
+                        f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors}"
+                    )
+                    self._widget_runtime_processes = running_processes
+                    self._widget_process = running_processes[0]
+                    self._extra_processes = running_processes[1:]
+                    return True
                 preferred_index = 0
                 if desired_count == 1 and isinstance(target_monitor_index, int) and target_monitor_index >= 0:
                     preferred_index = min(target_monitor_index, len(running_processes) - 1)
