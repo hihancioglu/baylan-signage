@@ -1552,11 +1552,15 @@ class CallRequestOverlay:
 
 
 class MultiMonitorPlayback:
-    def __init__(self, media_manager: MediaManager):
+    def __init__(self, media_manager: MediaManager, widget_player: BorderlessFullscreenPlayer | None = None):
         self.media_manager = media_manager
         self._monitor_states: dict[int, dict] = {}
         self._monitor_versions: dict[int, str] = {}
         self._players: dict[int, BorderlessFullscreenPlayer] = {}
+        # Widget runtime controller process listesinin monitor başına açılan
+        # player instance'larında ayrışmasını engellemek için tüm secondary
+        # widget oynatımlarını tek player üzerinden yürüt.
+        self._widget_player: BorderlessFullscreenPlayer | None = widget_player
         self._workers: dict[int, threading.Thread] = {}
         self._running_monitors: dict[int, bool] = {}
         self._lock = threading.Lock()
@@ -1831,13 +1835,13 @@ class MultiMonitorPlayback:
 
             media_path = str(item.get("local_path") or "")
 
-            with self._lock:
-                player = self._players.get(monitor_no)
-                if player is None:
-                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
-                    self._players[monitor_no] = player
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
+                with self._lock:
+                    player = self._widget_player
+                    if player is None:
+                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        self._widget_player = player
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
                         "monitor_widget_launch skipped | "
@@ -1885,6 +1889,11 @@ class MultiMonitorPlayback:
                     clone_to_all_monitors=widget_clone_enabled,
                 )
             else:
+                with self._lock:
+                    player = self._players.get(monitor_no)
+                    if player is None:
+                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        self._players[monitor_no] = player
                 if not media_path:
                     time.sleep(0.2)
                     continue
@@ -1941,7 +1950,7 @@ class PlaybackController:
         self._prewarmed_widget_signature: str | None = None
         # Klon modu devre dışı: her monitör bağımsız playlist ile yönetilir.
         self._clone_to_all_monitors = False
-        self.multi_monitor_playback = MultiMonitorPlayback(self.media_manager)
+        self.multi_monitor_playback = MultiMonitorPlayback(self.media_manager, widget_player=self.player)
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.

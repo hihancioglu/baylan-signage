@@ -2806,13 +2806,42 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player_cls.assert_called_once_with(keep_widget_runtime_warm=True)
         mock_player.play_widget_blocking.assert_called_once()
 
+    def test_multi_monitor_worker_uses_injected_widget_player_without_spawning_new_one(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        injected_widget_player = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager, widget_player=injected_widget_player)
+        multi_monitor._running_monitors[2] = True
+        multi_monitor._monitor_states[2] = {
+            "enabled": True,
+            "entries": [
+                {
+                    "item_type": "widget",
+                    "widget_url": "https://example.com/widget",
+                    "duration_sec": 12,
+                }
+            ],
+            "loop_mode": "sequential",
+        }
+
+        def _stop_after_first_play(*_args, **_kwargs):
+            multi_monitor._running_monitors[2] = False
+            return True
+
+        injected_widget_player.play_widget_blocking.side_effect = _stop_after_first_play
+        with patch("client.client.BorderlessFullscreenPlayer") as player_cls, patch("time.sleep", return_value=None):
+            multi_monitor._run(2)
+
+        player_cls.assert_not_called()
+        injected_widget_player.play_widget_blocking.assert_called_once()
+
     def test_multi_monitor_worker_plays_widget_on_target_monitor(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
-        multi_monitor = MultiMonitorPlayback(media_manager)
         mock_player = unittest.mock.Mock()
-        multi_monitor._players[2] = mock_player
+        multi_monitor = MultiMonitorPlayback(media_manager, widget_player=mock_player)
         multi_monitor._running_monitors[2] = True
         multi_monitor._monitor_states[2] = {
             "enabled": True,
@@ -2846,9 +2875,8 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
-        multi_monitor = MultiMonitorPlayback(media_manager)
         mock_player = unittest.mock.Mock()
-        multi_monitor._players[2] = mock_player
+        multi_monitor = MultiMonitorPlayback(media_manager, widget_player=mock_player)
         multi_monitor._running_monitors[2] = True
         multi_monitor._monitor_states[2] = {
             "enabled": True,
