@@ -308,11 +308,29 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
     if part.strip()
 ]
+SOCKETIO_STRICT_WEBSOCKET = os.getenv("SOCKETIO_STRICT_WEBSOCKET", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 WEBSOCKET_CLIENT_AVAILABLE = _websocket_client_available()
-if not WEBSOCKET_CLIENT_AVAILABLE and "websocket" in SOCKETIO_TRANSPORTS:
-    builtins.print("[startup] websocket-client package not installed; websocket disabled, using polling")
+if SOCKETIO_STRICT_WEBSOCKET and SOCKETIO_TRANSPORTS != ["websocket"]:
+    builtins.print(
+        f"[startup] SOCKETIO_STRICT_WEBSOCKET=true but transports={SOCKETIO_TRANSPORTS}; forcing ['websocket']"
+    )
+    SOCKETIO_TRANSPORTS = ["websocket"]
+
+if "websocket" in SOCKETIO_TRANSPORTS and not WEBSOCKET_CLIENT_AVAILABLE:
+    message = "[startup] websocket-client package not installed; websocket transport unavailable"
+    if SOCKETIO_STRICT_WEBSOCKET:
+        raise RuntimeError(f"{message}. Install websocket-client to start the agent.")
+    builtins.print(f"{message}; removing websocket transport")
     SOCKETIO_TRANSPORTS = [transport for transport in SOCKETIO_TRANSPORTS if transport != "websocket"]
 if not SOCKETIO_TRANSPORTS:
+    if SOCKETIO_STRICT_WEBSOCKET:
+        raise RuntimeError(
+            "[startup] SOCKETIO_STRICT_WEBSOCKET=true but websocket transport is unavailable."
+        )
     SOCKETIO_TRANSPORTS = ["polling"]
 RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
 RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
