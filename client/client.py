@@ -233,8 +233,8 @@ STATE_CHECK_INTERVAL_SEC = float(os.getenv("STATE_CHECK_INTERVAL_SEC", "0.5"))
 RECONNECT_RETRY_SEC = float(os.getenv("RECONNECT_RETRY_SEC", "3"))
 PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"))
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
-ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "0.4"))
-ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "2"))
+ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "2.0"))
+ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "4"))
 LOW_IDLE_ACTIVITY_ENABLED = _env_bool("LOW_IDLE_ACTIVITY_ENABLED", True)
 OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
@@ -821,6 +821,7 @@ _last_observed_idle_sec: float | None = None
 _activity_drop_streak = 0
 _low_idle_streak = 0
 last_idle_switch_ts = 0.0
+last_state_change = 0.0
 emergency_active = False
 work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
@@ -839,6 +840,15 @@ SUPPORTED_COMMANDS = {
     "PING",
     "CAPTURE_SCREEN",
 }
+
+
+def can_switch_state() -> bool:
+    global last_state_change
+    now = time.time()
+    if now - last_state_change < 3:
+        return False
+    last_state_change = now
+    return True
 
 
 class _WindowManager:
@@ -3333,9 +3343,18 @@ def _refresh_call_overlay():
 def set_state(next_state: ClientState, reason: str):
     global current_state
     global playing_started_at
+    global last_state_change
 
     if next_state == current_state:
         log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
+        return
+
+    if not can_switch_state():
+        log_debug(
+            "set_state blocked by debounce | "
+            f"from={current_state.value} to={next_state.value} reason={reason} "
+            f"elapsed={time.time() - last_state_change:.3f}s"
+        )
         return
 
     prev = current_state
@@ -3613,10 +3632,22 @@ def run_state_cycle():
             set_state(ClientState.ACTIVE, "content_disabled")
         return get_idle_seconds()
 
+    active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
+    active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
+    widget_active = current_state == ClientState.PLAYING and active_item_type == "widget"
+    ignore_idle = widget_active
+
+    if current_state == ClientState.IDLE_PENDING and not widget_active:
+        idle_background.show()
+    else:
+        idle_background.hide()
+
     idle_sec = get_idle_seconds()
     previous_idle_sec = _last_observed_idle_sec
     _last_observed_idle_sec = idle_sec
     activity_by_idle_drop = (
+        not ignore_idle
+        and
         isinstance(previous_idle_sec, (int, float))
         and (previous_idle_sec - idle_sec) >= ACTIVITY_IDLE_DROP_SEC
     )
@@ -3625,7 +3656,10 @@ def run_state_cycle():
     elif isinstance(previous_idle_sec, (int, float)) and idle_sec >= previous_idle_sec:
         _activity_drop_streak = 0
 
-    if LOW_IDLE_ACTIVITY_ENABLED and idle_sec <= ACTIVITY_RESUME_SEC:
+    if ignore_idle:
+        _activity_drop_streak = 0
+        _low_idle_streak = 0
+    elif LOW_IDLE_ACTIVITY_ENABLED and idle_sec <= ACTIVITY_RESUME_SEC:
         _low_idle_streak += 1
     else:
         _low_idle_streak = 0
@@ -3639,13 +3673,14 @@ def run_state_cycle():
         activity_reason = "idle_drop"
     elif low_idle_confirmed:
         activity_reason = "low_idle"
-    user_activity_detected = activity_reason != "none"
+    user_activity_detected = (activity_reason != "none") and not ignore_idle
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
         f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
         f"drop_streak={_activity_drop_streak} drop_confirmed={activity_drop_confirmed} "
         f"low_idle_streak={_low_idle_streak} low_idle_confirmed={low_idle_confirmed} "
         f"user_activity={user_activity_detected} activity_reason={activity_reason} "
+        f"widget_active={widget_active} ignore_idle={ignore_idle} "
         f"idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
     )
 
@@ -3669,7 +3704,10 @@ def run_state_cycle():
         if time.time() - last_idle_switch_ts < 2:
             return idle_sec
         last_idle_switch_ts = time.time()
-        idle_background.show()
+        if not widget_active:
+            idle_background.show()
+        else:
+            idle_background.hide()
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s")
 
     if current_state == ClientState.IDLE_PENDING:
@@ -3697,8 +3735,6 @@ def run_state_cycle():
             set_state(ClientState.PLAYING, "player_started")
 
     played_for_sec = time.monotonic() - playing_started_at
-    active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
-    active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
     has_selected_content = _playback_has_selected_content()
     content_name = playback.current_content_name()
     if current_state == ClientState.PLAYING and has_selected_content:
@@ -3707,7 +3743,9 @@ def run_state_cycle():
             f"content={content_name or '<unnamed-content>'} "
             f"played_for_sec={played_for_sec:.3f} type={active_item_type}"
         )
-        if active_item_type != "widget" or played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+        if active_item_type == "widget":
+            idle_background.hide()
+        elif played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
