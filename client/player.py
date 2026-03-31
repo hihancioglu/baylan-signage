@@ -2608,7 +2608,12 @@ class BorderlessFullscreenPlayer:
                 self._terminate_process(process, timeout_sec=5)
 
         with self._widget_process_lock:
-            if stop_widget_runtime and self._widget_process and self._widget_process.poll() is None:
+            running_widget_runtime_processes = [
+                process
+                for process in self._runtime_processes_snapshot()
+                if process and process.poll() is None
+            ]
+            if stop_widget_runtime and running_widget_runtime_processes:
                 self.stop_widget_engine()
             elif stop_widget_runtime:
                 self._stop_detached_widget_browser_processes()
@@ -2617,7 +2622,7 @@ class BorderlessFullscreenPlayer:
                 # Idle modundan ACTIVE'e dönerken pencere gizlenemezse (ör. runtime
                 # stdin hattı kopmuşsa) widget görünür kalabilir. Bu durumda sıcak
                 # tutma yerine runtime'ı tamamen kapatıp ekranda kalmayı engelle.
-                if not backgrounded and self._widget_process and self._widget_process.poll() is None:
+                if not backgrounded and running_widget_runtime_processes:
                     self.stop_widget_engine()
 
         with self._process_lock:
