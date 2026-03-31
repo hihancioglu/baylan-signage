@@ -25,10 +25,6 @@ $pyInstallerArgs = @(
     "--exclude-module", "tkinter"
     "--exclude-module", "unittest"
     "--exclude-module", "test"
-    "--exclude-module", "email"
-    "--exclude-module", "html"
-    "--exclude-module", "http"
-    "--exclude-module", "xml"
     "--exclude-module", "pydoc"
     "--name", $Name
     "--distpath", $OutputDir
