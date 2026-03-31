@@ -3878,9 +3878,8 @@ def _run_widget_entrypoint(
         _resolve_runtime_resource,
         _parse_monitor_bounds,
         _safe_print,
-        _start_with_cef,
-        _start_with_pywebview,
-        _viewer_backend_order,
+        _start_with_pyside6,
+        _viewer_backend_name,
         _windows_connected_monitor_bounds,
     )
 
@@ -3908,30 +3907,19 @@ def _run_widget_entrypoint(
         _safe_print(f"Geçersiz widget URL: {exc}")
         return 2
 
-    errors: list[str] = []
-    for backend in _viewer_backend_order():
-        try:
-            _safe_print(f"Widget viewer backend deneniyor: {backend}")
-            if backend == "cef":
-                _start_with_cef(
-                    normalized_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=parsed_monitor_bounds,
-                )
-            else:
-                _start_with_pywebview(
-                    normalized_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=parsed_monitor_bounds,
-                )
-            return 0
-        except Exception as exc:
-            errors.append(f"{backend}: {exc}")
-
-    _safe_print(f"Widget viewer başlatılamadı: {'; '.join(errors)}")
-    return 1
+    backend = _viewer_backend_name()
+    _safe_print(f"Widget viewer backend deneniyor: {backend}")
+    try:
+        _start_with_pyside6(
+            normalized_url,
+            runtime_ipc=runtime_ipc,
+            start_hidden=start_hidden,
+            monitor_bounds=parsed_monitor_bounds,
+        )
+        return 0
+    except Exception as exc:
+        _safe_print(f"Widget viewer başlatılamadı: {backend}: {exc}")
+        return 1
 
 
 if __name__ == "__main__":

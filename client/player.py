@@ -678,26 +678,15 @@ class BorderlessFullscreenPlayer:
             _safe_print("⚠️ Python widget viewer pasif: sadece Windows'ta destekleniyor")
             return False
 
-        backend = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
         try:
-            if backend in {"auto", "cef"}:
-                from cefpython3 import cefpython as cef
+            from PySide6 import QtWebEngineWidgets
 
-                if cef:
-                    return True
+            if QtWebEngineWidgets:
+                return True
         except Exception:
             pass
 
-        try:
-            if backend in {"auto", "pywebview"}:
-                import webview
-
-                if webview:
-                    return True
-        except Exception:
-            pass
-
-        _safe_print("⚠️ Python widget viewer pasif: ne cefpython3 ne de pywebview kullanılabilir")
+        _safe_print("⚠️ Python widget viewer pasif: PySide6 QtWebEngine bulunamadı")
         return False
 
     def _should_use_python_widget_viewer(self, widget_source: str) -> bool:

@@ -10,62 +10,8 @@ from client import widget_viewer
 
 
 class TestWidgetViewer(unittest.TestCase):
-    def test_gui_candidates_default_includes_auto_and_edge(self):
-        with patch.dict("os.environ", {}, clear=False):
-            candidates = widget_viewer._gui_candidates()
-
-        self.assertEqual(candidates[0], None)
-        self.assertIn("edgechromium", candidates)
-
-    def test_gui_candidates_honors_priority_env(self):
-        with patch.dict(
-            "os.environ",
-            {"PYWEBVIEW_GUI_PRIORITY": "qt,edgechromium", "PYWEBVIEW_TRY_AUTO": "0"},
-            clear=False,
-        ):
-            candidates = widget_viewer._gui_candidates()
-
-        self.assertEqual(candidates, ["qt", "edgechromium"])
-
-    def test_start_with_fallback_tries_next_gui_when_first_fails(self):
-        fake_webview = unittest.mock.Mock()
-        fake_webview.start.side_effect = [RuntimeError("edge failed"), None]
-
-        with patch("client.widget_viewer._gui_candidates", return_value=["edgechromium", "qt"]):
-            widget_viewer._start_with_fallback(fake_webview)
-
-        self.assertEqual(fake_webview.start.call_count, 2)
-        self.assertEqual(fake_webview.start.call_args_list[0].kwargs["gui"], "edgechromium")
-        self.assertEqual(fake_webview.start.call_args_list[1].kwargs["gui"], "qt")
-
-    def test_backend_order_prefers_configured_backend(self):
-        with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "pywebview"}, clear=False):
-            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview"])
-
-        with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "auto"}, clear=False):
-            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview", "cef"])
-
-    def test_start_with_cef_forces_black_background(self):
-        fake_cef = unittest.mock.Mock()
-        fake_window_info = unittest.mock.Mock()
-        fake_browser = unittest.mock.Mock()
-        fake_cef.WindowInfo.return_value = fake_window_info
-        fake_cef.CreateBrowserSync.return_value = fake_browser
-
-        with patch.dict("sys.modules", {"cefpython3": unittest.mock.Mock(cefpython=fake_cef)}):
-            widget_viewer._start_with_cef("https://example.com", runtime_ipc=False)
-
-        initialize_call = fake_cef.Initialize.call_args
-        self.assertEqual(
-            initialize_call.kwargs["switches"].get("autoplay-policy"),
-            "no-user-gesture-required",
-        )
-
-        create_call = fake_cef.CreateBrowserSync.call_args
-        self.assertEqual(
-            create_call.kwargs["settings"]["background_color"],
-            widget_viewer.CEF_BLACK_BACKGROUND,
-        )
+    def test_viewer_backend_name_is_pyside6(self):
+        self.assertEqual(widget_viewer._viewer_backend_name(), "pyside6-qtwebengine")
 
 
     def test_parse_runtime_options_reads_flags_in_single_pass(self):
@@ -101,67 +47,6 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertEqual(options.monitor_bounds, (1920, 0, 1920, 1080))
 
-    def test_start_with_pywebview_uses_fullscreen_without_monitor_bounds(self):
-        fake_webview = unittest.mock.Mock()
-        fake_webview.create_window.return_value = unittest.mock.Mock()
-
-        with patch.dict("sys.modules", {"webview": fake_webview}):
-            widget_viewer._start_with_pywebview("https://example.com")
-
-        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
-
-    def test_start_with_pywebview_keeps_fullscreen_with_monitor_bounds(self):
-        fake_webview = unittest.mock.Mock()
-        fake_webview.create_window.return_value = unittest.mock.Mock()
-
-        with patch.dict("sys.modules", {"webview": fake_webview}):
-            widget_viewer._start_with_pywebview("https://example.com", monitor_bounds=(1920, 0, 1920, 1080))
-
-        self.assertEqual(fake_webview.create_window.call_args.kwargs["x"], 1920)
-        self.assertEqual(fake_webview.create_window.call_args.kwargs["y"], 0)
-        self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1920)
-        self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
-        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
-
-    def test_start_with_pywebview_restores_fullscreen_and_hides_taskbar_entry_after_background_on_windows(self):
-        fake_window = unittest.mock.Mock()
-        fake_webview = unittest.mock.Mock()
-        fake_webview.create_window.return_value = fake_window
-
-        def _fake_runtime_reader(dispatch):
-            dispatch({"type": "background"})
-            dispatch(
-                {
-                    "type": "layout_update",
-                    "payload": {
-                        "signature": "sig-1",
-                        "config": {"widgets": [{"type": "iframe", "url": "https://example.com"}]},
-                    },
-                }
-            )
-
-        class _ImmediateThread:
-            def __init__(self, target=None, args=(), daemon=False):
-                self._target = target
-                self._args = args
-
-            def start(self):
-                if self._target:
-                    self._target(*self._args)
-
-        with patch.dict("sys.modules", {"webview": fake_webview}), patch(
-            "client.widget_viewer._runtime_message_reader", side_effect=_fake_runtime_reader
-        ), patch("client.widget_viewer.threading.Thread", _ImmediateThread), patch(
-            "client.widget_viewer._start_with_fallback"
-        ), patch("client.widget_viewer.os.name", "nt"):
-            widget_viewer._start_with_pywebview("https://example.com", runtime_ipc=True, monitor_bounds=(0, 0, 1920, 1080))
-
-        fake_window.hide.assert_called()
-        self.assertEqual(fake_window.toggle_fullscreen.call_count, 2)
-        fake_window.move.assert_any_call(-32000, -32000)
-        fake_window.move.assert_any_call(0, 0)
-        fake_window.resize.assert_any_call(1, 1)
-        fake_window.resize.assert_any_call(1920, 1080)
 
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):

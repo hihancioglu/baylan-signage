@@ -132,27 +132,16 @@ $clientPyInstallerArgs = @(
     $ClientScript
 )
 
-
-if ($EnableCefCollect) {
-    & $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[agent] CEF bulundu, --collect-all cefpython3 eklenecek."
-        $clientPyInstallerArgs += @("--collect-all", "cefpython3")
-    } else {
-        Write-Warning "-EnableCefCollect verildi ancak cefpython3 bulunamadı; CEF collect adımı atlanıyor."
-    }
-}
-
-& $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
+& $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('PySide6') else 1)" *> $null
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "[agent] pywebview bulundu, collect/hidden-import parametreleri ekleniyor."
+    Write-Host "[agent] PySide6 bulundu, Qt/WebEngine collect parametreleri ekleniyor."
     $clientPyInstallerArgs += @(
-        "--collect-all", "webview",
-        "--hidden-import", "webview.platforms.winforms",
-        "--hidden-import", "webview.platforms.edgechromium"
+        "--collect-all", "PySide6",
+        "--collect-all", "PySide6.QtWebEngineCore",
+        "--collect-all", "PySide6.QtWebEngineWidgets"
     )
 } else {
-    Write-Host "[agent] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
+    Write-Warning "PySide6 bulunamadı; widget viewer (PySide6 QtWebEngine) çalışmayabilir."
 }
 
 & $PythonExe -m PyInstaller @clientPyInstallerArgs

@@ -188,18 +188,17 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch.dict("os.environ", {"WIDGET_USE_PYTHON_VIEWER": "0"}, clear=True):
             self.assertFalse(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
 
-    def test_detect_widget_viewer_support_accepts_cef_backend(self):
-        fake_cef_module = ModuleType("cefpython3")
-        fake_cefpython = ModuleType("cefpython3.cefpython")
-        fake_cef_module.cefpython = fake_cefpython
-
+    def test_detect_widget_viewer_support_accepts_pyside6_backend(self):
+        fake_pyside6 = ModuleType("PySide6")
+        fake_qtwebengine = ModuleType("PySide6.QtWebEngineWidgets")
+        fake_pyside6.QtWebEngineWidgets = fake_qtwebengine
         with patch("client.player.os.name", "nt"), patch.dict(
             "os.environ",
-            {"WIDGET_VIEWER_BACKEND": "cef"},
-            clear=False,
+            {},
+            clear=True,
         ), patch("client.player.getattr", return_value=False), patch.dict(
             "sys.modules",
-            {"cefpython3": fake_cef_module, "cefpython3.cefpython": fake_cefpython},
+            {"PySide6": fake_pyside6, "PySide6.QtWebEngineWidgets": fake_qtwebengine},
             clear=False,
         ):
             player = BorderlessFullscreenPlayer()
@@ -209,11 +208,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_detect_widget_viewer_support_rejects_when_backends_missing(self):
         with patch("client.player.os.name", "nt"), patch.dict(
             "os.environ",
-            {"WIDGET_VIEWER_BACKEND": "auto"},
+            {},
             clear=False,
         ), patch("client.player.getattr", return_value=False), patch.dict(
             "sys.modules",
-            {"webview": None, "cefpython3": None, "cefpython3.cefpython": None},
+            {"PySide6": None, "PySide6.QtWebEngineWidgets": None},
             clear=False,
         ):
             player = BorderlessFullscreenPlayer()
