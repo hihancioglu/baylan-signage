@@ -3349,7 +3349,14 @@ def set_state(next_state: ClientState, reason: str):
         log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
         return
 
-    if not can_switch_state():
+    bypass_debounce = (current_state, next_state) in {
+        (ClientState.IDLE_PENDING, ClientState.PLAYING),
+        (ClientState.IDLE_PENDING, ClientState.ACTIVE),
+        (ClientState.PLAYING, ClientState.RETURNING),
+        (ClientState.RETURNING, ClientState.ACTIVE),
+    }
+
+    if not bypass_debounce and not can_switch_state():
         log_debug(
             "set_state blocked by debounce | "
             f"from={current_state.value} to={next_state.value} reason={reason} "
@@ -3635,7 +3642,10 @@ def run_state_cycle():
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
     active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
     widget_active = current_state == ClientState.PLAYING and active_item_type == "widget"
-    ignore_idle = widget_active
+    # Widget oynarken de kullanıcı aktivitesini okuyalım; aksi halde mouse/klavye
+    # hareketi PLAYING -> RETURNING -> ACTIVE akışını tetikleyemiyor.
+    # Erken/yanlış dönüşleri minimum_playing_before_return koruyor.
+    ignore_idle = False
 
     if current_state == ClientState.IDLE_PENDING and not widget_active:
         idle_background.show()
