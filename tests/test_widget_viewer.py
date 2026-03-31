@@ -43,29 +43,7 @@ class TestWidgetViewer(unittest.TestCase):
             self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview"])
 
         with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "auto"}, clear=False):
-            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview", "cef"])
-
-    def test_start_with_cef_forces_black_background(self):
-        fake_cef = unittest.mock.Mock()
-        fake_window_info = unittest.mock.Mock()
-        fake_browser = unittest.mock.Mock()
-        fake_cef.WindowInfo.return_value = fake_window_info
-        fake_cef.CreateBrowserSync.return_value = fake_browser
-
-        with patch.dict("sys.modules", {"cefpython3": unittest.mock.Mock(cefpython=fake_cef)}):
-            widget_viewer._start_with_cef("https://example.com", runtime_ipc=False)
-
-        initialize_call = fake_cef.Initialize.call_args
-        self.assertEqual(
-            initialize_call.kwargs["switches"].get("autoplay-policy"),
-            "no-user-gesture-required",
-        )
-
-        create_call = fake_cef.CreateBrowserSync.call_args
-        self.assertEqual(
-            create_call.kwargs["settings"]["background_color"],
-            widget_viewer.CEF_BLACK_BACKGROUND,
-        )
+            self.assertEqual(widget_viewer._viewer_backend_order(), ["pywebview"])
 
 
     def test_parse_runtime_options_reads_flags_in_single_pass(self):

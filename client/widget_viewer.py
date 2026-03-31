@@ -16,16 +16,6 @@ import re
 from dataclasses import dataclass
 
 
-CHROME_KIOSK_SWITCHES = {
-    "kiosk": "",
-    "disable-translate": "",
-    "disable-infobars": "",
-    "disable-session-crashed-bubble": "",
-    "disable-features": "TranslateUI",
-    # Video autoplay in dashboard iframes requires explicit Chromium policy override.
-    "autoplay-policy": "no-user-gesture-required",
-}
-CEF_BLACK_BACKGROUND = 0xFF000000
 WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[a-zA-Z]:[\\/]")
 WEATHER_WIDGET_HREF_PATTERN = re.compile(
     r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>',
@@ -509,18 +499,15 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
 
 def _viewer_backend_order() -> list[str]:
     preferred = os.getenv("WIDGET_VIEWER_BACKEND", "auto").strip().lower()
-    if preferred in {"cef", "pywebview"}:
-        return [preferred]
-    # Windows'ta ikinci ekran/harici GPU kombinasyonlarında CEF siyah ekran
-    # davranışı gösterebildiği için varsayılan otomatik sırada pywebview'i
-    # öne alıyoruz. CEF yine fallback olarak denenir.
-    return ["pywebview", "cef"]
+    if preferred == "pywebview":
+        return ["pywebview"]
+    return ["pywebview"]
 
 
 def _gui_candidates() -> list[str | None]:
     configured = os.getenv(
         "PYWEBVIEW_GUI_PRIORITY",
-        "edgechromium,qt,gtk,winforms,mshtml,cef",
+        "edgechromium,qt,gtk,winforms,mshtml",
     )
     candidates: list[str | None] = []
 
@@ -636,25 +623,6 @@ def _build_runtime_update_script(payload: object, signature: str | None = None) 
 
 
 
-def _set_cef_window_visible(browser, visible: bool) -> None:
-    try:
-        handle = int(browser.GetOuterWindowHandle())
-    except Exception:
-        return
-
-    if handle <= 0:
-        return
-
-    try:
-        import ctypes
-
-        SW_HIDE = 0
-        SW_SHOW = 5
-        ctypes.windll.user32.ShowWindow(handle, SW_SHOW if visible else SW_HIDE)
-    except Exception:
-        pass
-
-
 def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | None:
     text = str(raw_value or "").strip()
     if not text:
@@ -718,35 +686,6 @@ def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
         seen_bounds.add(bounds)
         unique_bounds.append(bounds)
     return unique_bounds
-
-
-def _apply_cef_monitor_bounds(
-    browser,
-    monitor_bounds: tuple[int, int, int, int] | None,
-    *,
-    show_window: bool = True,
-) -> None:
-    if monitor_bounds is None:
-        return
-    try:
-        handle = int(browser.GetOuterWindowHandle())
-    except Exception:
-        return
-    if handle <= 0:
-        return
-
-    x, y, width, height = monitor_bounds
-    try:
-        SWP_NOZORDER = 0x0004
-        SWP_SHOWWINDOW = 0x0040
-        flags = SWP_NOZORDER
-        if show_window:
-            flags |= SWP_SHOWWINDOW
-        ctypes.windll.user32.SetWindowPos(handle, 0, x, y, width, height, flags)
-    except Exception:
-        pass
-
-
 
 
 @dataclass(frozen=True)
@@ -947,96 +886,6 @@ def _start_with_pywebview(
     _start_with_fallback(webview)
 
 
-def _start_with_cef(
-    widget_url: str,
-    runtime_ipc: bool = False,
-    start_hidden: bool = False,
-    monitor_bounds: tuple[int, int, int, int] | None = None,
-) -> None:
-    from cefpython3 import cefpython as cef
-
-    switches = dict(CHROME_KIOSK_SWITCHES)
-    custom_switches = os.getenv("CEF_EXTRA_SWITCHES", "").strip()
-    if custom_switches:
-        for raw_switch in custom_switches.split(","):
-            cleaned = raw_switch.strip().lstrip("-")
-            if not cleaned:
-                continue
-            if "=" in cleaned:
-                key, value = cleaned.split("=", 1)
-                switches[key] = value
-            else:
-                switches[cleaned] = ""
-
-    switches.setdefault("force-device-scale-factor", "1")
-    switches.setdefault("high-dpi-support", "1")
-
-    cef.Initialize(settings={"context_menu": {"enabled": False}}, switches=switches)
-    window_info = cef.WindowInfo()
-    window_info.SetAsPopup(0, "Baylan Widget")
-    browser = cef.CreateBrowserSync(
-        window_info=window_info,
-        url=widget_url,
-        window_title="Baylan Widget",
-        settings={"background_color": CEF_BLACK_BACKGROUND},
-    )
-    try:
-        browser.SetZoomLevel(0)
-    except Exception:
-        _debug_log("cef zoom level reset skipped")
-    _apply_cef_monitor_bounds(browser, monitor_bounds, show_window=not start_hidden)
-    if start_hidden:
-        _set_cef_window_visible(browser, False)
-
-    if runtime_ipc:
-        _debug_log(f"cef runtime ipc enabled | start_hidden={start_hidden}")
-        shown_once = not start_hidden
-
-        def dispatch(message: dict) -> None:
-            nonlocal shown_once
-            _debug_log(f"cef dispatch message={message.get('type')}")
-            if message.get("type") == "stop":
-                cef.PostTask(cef.TID_UI, cef.QuitMessageLoop)
-                return
-            if message.get("type") == "background":
-                shown_once = False
-
-                def _hide_window():
-                    _set_cef_window_visible(browser, False)
-
-                cef.PostTask(cef.TID_UI, _hide_window)
-                return
-
-            message_type = str(message.get("type") or "").strip().lower()
-            raw_payload = message.get("payload")
-            signature = None
-            payload = None
-            if message_type == "layout_update":
-                if isinstance(raw_payload, dict):
-                    signature = raw_payload.get("signature")
-                    payload = raw_payload.get("config")
-            elif message_type == "playlist_sync":
-                payload = {"__playlist_sync": raw_payload}
-
-            if payload is None:
-                return
-
-            def _post_js():
-                nonlocal shown_once
-                _debug_log(f"cef ExecuteJavascript | message_type={message_type} signature={signature}")
-                browser.GetMainFrame().ExecuteJavascript(_build_runtime_update_script(payload, signature=signature))
-                if not shown_once:
-                    shown_once = True
-                    _set_cef_window_visible(browser, True)
-
-            cef.PostTask(cef.TID_UI, _post_js)
-
-        threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
-
-    cef.MessageLoop()
-    cef.Shutdown()
-
-
 def main() -> int:
     if len(sys.argv) < 2:
         _safe_print("Kullanım: widget_viewer.py <widget_url>")
@@ -1074,20 +923,12 @@ def main() -> int:
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
             _debug_log(f"backend try={backend} widget_url={widget_url}")
-            if backend == "cef":
-                _start_with_cef(
-                    widget_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=monitor_bounds,
-                )
-            else:
-                _start_with_pywebview(
-                    widget_url,
-                    runtime_ipc=runtime_ipc,
-                    start_hidden=start_hidden,
-                    monitor_bounds=monitor_bounds,
-                )
+            _start_with_pywebview(
+                widget_url,
+                runtime_ipc=runtime_ipc,
+                start_hidden=start_hidden,
+                monitor_bounds=monitor_bounds,
+            )
             _debug_log(f"main backend success | backend={backend} total_elapsed_ms={int((time.perf_counter() - launch_started_at) * 1000)}")
             return 0
         except Exception as exc:
