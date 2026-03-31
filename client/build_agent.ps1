@@ -4,7 +4,9 @@ param(
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
     [string]$RuntimeTmpDir = "$env:ProgramData\BaylanSignage\RuntimeTmp",
+    [string]$UpxDir = "",
     [switch]$EnableCefCollect,
+    [switch]$EnableUpx,
     [switch]$SkipInstallPyInstaller,
     [switch]$ForceUpgradePyInstaller
 )
@@ -89,6 +91,8 @@ $clientPyInstallerArgs = @(
     "--clean"
     "--onefile"
     "--noconsole"
+    "--strip"
+    "--noupx"
     "--runtime-tmpdir"
     $RuntimeTmpDir
     "--name"
@@ -127,6 +131,22 @@ $clientPyInstallerArgs = @(
     "player"
     "--hidden-import"
     "state_machine"
+    "--exclude-module"
+    "tkinter"
+    "--exclude-module"
+    "unittest"
+    "--exclude-module"
+    "test"
+    "--exclude-module"
+    "email"
+    "--exclude-module"
+    "html"
+    "--exclude-module"
+    "http"
+    "--exclude-module"
+    "xml"
+    "--exclude-module"
+    "pydoc"
     "--distpath"
     $OutputDir
     $ClientScript
@@ -134,14 +154,25 @@ $clientPyInstallerArgs = @(
 
 & $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('PySide6') else 1)" *> $null
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "[agent] PySide6 bulundu, Qt/WebEngine collect parametreleri ekleniyor."
+    Write-Host "[agent] PySide6 bulundu, minimum gerekli Qt/WebEngine importları ekleniyor."
     $clientPyInstallerArgs += @(
-        "--collect-all", "PySide6",
-        "--collect-all", "PySide6.QtWebEngineCore",
-        "--collect-all", "PySide6.QtWebEngineWidgets"
+        "--hidden-import", "PySide6.QtCore",
+        "--hidden-import", "PySide6.QtWidgets",
+        "--hidden-import", "PySide6.QtGui",
+        "--hidden-import", "PySide6.QtNetwork",
+        "--hidden-import", "PySide6.QtWebChannel",
+        "--hidden-import", "PySide6.QtWebEngineCore",
+        "--hidden-import", "PySide6.QtWebEngineWidgets"
     )
 } else {
     Write-Warning "PySide6 bulunamadı; widget viewer (PySide6 QtWebEngine) çalışmayabilir."
+}
+
+if ($EnableUpx) {
+    if ([string]::IsNullOrWhiteSpace($UpxDir)) {
+        throw "UPX aktif edildi ancak -UpxDir boş. Örn: -EnableUpx -UpxDir C:\upx"
+    }
+    $clientPyInstallerArgs += @("--upx-dir", $UpxDir)
 }
 
 & $PythonExe -m PyInstaller @clientPyInstallerArgs
