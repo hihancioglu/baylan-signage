@@ -2502,8 +2502,11 @@ class PlaybackController:
         self._running = False
         self.overlay.hide()
         self._background_overlay.hide()
-        self.player.stop(stop_widget_runtime=stop_widget_runtime)
+        # Önce monitor worker'larını durdurup ardından shared widget player'ı
+        # kapatmak, worker thread'lerin ACTIVE dönüşünde tekrar widget açmasını
+        # ve çift widget_viewer penceresi oluşmasını engeller.
         self.multi_monitor_playback.stop()
+        self.player.stop(stop_widget_runtime=stop_widget_runtime)
 
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=1)
@@ -2517,8 +2520,8 @@ class PlaybackController:
                 with self._playback_state_lock:
                     self._playback_state["resume_sec"] = float(self._playback_state.get("resume_sec", 0)) + elapsed
                 self._persist_playback_state()
-        self.player.stop()
         self.multi_monitor_playback.pause()
+        self.player.stop()
 
     def _run(self):
         try:

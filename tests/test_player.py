@@ -2161,6 +2161,38 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.player.stop.assert_called_once()
         controller.overlay.show.assert_called_once()
 
+    def test_playback_controller_stop_stops_multi_monitor_before_widget_player(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.player = unittest.mock.Mock()
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        call_order: list[str] = []
+        controller.multi_monitor_playback.stop.side_effect = lambda: call_order.append("multi_monitor_stop")
+        controller.player.stop.side_effect = lambda **_kwargs: call_order.append("player_stop")
+
+        controller.stop(stop_widget_runtime=False)
+
+        self.assertEqual(call_order, ["multi_monitor_stop", "player_stop"])
+        controller.player.stop.assert_called_once_with(stop_widget_runtime=False)
+
+    def test_playback_controller_pause_stops_multi_monitor_before_widget_player(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.player = unittest.mock.Mock()
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller._active_item = None
+        controller._active_item_started_at = None
+        call_order: list[str] = []
+        controller.multi_monitor_playback.pause.side_effect = lambda: call_order.append("multi_monitor_pause")
+        controller.player.stop.side_effect = lambda: call_order.append("player_stop")
+
+        controller.pause()
+
+        self.assertEqual(call_order, ["multi_monitor_pause", "player_stop"])
+        controller.player.stop.assert_called_once_with()
+
 
     def test_is_newer_version_handles_build_prefix_and_unknown_marker(self):
         from client.client import _is_newer_version
