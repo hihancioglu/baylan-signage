@@ -294,7 +294,7 @@ UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.ex
 SOCKETIO_LOG_ENABLED = os.getenv("SOCKETIO_LOG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 SOCKETIO_TRANSPORTS = [
     part.strip()
-    for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
+    for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
     if part.strip()
 ]
 RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
