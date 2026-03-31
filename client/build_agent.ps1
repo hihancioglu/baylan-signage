@@ -11,15 +11,51 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+
+function Resolve-PythonCommand {
+    param(
+        [string]$RequestedPython
+    )
+
+    $command = Get-Command $RequestedPython -ErrorAction SilentlyContinue
+    if (-not $command) {
+        throw "Python command not found: '$RequestedPython'. Install Python 3.10 and recreate the venv, or pass -Python with a valid interpreter path."
+    }
+
+    return $command.Source
+}
+
+function Get-PythonVersion {
+    param(
+        [string]$PythonExe
+    )
+
+    $versionOutput = & $PythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($versionOutput)) {
+        throw "Python command '$PythonExe' is not runnable. If this is a broken virtualenv, recreate it with Python 3.10."
+    }
+
+    return $versionOutput.Trim()
+}
+
+
+$PythonExe = Resolve-PythonCommand -RequestedPython $Python
+$PythonVersion = Get-PythonVersion -PythonExe $PythonExe
+Write-Host "[agent] Using Python: $PythonExe (version $PythonVersion)"
+
+if ($EnableCefCollect -and -not $PythonVersion.StartsWith("3.10.")) {
+    Write-Warning "CEF packaging typically requires Python 3.10. Current version: $PythonVersion"
+}
+
 if (-not $SkipInstallPyInstaller) {
     Write-Host "[1/5] Installing/upgrading pyinstaller..."
-    & $Python -m pip install --upgrade pyinstaller
+    & $PythonExe -m pip install --upgrade pyinstaller
     $pipExitCode = $LASTEXITCODE
 
     if ($pipExitCode -ne 0) {
         # Some networks use SSL interception/proxies that break pip certificate checks.
         # If pyinstaller is already installed, continue with the local version.
-        & $Python -m PyInstaller --version *> $null
+        & $PythonExe -m PyInstaller --version *> $null
         $hasLocalPyInstaller = ($LASTEXITCODE -eq 0)
 
         if ($hasLocalPyInstaller -and -not $ForceUpgradePyInstaller) {
@@ -98,7 +134,7 @@ $clientPyInstallerArgs = @(
 
 
 if ($EnableCefCollect) {
-    & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
+    & $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[agent] CEF bulundu, --collect-all cefpython3 eklenecek."
         $clientPyInstallerArgs += @("--collect-all", "cefpython3")
@@ -107,7 +143,7 @@ if ($EnableCefCollect) {
     }
 }
 
-& $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
+& $PythonExe -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[agent] pywebview bulundu, collect/hidden-import parametreleri ekleniyor."
     $clientPyInstallerArgs += @(
@@ -119,7 +155,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "[agent] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
 }
 
-& $Python -m PyInstaller @clientPyInstallerArgs
+& $PythonExe -m PyInstaller @clientPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
