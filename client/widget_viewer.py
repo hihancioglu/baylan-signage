@@ -855,9 +855,10 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
+        backgrounded = False
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once
+            nonlocal shown_once, backgrounded
             _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
@@ -874,7 +875,18 @@ def _start_with_pywebview(
                         window.hide()
                     except Exception:
                         pass
+                if os.name == "nt":
+                    try:
+                        window.toggle_fullscreen()
+                    except Exception:
+                        pass
+                    try:
+                        window.move(-32000, -32000)
+                        window.resize(1, 1)
+                    except Exception:
+                        pass
                 shown_once = False
+                backgrounded = True
                 return
             message_type = str(message.get("type") or "").strip().lower()
             raw_payload = message.get("payload")
@@ -898,10 +910,23 @@ def _start_with_pywebview(
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
             if not shown_once:
                 shown_once = True
+                if os.name == "nt" and backgrounded:
+                    if monitor_bounds is not None:
+                        x, y, width, height = monitor_bounds
+                        try:
+                            window.move(x, y)
+                            window.resize(width, height)
+                        except Exception:
+                            pass
+                    try:
+                        window.toggle_fullscreen()
+                    except Exception:
+                        pass
                 try:
                     window.show()
                 except Exception:
                     pass
+                backgrounded = False
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
