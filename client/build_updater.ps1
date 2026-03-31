@@ -21,7 +21,6 @@ $pyInstallerArgs = @(
     "--noconfirm"
     "--clean"
     "--onefile"
-    "--strip"
     "--noupx"
     "--exclude-module", "tkinter"
     "--exclude-module", "unittest"
