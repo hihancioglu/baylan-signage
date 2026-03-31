@@ -2961,9 +2961,8 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
-        multi_monitor = MultiMonitorPlayback(media_manager)
         mock_player = unittest.mock.Mock()
-        multi_monitor._players[2] = mock_player
+        multi_monitor = MultiMonitorPlayback(media_manager, widget_player=mock_player)
         multi_monitor._running_monitors[2] = True
         multi_monitor._monitor_states[2] = {
             "enabled": True,
