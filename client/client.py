@@ -820,6 +820,7 @@ current_state = ClientState.ACTIVE
 _last_observed_idle_sec: float | None = None
 _activity_drop_streak = 0
 _low_idle_streak = 0
+last_idle_switch_ts = 0.0
 emergency_active = False
 work_order_alert_active = False
 work_order_alert_message = "İŞEMRİ BAŞLATILMAMIŞ"
@@ -3547,7 +3548,7 @@ def on_call_request_cancel_result(data):
 
 
 def run_state_cycle():
-    global _last_observed_idle_sec, _activity_drop_streak, _low_idle_streak
+    global _last_observed_idle_sec, _activity_drop_streak, _low_idle_streak, last_idle_switch_ts
 
     def _playback_has_selected_content() -> bool:
         if playback.current_content_name():
@@ -3665,6 +3666,9 @@ def run_state_cycle():
         )
 
     if current_state == ClientState.ACTIVE and idle_sec >= effective_idle_timeout_sec:
+        if time.time() - last_idle_switch_ts < 2:
+            return idle_sec
+        last_idle_switch_ts = time.time()
         idle_background.show()
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s")
 

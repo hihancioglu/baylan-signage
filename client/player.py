@@ -270,6 +270,8 @@ class BorderlessFullscreenPlayer:
             self._keep_widget_runtime_warm = bool(keep_widget_runtime_warm)
         self._last_interrupted = False
         self._last_widget_source = ""
+        self._last_runtime_signature: tuple[int | None, bool | None] | None = None
+        self._last_widget_signature: str | None = None
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
 
     def _apply_pending_stop_to_media_processes(self, processes: list[subprocess.Popen]) -> bool:
@@ -1440,6 +1442,12 @@ class BorderlessFullscreenPlayer:
                 )
                 self._widget_process = running_processes[0]
                 return True
+            # aynı konfig ise restart ETME
+            if (
+                running_processes
+                and getattr(self, "_last_runtime_signature", None) == (target_monitor_index, clone_to_all_monitors)
+            ):
+                return True
 
             if running_processes and desired_count > 0 and len(running_processes) > desired_count:
                 if self._keep_widget_runtime_warm:
@@ -1527,6 +1535,7 @@ class BorderlessFullscreenPlayer:
                     f"restart_count={self._widget_runtime_restart_count} "
                     f"monitor_targets={runtime_targets}"
                 )
+                self._last_runtime_signature = (target_monitor_index, clone_to_all_monitors)
                 return True
             except FileNotFoundError as exc:
                 _debug_log(
@@ -1628,6 +1637,8 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
+        if widget_signature == self._last_widget_signature:
+            return True
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
         if payload is None:
             _safe_print("⚠️ widget layout payload geçersiz")
@@ -1645,11 +1656,14 @@ class BorderlessFullscreenPlayer:
                 "config": payload,
             },
         }
-        return self._send_widget_runtime_message(
+        sent = self._send_widget_runtime_message(
             message,
             target_monitor_index=target_monitor_index,
             clone_to_all_monitors=clone_to_all_monitors,
         )
+        if sent:
+            self._last_widget_signature = widget_signature
+        return sent
 
     def stop_widget_engine(self) -> None:
         with self._widget_process_lock:
