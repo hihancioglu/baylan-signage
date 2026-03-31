@@ -1470,6 +1470,43 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(player._extra_processes, [process_b])
         popen_mock.assert_not_called()
 
+    def test_start_widget_engine_shrinks_runtime_pool_without_respawn(self):
+        player = self._build_player()
+        process_a = unittest.mock.Mock()
+        process_a.poll.return_value = None
+        process_a.stdin = unittest.mock.Mock()
+        process_b = unittest.mock.Mock()
+        process_b.poll.return_value = None
+        process_b.stdin = unittest.mock.Mock()
+        process_c = unittest.mock.Mock()
+        process_c.poll.return_value = None
+        process_c.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [process_a, process_b, process_c]
+        player._widget_process = process_a
+        player._extra_processes = [process_b, process_c]
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player,
+            "_resolve_widget_runtime_monitor_targets",
+            return_value=[(0, (0, 0, 1920, 1080))],
+        ), patch("subprocess.Popen") as popen_mock, patch.object(
+            player,
+            "_terminate_process",
+        ) as terminate_mock:
+            ok = player.start_widget_engine_if_needed(
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(player._widget_runtime_processes, [process_a])
+        self.assertEqual(player._widget_process, process_a)
+        self.assertEqual(player._extra_processes, [])
+        terminate_mock.assert_any_call(process_b, timeout_sec=2, force_tree=True)
+        terminate_mock.assert_any_call(process_c, timeout_sec=2, force_tree=True)
+        self.assertEqual(terminate_mock.call_count, 2)
+        popen_mock.assert_not_called()
+
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()

@@ -1441,6 +1441,30 @@ class BorderlessFullscreenPlayer:
                 self._widget_process = running_processes[0]
                 return True
 
+            if running_processes and desired_count > 0 and len(running_processes) > desired_count:
+                preferred_index = 0
+                if desired_count == 1 and isinstance(target_monitor_index, int) and target_monitor_index >= 0:
+                    preferred_index = min(target_monitor_index, len(running_processes) - 1)
+                kept_processes = [running_processes[preferred_index]]
+                removed_processes = [
+                    process
+                    for process in running_processes
+                    if process not in kept_processes and process.poll() is None
+                ]
+                _debug_log(
+                    "widget runtime ensure shrink | "
+                    "reason=running_count_above_desired_count "
+                    f"running_count={len(running_processes)} desired_count={desired_count} "
+                    f"kept_pid={getattr(kept_processes[0], 'pid', None)} "
+                    f"removed_pids={[getattr(process, 'pid', None) for process in removed_processes]}"
+                )
+                for process in removed_processes:
+                    self._terminate_process(process, timeout_sec=2, force_tree=True)
+                self._widget_runtime_processes = kept_processes
+                self._widget_process = kept_processes[0]
+                self._extra_processes = []
+                return True
+
             if running_processes:
                 _debug_log(
                     "widget runtime ensure restart | "
