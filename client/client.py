@@ -216,6 +216,10 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _prewarm_all_monitors_enabled() -> bool:
+    return _env_bool("WIDGET_PREWARM_ALL_MONITORS", False)
+
+
 def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
     args = argv if argv is not None else sys.argv[1:]
     normalized = {str(arg).strip().lower() for arg in args if isinstance(arg, str)}
@@ -1965,13 +1969,14 @@ class PlaybackController:
 
         # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
         # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
-        # Tüm monitörlerde ayrı viewer süreci sıcak tutulur; böylece idle'a
-        # geçildiği anda hedef monitörde başlatma gecikmesi yaşanmaz.
+        # Varsayılan olarak tek süreç prewarm edilir; tüm monitörlerde widget
+        # prosesleri açmak başlangıçta gereksiz process yükü (ve küçük boş
+        # widget pencereleri) oluşturabiliyor.
         if (
             os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
             and not _is_widget_viewer_process()
         ):
-            self.player.start_widget_engine_if_needed(clone_to_all_monitors=True)
+            self.player.start_widget_engine_if_needed(clone_to_all_monitors=_prewarm_all_monitors_enabled())
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
