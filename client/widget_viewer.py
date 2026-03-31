@@ -503,8 +503,14 @@ def _viewer_backend_name() -> str:
 
 
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
+    raw_source = str(widget_url or "").strip()
+    if raw_source == WIDGET_ENGINE_SENTINEL:
+        engine_uri = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
+        _debug_log(f"_build_engine_url sentinel_source engine_uri={engine_uri}")
+        return engine_uri
+
     single_engine_enabled = os.getenv("WIDGET_SINGLE_ENGINE", "0").strip().lower() in {"1", "true", "yes"}
-    source = _normalize_url(widget_url) if str(widget_url or "").strip() else ""
+    source = _normalize_url(widget_url) if raw_source else ""
     has_layout_config = isinstance(widget_config, dict) and isinstance(widget_config.get("widgets"), list)
     if not single_engine_enabled:
         _debug_log(f"_build_engine_url single_engine_disabled source={source}")

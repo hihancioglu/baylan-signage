@@ -54,6 +54,13 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertEqual(result, "https://example.com")
 
+    def test_build_engine_url_maps_runtime_sentinel_to_local_engine(self):
+        with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "0"}, clear=False):
+            result = widget_viewer._build_engine_url(widget_viewer.WIDGET_ENGINE_SENTINEL)
+
+        self.assertIn("widget_engine.html", result)
+        self.assertTrue(result.startswith("file://"))
+
     def test_build_engine_url_wraps_source_when_layout_exists(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url(
