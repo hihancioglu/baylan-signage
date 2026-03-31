@@ -130,6 +130,8 @@ $clientPyInstallerArgs = @(
     "player"
     "--hidden-import"
     "state_machine"
+    "--hidden-import"
+    "websocket"
     "--exclude-module"
     "tkinter"
     "--exclude-module"

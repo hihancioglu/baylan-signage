@@ -11,3 +11,5 @@ ldap3==2.9.1
 
 pystray==0.19.5
 PySide6==6.8.2.1; platform_system == "Windows"
+
+websocket-client==1.8.0
