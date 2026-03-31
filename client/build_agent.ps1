@@ -90,6 +90,8 @@ $clientPyInstallerArgs = @(
     "player"
     "--hidden-import"
     "state_machine"
+    "--hidden-import"
+    "websocket"
     "--distpath"
     $OutputDir
     $ClientScript
