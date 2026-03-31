@@ -1495,14 +1495,26 @@ class DownloadStatusOverlay:
 class IdleBackgroundOverlay:
     def __init__(self, gui_runtime: GuiRuntime):
         self._gui_runtime = gui_runtime
+        self._visible = False
 
     def show(self):
         if not platform.system().lower().startswith("win"):
+            log_debug("idle_overlay show skipped | reason=non_windows")
             return
+        if self._visible:
+            log_debug("idle_overlay show skipped | reason=already_visible")
+            return
+        log_debug("idle_overlay show posted")
         self._gui_runtime.post("idle_overlay_show")
+        self._visible = True
 
     def hide(self):
+        if not self._visible:
+            log_debug("idle_overlay hide skipped | reason=already_hidden")
+            return
+        log_debug("idle_overlay hide posted")
         self._gui_runtime.post("idle_overlay_hide")
+        self._visible = False
 
 
 class WorkOrderAlertOverlay:
@@ -3565,6 +3577,18 @@ def run_state_cycle():
 
         return False
 
+    def _playback_runtime_snapshot() -> str:
+        process = getattr(playback, "_process", None)
+        widget_process = getattr(playback, "_widget_process", None)
+        extra_processes = getattr(playback, "_extra_processes", None)
+        extra_count = len(extra_processes) if isinstance(extra_processes, list) else 0
+        return (
+            f"media_pid={getattr(process, 'pid', None)} media_running={bool(process and process.poll() is None)} "
+            f"widget_pid={getattr(widget_process, 'pid', None)} "
+            f"widget_running={bool(widget_process and widget_process.poll() is None)} "
+            f"extra_process_count={extra_count}"
+        )
+
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
@@ -3636,7 +3660,10 @@ def run_state_cycle():
         set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s")
 
     if current_state == ClientState.IDLE_PENDING:
-        log_debug("state_cycle IDLE_PENDING | ensuring playback.start")
+        log_debug(
+            "state_cycle IDLE_PENDING | ensuring playback.start "
+            f"{_playback_runtime_snapshot()}"
+        )
         playback.start()
         if user_activity_detected:
             idle_background.hide()
@@ -3707,7 +3734,10 @@ def run_state_cycle():
         set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
 
     if current_state == ClientState.RETURNING:
-        log_debug("state_cycle RETURNING | returning focus to ERP and stopping playback")
+        log_debug(
+            "state_cycle RETURNING | returning focus to ERP and stopping playback "
+            f"{_playback_runtime_snapshot()}"
+        )
         idle_background.hide()
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
@@ -3721,7 +3751,10 @@ def run_state_cycle():
 
     if current_state == ClientState.ACTIVE:
         if _playback_has_selected_content() or _playback_has_running_process():
-            log_debug("state_cycle ACTIVE | stopping playback with warm widget runtime")
+            log_debug(
+                "state_cycle ACTIVE | stopping playback with warm widget runtime "
+                f"{_playback_runtime_snapshot()}"
+            )
             # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
             # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
             playback.stop(stop_widget_runtime=False)
