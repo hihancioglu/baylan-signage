@@ -292,11 +292,28 @@ AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower()
 UPDATER_DOWNLOAD_DIR = _resolve_runtime_path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
 SOCKETIO_LOG_ENABLED = os.getenv("SOCKETIO_LOG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
+def _websocket_client_available() -> bool:
+    try:
+        import websocket  # websocket-client package
+
+        _ = websocket
+        return True
+    except Exception:
+        return False
+
 SOCKETIO_TRANSPORTS = [
-    part.strip()
+    part.strip().lower()
     for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
     if part.strip()
 ]
+WEBSOCKET_CLIENT_AVAILABLE = _websocket_client_available()
+if not WEBSOCKET_CLIENT_AVAILABLE and "websocket" in SOCKETIO_TRANSPORTS:
+    builtins.print("[startup] websocket-client package not installed; websocket disabled, using polling")
+    SOCKETIO_TRANSPORTS = [transport for transport in SOCKETIO_TRANSPORTS if transport != "websocket"]
+if not SOCKETIO_TRANSPORTS:
+    SOCKETIO_TRANSPORTS = ["polling"]
 RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
 RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
 RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS", "24")))
