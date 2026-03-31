@@ -3657,8 +3657,6 @@ def run_state_cycle():
 
     if current_state == ClientState.IDLE_PENDING and not widget_active:
         idle_background.show()
-    else:
-        idle_background.hide()
 
     idle_sec = get_idle_seconds()
     previous_idle_sec = _last_observed_idle_sec
@@ -3670,6 +3668,16 @@ def run_state_cycle():
         and (previous_idle_sec - idle_sec) >= ACTIVITY_IDLE_DROP_SEC
     )
     if activity_by_idle_drop:
+        _activity_drop_streak += 1
+    elif (
+        isinstance(previous_idle_sec, (int, float))
+        and isinstance(idle_sec, (int, float))
+        and _activity_drop_streak > 0
+        and idle_sec < previous_idle_sec
+    ):
+        # Ardışık düşüş serisi başladıysa, sonraki küçük düşüşleri de aktivite
+        # adayı olarak sayalım. Böylece eşik üstündeki idle değerlerinde dahi
+        # geri dönüş kaçırılmaz.
         _activity_drop_streak += 1
     elif isinstance(previous_idle_sec, (int, float)) and idle_sec >= previous_idle_sec:
         _activity_drop_streak = 0
@@ -3685,12 +3693,12 @@ def run_state_cycle():
     activity_drop_confirmed = _activity_drop_streak >= max(ACTIVITY_DROP_CONFIRM_COUNT, 1)
     low_idle_confirmed = _low_idle_streak >= 3
     activity_reason = "none"
-    if activity_drop_confirmed and low_idle_confirmed:
-        activity_reason = "idle_drop+low_idle"
-    elif activity_drop_confirmed:
-        activity_reason = "idle_drop"
+    if activity_drop_confirmed:
+        activity_reason = "idle_drop+low_idle" if low_idle_confirmed else "idle_drop"
     elif low_idle_confirmed:
         activity_reason = "low_idle"
+    else:
+        activity_reason = "none"
     user_activity_detected = (activity_reason != "none") and not ignore_idle
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
@@ -3761,9 +3769,7 @@ def run_state_cycle():
             f"content={content_name or '<unnamed-content>'} "
             f"played_for_sec={played_for_sec:.3f} type={active_item_type}"
         )
-        if active_item_type == "widget":
-            idle_background.hide()
-        elif played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+        if played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS

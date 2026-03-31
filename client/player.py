@@ -1456,7 +1456,12 @@ class BorderlessFullscreenPlayer:
                 return True
 
             if running_processes and desired_count > 0 and len(running_processes) > desired_count:
-                if self._keep_widget_runtime_warm:
+                keep_all_running = (
+                    self._keep_widget_runtime_warm
+                    and target_monitor_index is None
+                    and clone_to_all_monitors is None
+                )
+                if keep_all_running:
                     _debug_log(
                         "widget runtime ensure reuse | "
                         "reason=keep_runtime_warm_avoid_shrink "
@@ -2154,7 +2159,12 @@ class BorderlessFullscreenPlayer:
             and self._python_widget_viewer_supported
         )
         runtime_controller_skipped = not runtime_controller_allowed
-        if self._widget_runtime_controller_enabled() and runtime_controller_allowed:
+        runtime_controller_requested = target_monitor_index is not None
+        if (
+            runtime_controller_requested
+            and self._widget_runtime_controller_enabled()
+            and runtime_controller_allowed
+        ):
             if self._process and self._process.poll() is None:
                 self._terminate_process(self._process, timeout_sec=5)
                 self._process = None
