@@ -292,11 +292,45 @@ AUTO_UPDATER_ENABLED = os.getenv("AUTO_UPDATER_ENABLED", "true").strip().lower()
 UPDATER_DOWNLOAD_DIR = _resolve_runtime_path(os.getenv("UPDATER_DOWNLOAD_DIR", "client/updates"))
 UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.exe")
 SOCKETIO_LOG_ENABLED = os.getenv("SOCKETIO_LOG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
-SOCKETIO_TRANSPORTS = [
-    part.strip()
-    for part in os.getenv("SOCKETIO_TRANSPORTS", "polling,websocket").split(",")
-    if part.strip()
-]
+
+
+def _module_exists(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def _resolve_socketio_transports() -> list[str]:
+    raw_transports = [
+        part.strip().lower()
+        for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket,polling").split(",")
+        if part.strip()
+    ]
+    if not raw_transports:
+        raw_transports = ["websocket", "polling"]
+
+    has_requests = _module_exists("requests")
+    has_websocket_client = _module_exists("websocket")
+
+    transports: list[str] = []
+    for transport in raw_transports:
+        if transport == "polling" and not has_requests:
+            continue
+        if transport == "websocket" and not has_websocket_client:
+            continue
+        transports.append(transport)
+
+    if not transports:
+        # En azından bir taşıyıcıyı dene; bağlantı denemesi sırasında ayrıntılı hata görülecek.
+        if has_websocket_client:
+            transports = ["websocket"]
+        elif has_requests:
+            transports = ["polling"]
+        else:
+            transports = ["websocket"]
+
+    return transports
+
+
+SOCKETIO_TRANSPORTS = _resolve_socketio_transports()
 RUNTIME_TMP_DIR = _resolve_windows_writable_path(os.getenv("RUNTIME_TMP_DIR"), "RuntimeTmp")
 RUNTIME_TMP_CLEANUP_ENABLED = _env_bool("RUNTIME_TMP_CLEANUP_ENABLED", True)
 RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS = max(1, int(os.getenv("RUNTIME_TMP_CLEANUP_MAX_AGE_HOURS", "24")))
