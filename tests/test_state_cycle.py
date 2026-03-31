@@ -277,8 +277,15 @@ class TestRunStateCycle(unittest.TestCase):
             main, "get_idle_seconds", return_value=80.0
         ), patch.object(main.time, "monotonic", return_value=100.3):
             main.run_state_cycle()
-
         fake_idle_background.hide.assert_not_called()
+
+    def test_prewarm_all_monitors_disabled_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(main._prewarm_all_monitors_enabled())
+
+    def test_prewarm_all_monitors_reads_env_toggle(self):
+        with patch.dict(os.environ, {"WIDGET_PREWARM_ALL_MONITORS": "1"}, clear=True):
+            self.assertTrue(main._prewarm_all_monitors_enabled())
 
     def test_active_state_skips_redundant_stop_when_nothing_is_playing(self):
         self._configure_common()
