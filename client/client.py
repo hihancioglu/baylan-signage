@@ -294,37 +294,11 @@ UPDATER_EXECUTABLE_NAME = os.getenv("UPDATER_EXECUTABLE_NAME", "BaylanUpdater.ex
 SOCKETIO_LOG_ENABLED = os.getenv("SOCKETIO_LOG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 
 
-def _module_exists(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
-
-
 def _resolve_socketio_transports() -> list[str]:
-    raw_transports = [
-        part.strip().lower()
-        for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
-        if part.strip()
-    ]
-    if not raw_transports:
-        raw_transports = ["websocket"]
-
-    has_websocket_client = _module_exists("websocket")
-
-    transports: list[str] = []
-    for transport in raw_transports:
-        if transport == "websocket" and not has_websocket_client:
-            continue
-        if transport != "websocket":
-            continue
-        transports.append(transport)
-
-    if not transports:
-        # Sadece websocket kullanılır; bağımlılık yoksa yine websocket ile dene.
-        if has_websocket_client:
-            transports = ["websocket"]
-        else:
-            transports = ["websocket"]
-
-    return transports
+    # Agent tarafında bağlantı yöntemini zorunlu olarak websocket'e sabitliyoruz.
+    # Sunucu tarafında polling desteği eklense bile agent fallback denemeyecek.
+    _ = os.getenv("SOCKETIO_TRANSPORTS", "websocket")
+    return ["websocket"]
 
 
 SOCKETIO_TRANSPORTS = _resolve_socketio_transports()
