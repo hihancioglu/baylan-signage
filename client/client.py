@@ -308,7 +308,7 @@ SOCKETIO_TRANSPORTS = [
     for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
     if part.strip()
 ]
-SOCKETIO_STRICT_WEBSOCKET = os.getenv("SOCKETIO_STRICT_WEBSOCKET", "true").strip().lower() in {
+SOCKETIO_STRICT_WEBSOCKET = os.getenv("SOCKETIO_STRICT_WEBSOCKET", "false").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -323,7 +323,7 @@ if SOCKETIO_STRICT_WEBSOCKET and SOCKETIO_TRANSPORTS != ["websocket"]:
 if "websocket" in SOCKETIO_TRANSPORTS and not WEBSOCKET_CLIENT_AVAILABLE:
     message = "[startup] websocket-client package not installed; websocket transport unavailable"
     if SOCKETIO_STRICT_WEBSOCKET:
-        raise RuntimeError(f"{message}. Install websocket-client to start the agent.")
+        raise RuntimeError(f"{message}. Install websocket-client (for example: pip install websocket-client) to start the agent.")
     builtins.print(f"{message}; removing websocket transport")
     SOCKETIO_TRANSPORTS = [transport for transport in SOCKETIO_TRANSPORTS if transport != "websocket"]
 if not SOCKETIO_TRANSPORTS:
