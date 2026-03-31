@@ -301,29 +301,26 @@ def _module_exists(module_name: str) -> bool:
 def _resolve_socketio_transports() -> list[str]:
     raw_transports = [
         part.strip().lower()
-        for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket,polling").split(",")
+        for part in os.getenv("SOCKETIO_TRANSPORTS", "websocket").split(",")
         if part.strip()
     ]
     if not raw_transports:
-        raw_transports = ["websocket", "polling"]
+        raw_transports = ["websocket"]
 
-    has_requests = _module_exists("requests")
     has_websocket_client = _module_exists("websocket")
 
     transports: list[str] = []
     for transport in raw_transports:
-        if transport == "polling" and not has_requests:
-            continue
         if transport == "websocket" and not has_websocket_client:
+            continue
+        if transport != "websocket":
             continue
         transports.append(transport)
 
     if not transports:
-        # En azından bir taşıyıcıyı dene; bağlantı denemesi sırasında ayrıntılı hata görülecek.
+        # Sadece websocket kullanılır; bağımlılık yoksa yine websocket ile dene.
         if has_websocket_client:
             transports = ["websocket"]
-        elif has_requests:
-            transports = ["polling"]
         else:
             transports = ["websocket"]
 
