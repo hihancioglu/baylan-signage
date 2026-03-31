@@ -101,7 +101,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
         self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
 
-    def test_start_with_pywebview_restores_fullscreen_and_hides_taskbar_entry_after_background_on_windows(self):
+    def test_start_with_pywebview_background_hides_window_without_offscreen_resize_on_windows(self):
         fake_window = unittest.mock.Mock()
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = fake_window
@@ -135,11 +135,10 @@ class TestWidgetViewer(unittest.TestCase):
             widget_viewer._start_with_pywebview("https://example.com", runtime_ipc=True, monitor_bounds=(0, 0, 1920, 1080))
 
         fake_window.hide.assert_called()
-        self.assertEqual(fake_window.toggle_fullscreen.call_count, 2)
-        fake_window.move.assert_any_call(-32000, -32000)
-        fake_window.move.assert_any_call(0, 0)
-        fake_window.resize.assert_any_call(1, 1)
-        fake_window.resize.assert_any_call(1920, 1080)
+        fake_window.toggle_fullscreen.assert_not_called()
+        fake_window.move.assert_not_called()
+        fake_window.resize.assert_not_called()
+        fake_window.show.assert_called_once()
 
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
