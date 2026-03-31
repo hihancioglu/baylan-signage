@@ -77,18 +77,16 @@ Uyarıyı kaldırmak için `active` alanını `false` gönderin.
 
 
 ## Widget Tam Ekran Gösterim (Windows)
-Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici vardır (`client/widget_viewer.py`). Gösterici artık hem `cefpython3` (tercihli) hem de `pywebview` backend'lerini destekler.
+Widget URL oynatımında tarayıcı kiosk moduna alternatif olarak Python tabanlı bir gösterici vardır (`client/widget_viewer.py`). Gösterici `pywebview` backend'i ile çalışır.
 
 Ortam değişkenleri:
 - `WIDGET_USE_PYTHON_VIEWER` (`1` varsayılan): `0/false/no` verilmezse URL widget'larda Python gösterici tercih edilir.
 - `PYTHON_WIDGET_VIEWER_ENABLED` (`1` varsayılan): Python widget göstericiyi global olarak aç/kapatır.
-- `WIDGET_VIEWER_BACKEND` (`auto` varsayılan): `auto`, `cef`, `pywebview`.
+- `WIDGET_VIEWER_BACKEND` (`auto` varsayılan): `auto`, `pywebview`.
 - `WIDGET_SINGLE_ENGINE` (`0` varsayılan): `1/true/yes` ise URL widget doğrudan açılmak yerine `client/widget_engine.html` içine tek Chromium instance mantığıyla `iframe` olarak yüklenir.
-- `CEF_EXTRA_SWITCHES`: Virgülle ayrılmış ek CEF switch listesi (`switch` veya `switch=value`).
 
 Notlar:
-- CEF backend, kiosk için Chrome uyumlu switch'lerle (`--kiosk`, `--disable-translate`, `--disable-infobars`, `--disable-session-crashed-bubble`, `--disable-features=TranslateUI`) başlatılır.
-- Backend başlatılamazsa diğer backend denenir; Python gösterici tamamen kullanılamazsa mevcut tarayıcı kiosk akışına geri dönülür.
+- Backend başlatılamazsa Python gösterici devre dışı kalır ve mevcut tarayıcı kiosk akışına geri dönülür.
 
 ### Frozen build'de widget viewer'ı aktif etme
 `client/player.py` içinde frozen (`BaylanSignageAgent.exe`) modda URL widget gösterimi için agent, aynı executable'ı `--widget` parametresiyle ikinci process olarak başlatır.
@@ -96,9 +94,7 @@ Notlar:
 Aktivasyon için:
 - `client/build_agent.ps1` script'ini çalıştırın; tek artifact üretilir: `dist/BaylanSignageAgent.exe`.
 - Runtime'da widget process çağrısı `BaylanSignageAgent.exe --widget <url>` şeklindedir.
-- Widget viewer backend'i için en az bir bağımlılık kullanılabilir olmalıdır: `cefpython3` veya `pywebview`.
-- CEF backend'i frozen dağıtıma dahil etmek için build'i `-EnableCefCollect` ile çalıştırın. Bu parametre, `cefpython3` kuruluysa agent PyInstaller çağrısına `--collect-all cefpython3` ekler.
-- `-EnableCefCollect` verilse bile build hard-fail olmaz: `cefpython3` bulunamazsa CEF collect adımı uyarı ile atlanır.
+- Widget viewer backend'i için `pywebview` bağımlılığı kullanılabilir olmalıdır.
 - `pywebview` kuruluysa build script gerekli paketleri (`--collect-all webview` + platform hidden import'ları) otomatik ekler; kurulu değilse bu adım hataya düşmeden atlanır.
 - Build script PyInstaller onefile extraction için sabit runtime dizini (`--runtime-tmpdir`) kullanır. Varsayılan: `C:\ProgramData\BaylanSignage\RuntimeTmp` (opsiyonel override: `-RuntimeTmpDir`).
 

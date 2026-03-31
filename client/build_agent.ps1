@@ -4,7 +4,6 @@ param(
     [string]$OutputDir = "dist",
     [string]$Name = "BaylanSignageAgent",
     [string]$RuntimeTmpDir = "$env:ProgramData\BaylanSignage\RuntimeTmp",
-    [switch]$EnableCefCollect,
     [switch]$SkipInstallPyInstaller,
     [switch]$ForceUpgradePyInstaller
 )
@@ -96,17 +95,6 @@ $clientPyInstallerArgs = @(
     $ClientScript
 )
 
-
-if ($EnableCefCollect) {
-    & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('cefpython3') else 1)" *> $null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[agent] CEF bulundu, --collect-all cefpython3 eklenecek."
-        $clientPyInstallerArgs += @("--collect-all", "cefpython3")
-    } else {
-        Write-Warning "-EnableCefCollect verildi ancak cefpython3 bulunamadı; CEF collect adımı atlanıyor."
-    }
-}
-
 & $Python -c "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('webview') else 1)" *> $null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[agent] pywebview bulundu, collect/hidden-import parametreleri ekleniyor."
@@ -116,7 +104,7 @@ if ($LASTEXITCODE -eq 0) {
         "--hidden-import", "webview.platforms.edgechromium"
     )
 } else {
-    Write-Host "[agent] pywebview bulunamadı, sadece CEF/diğer backend'lerle devam edilecek."
+    Write-Host "[agent] pywebview bulunamadı, widget viewer backend'i devre dışı kalacak."
 }
 
 & $Python -m PyInstaller @clientPyInstallerArgs
