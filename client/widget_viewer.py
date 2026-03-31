@@ -794,42 +794,9 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
-        backgrounded = False
-
-        def _windows_background_window() -> None:
-            """Move fullscreen window off-screen and tiny to avoid taskbar entry flashes."""
-            try:
-                window.toggle_fullscreen()
-            except Exception:
-                pass
-            try:
-                window.move(-32000, -32000)
-            except Exception:
-                pass
-            try:
-                window.resize(1, 1)
-            except Exception:
-                pass
-
-        def _windows_restore_window() -> None:
-            if monitor_bounds is None:
-                return
-            x, y, width, height = monitor_bounds
-            try:
-                window.move(x, y)
-            except Exception:
-                pass
-            try:
-                window.resize(width, height)
-            except Exception:
-                pass
-            try:
-                window.toggle_fullscreen()
-            except Exception:
-                pass
 
         def dispatch(message: dict) -> None:
-            nonlocal shown_once, backgrounded
+            nonlocal shown_once
             _debug_log(f"pywebview dispatch message={message.get('type')}")
             if message.get("type") == "stop":
                 try:
@@ -846,9 +813,6 @@ def _start_with_pywebview(
                         window.hide()
                     except Exception:
                         pass
-                if os.name == "nt":
-                    _windows_background_window()
-                backgrounded = True
                 shown_once = False
                 return
             message_type = str(message.get("type") or "").strip().lower()
@@ -873,9 +837,6 @@ def _start_with_pywebview(
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
             if not shown_once:
                 shown_once = True
-                if os.name == "nt" and backgrounded:
-                    _windows_restore_window()
-                    backgrounded = False
                 try:
                     window.show()
                 except Exception:
