@@ -57,7 +57,7 @@ app.secret_key = PANEL_SESSION_SECRET
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    transports=["polling", "websocket"],
+    transports=["websocket"],
 )
 
 ensure_sqlite_schema()
