@@ -3280,6 +3280,44 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
 
+    def test_reconcile_widget_players_stops_stale_widget_runtimes_for_non_widget_monitor(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        stale_widget_player = unittest.mock.Mock()
+        stale_widget_player.stop = unittest.mock.Mock()
+        multi_monitor._widget_players[2] = stale_widget_player
+
+        # Monitör konfigürasyonda var ama widget içermiyor -> stale sayılmalı.
+        multi_monitor._reconcile_widget_players_for_states(
+            {
+                2: {
+                    "enabled": True,
+                    "entries": [{"item_type": "media", "local_path": "/tmp/demo.mp4"}],
+                    "target_monitor_index": 1,
+                }
+            }
+        )
+
+        stale_widget_player.stop.assert_called_once_with(stop_widget_runtime=True)
+        self.assertNotIn(2, multi_monitor._widget_players)
+
+    def test_reconcile_widget_players_keeps_runtime_when_monitor_temporarily_missing(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        widget_player = unittest.mock.Mock()
+        widget_player.stop = unittest.mock.Mock()
+        multi_monitor._widget_players[2] = widget_player
+
+        # Konfigürasyon geçici olarak boş gelirse runtime zorla kapatılmamalı.
+        multi_monitor._reconcile_widget_players_for_states({})
+
+        widget_player.stop.assert_not_called()
+        self.assertIn(2, multi_monitor._widget_players)
+
     def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
         from client.client import PlaybackController
 
