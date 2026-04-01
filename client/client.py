@@ -1821,13 +1821,46 @@ class MultiMonitorPlayback:
                 )
 
     def _ensure_worker(self, monitor_no: int):
+        widget_player_to_prewarm: BorderlessFullscreenPlayer | None = None
+        widget_target_monitor_index: int | None = None
         with self._lock:
             existing = self._workers.get(monitor_no)
             if existing and existing.is_alive():
                 return
+            monitor_state = dict(self._monitor_states.get(monitor_no) or {})
+            entries = list(monitor_state.get("entries") or [])
+            has_widget_entry = any(
+                str((entry or {}).get("item_type") or "media").strip().lower() == "widget"
+                for entry in entries
+                if isinstance(entry, dict)
+            )
+            if has_widget_entry:
+                player = self._widget_players.get(monitor_no)
+                if player is None:
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                    self._widget_players[monitor_no] = player
+                widget_player_to_prewarm = player
+                target_monitor_index = monitor_state.get("target_monitor_index")
+                if isinstance(target_monitor_index, int) and target_monitor_index >= 0:
+                    widget_target_monitor_index = int(target_monitor_index)
             self._running_monitors[monitor_no] = True
             worker = threading.Thread(target=self._run, args=(monitor_no,), daemon=True)
             self._workers[monitor_no] = worker
+        if widget_player_to_prewarm is not None:
+            try:
+                prewarm_ok = bool(
+                    widget_player_to_prewarm.start_widget_engine_if_needed(
+                        target_monitor_index=widget_target_monitor_index,
+                        clone_to_all_monitors=False,
+                    )
+                )
+            except Exception:
+                prewarm_ok = False
+            log_debug(
+                "monitor_widget_prewarm | "
+                f"monitor_no={monitor_no} target_monitor_index={widget_target_monitor_index} "
+                f"ok={prewarm_ok}"
+            )
         worker.start()
 
     @staticmethod
