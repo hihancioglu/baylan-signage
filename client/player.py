@@ -270,7 +270,7 @@ class BorderlessFullscreenPlayer:
             self._keep_widget_runtime_warm = bool(keep_widget_runtime_warm)
         self._last_interrupted = False
         self._last_widget_source = ""
-        self._last_runtime_signature: tuple[int | None, bool | None] | None = None
+        self._last_runtime_signature: tuple[tuple[int | None, ...], bool] | None = None
         self._last_widget_signature: str | None = None
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
 
@@ -1410,6 +1410,13 @@ class BorderlessFullscreenPlayer:
                 clone_to_all_monitors=clone_to_all_monitors,
             )
             desired_count = len(runtime_targets)
+            requested_signature = (
+                tuple(
+                    monitor_index if isinstance(monitor_index, int) and monitor_index >= 0 else None
+                    for monitor_index, _bounds in runtime_targets
+                ),
+                bool(clone_to_all_monitors),
+            )
             running_processes = [
                 process for process in self._widget_runtime_processes
                 if process and process.poll() is None
@@ -1434,15 +1441,14 @@ class BorderlessFullscreenPlayer:
                 self._widget_process = running_processes[0]
                 self._extra_processes = running_processes[1:]
                 return True
-            current_signature = (target_monitor_index, clone_to_all_monitors)
             last_signature = getattr(self, "_last_runtime_signature", None)
             if running_processes and len(running_processes) == desired_count:
-                if last_signature == current_signature:
+                if last_signature == requested_signature:
                     _debug_log(
                         "widget runtime ensure reuse | "
                         "reason=running_count_matches_desired_count "
                         f"running_count={len(running_processes)} desired_count={desired_count} "
-                        f"signature={current_signature}"
+                        f"signature={requested_signature}"
                     )
                     self._widget_process = running_processes[0]
                     return True
@@ -1450,11 +1456,11 @@ class BorderlessFullscreenPlayer:
                     "widget runtime ensure restart | "
                     "reason=running_count_matches_but_signature_differs "
                     f"running_count={len(running_processes)} desired_count={desired_count} "
-                    f"last_signature={last_signature} requested_signature={current_signature}"
+                    f"last_signature={last_signature} requested_signature={requested_signature}"
                 )
             same_config = (
                 running_processes
-                and last_signature == current_signature
+                and last_signature == requested_signature
             )
             # aynı konfig ise restart ETME
             if same_config:
@@ -1556,7 +1562,7 @@ class BorderlessFullscreenPlayer:
                     f"restart_count={self._widget_runtime_restart_count} "
                     f"monitor_targets={runtime_targets}"
                 )
-                self._last_runtime_signature = (target_monitor_index, clone_to_all_monitors)
+                self._last_runtime_signature = requested_signature
                 return True
             except FileNotFoundError as exc:
                 _debug_log(
