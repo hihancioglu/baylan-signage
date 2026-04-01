@@ -135,7 +135,7 @@ class TestWidgetViewer(unittest.TestCase):
             widget_viewer._start_with_pywebview("https://example.com", runtime_ipc=True, monitor_bounds=(0, 0, 1920, 1080))
 
         fake_window.hide.assert_called()
-        fake_window.minimize.assert_called_once()
+        fake_window.minimize.assert_not_called()
         fake_window.toggle_fullscreen.assert_not_called()
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
