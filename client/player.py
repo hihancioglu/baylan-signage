@@ -1710,7 +1710,14 @@ class BorderlessFullscreenPlayer:
             _safe_print(f"⚠️ widget runtime mesajı gönderilemedi: {exc}")
             return False
 
-    def sync_widget_runtime_playlist(self, widget_items: list[dict], active_signature: str | None = None) -> bool:
+    def sync_widget_runtime_playlist(
+        self,
+        widget_items: list[dict],
+        active_signature: str | None = None,
+        *,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
+    ) -> bool:
         normalized_items: list[dict] = []
         for item in widget_items or []:
             if not isinstance(item, dict):
@@ -1733,7 +1740,11 @@ class BorderlessFullscreenPlayer:
                 "active_signature": str(active_signature or "").strip() or None,
             },
         }
-        return self._send_widget_runtime_message(message)
+        return self._send_widget_runtime_message(
+            message,
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        )
 
     def update_widget_layout(
         self,
