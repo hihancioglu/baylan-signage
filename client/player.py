@@ -270,8 +270,9 @@ class BorderlessFullscreenPlayer:
             self._keep_widget_runtime_warm = bool(keep_widget_runtime_warm)
         self._last_interrupted = False
         self._last_widget_source = ""
-        self._last_runtime_signature: tuple[tuple[int | None, ...], bool] | None = None
+        self._last_runtime_signature: tuple[tuple[tuple[int | None, tuple[int, int, int, int] | None], ...], bool, int | None] | None = None
         self._last_widget_signature: str | None = None
+        self._active_widget_signature: str | None = None
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
 
     def _apply_pending_stop_to_media_processes(self, processes: list[subprocess.Popen]) -> bool:
@@ -1410,12 +1411,16 @@ class BorderlessFullscreenPlayer:
                 clone_to_all_monitors=clone_to_all_monitors,
             )
             desired_count = len(runtime_targets)
-            requested_signature = (
+            runtime_signature = (
                 tuple(
-                    monitor_index if isinstance(monitor_index, int) and monitor_index >= 0 else None
-                    for monitor_index, _bounds in runtime_targets
+                    (
+                        monitor_index if isinstance(monitor_index, int) and monitor_index >= 0 else None,
+                        bounds,
+                    )
+                    for monitor_index, bounds in runtime_targets
                 ),
                 bool(clone_to_all_monitors),
+                target_monitor_index if isinstance(target_monitor_index, int) and target_monitor_index >= 0 else None,
             )
             running_processes = [
                 process for process in self._widget_runtime_processes
@@ -1427,49 +1432,24 @@ class BorderlessFullscreenPlayer:
                 f"desired_targets={runtime_targets} desired_count={desired_count} "
                 f"running_pids={[getattr(process, 'pid', None) for process in running_processes]}"
             )
-            if (
-                running_processes
-                and target_monitor_index is None
-                and clone_to_all_monitors is None
-            ):
+            last_signature = getattr(self, "_last_runtime_signature", None)
+            if running_processes and last_signature == runtime_signature:
                 _debug_log(
                     "widget runtime ensure reuse | "
-                    "reason=default_request_with_running_process "
-                    f"running_count={len(running_processes)}"
+                    "reason=runtime_signature_matched "
+                    f"running_count={len(running_processes)} signature={runtime_signature}"
                 )
                 self._widget_runtime_processes = running_processes
                 self._widget_process = running_processes[0]
                 self._extra_processes = running_processes[1:]
                 return True
-            last_signature = getattr(self, "_last_runtime_signature", None)
             if running_processes and len(running_processes) == desired_count:
-                if last_signature == requested_signature:
-                    _debug_log(
-                        "widget runtime ensure reuse | "
-                        "reason=running_count_matches_desired_count "
-                        f"running_count={len(running_processes)} desired_count={desired_count} "
-                        f"signature={requested_signature}"
-                    )
-                    self._widget_process = running_processes[0]
-                    return True
                 _debug_log(
                     "widget runtime ensure restart | "
                     "reason=running_count_matches_but_signature_differs "
                     f"running_count={len(running_processes)} desired_count={desired_count} "
-                    f"last_signature={last_signature} requested_signature={requested_signature}"
+                    f"last_signature={last_signature} runtime_signature={runtime_signature}"
                 )
-            same_config = (
-                running_processes
-                and last_signature == requested_signature
-            )
-            # aynı konfig ise restart ETME
-            if same_config:
-                _debug_log(
-                    "widget runtime ensure reuse | "
-                    "reason=same_config "
-                    f"running_count={len(running_processes)} signature={self._last_runtime_signature}"
-                )
-                return True
 
             if running_processes and desired_count > 0 and len(running_processes) > desired_count:
                 keep_all_running = (
@@ -1562,7 +1542,7 @@ class BorderlessFullscreenPlayer:
                     f"restart_count={self._widget_runtime_restart_count} "
                     f"monitor_targets={runtime_targets}"
                 )
-                self._last_runtime_signature = requested_signature
+                self._last_runtime_signature = runtime_signature
                 return True
             except FileNotFoundError as exc:
                 _debug_log(
@@ -1664,6 +1644,9 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
+        if widget_signature and widget_signature == getattr(self, "_active_widget_signature", None):
+            _debug_log(f"update_widget_layout skipped | signature_unchanged={widget_signature}")
+            return True
         if widget_signature == self._last_widget_signature:
             return True
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
@@ -1690,6 +1673,7 @@ class BorderlessFullscreenPlayer:
         )
         if sent:
             self._last_widget_signature = widget_signature
+            self._active_widget_signature = widget_signature
         return sent
 
     def stop_widget_engine(self) -> None:
@@ -2645,11 +2629,8 @@ class BorderlessFullscreenPlayer:
                 self._stop_detached_widget_browser_processes()
             elif not stop_widget_runtime:
                 backgrounded = self.background_widget_engine()
-                # Idle modundan ACTIVE'e dönerken pencere gizlenemezse (ör. runtime
-                # stdin hattı kopmuşsa) widget görünür kalabilir. Bu durumda sıcak
-                # tutma yerine runtime'ı tamamen kapatıp ekranda kalmayı engelle.
-                if not backgrounded and running_widget_runtime_processes:
-                    self.stop_widget_engine()
+                if not backgrounded:
+                    _debug_log("stop keep-warm requested but background failed | runtime_kept_alive=True")
 
         with self._process_lock:
             self._process = None

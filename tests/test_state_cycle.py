@@ -305,7 +305,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_playback.stop.assert_not_called()
 
-    def test_active_state_keeps_widget_runtime_warm_when_widget_process_is_running(self):
+    def test_active_state_does_not_issue_redundant_stop_when_widget_process_is_running(self):
         self._configure_common()
         main.current_state = main.ClientState.ACTIVE
 
@@ -322,7 +322,7 @@ class TestRunStateCycle(unittest.TestCase):
         ):
             main.run_state_cycle()
 
-        fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+        fake_playback.stop.assert_not_called()
 
     def test_outage_caps_idle_threshold_and_transitions_to_idle_pending(self):
         self._configure_common()
