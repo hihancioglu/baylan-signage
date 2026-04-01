@@ -1622,14 +1622,43 @@ class MultiMonitorPlayback:
         return max(0, int(monitor_no) - 1)
 
     def prewarm_widget_runtimes_on_startup(self):
+        # Startup prewarm now relies on actual playlist/widget analysis from
+        # update_from_config so we only warm required monitor runtimes.
         with self._lock:
-            if self._startup_widget_prewarm_done:
-                return
             self._startup_widget_prewarm_done = True
 
-        connected_count = self._connected_monitor_count() or 1
-        for monitor_no in range(2, int(connected_count) + 1):
-            target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
+    @staticmethod
+    def _state_has_widget_entries(state: dict | None) -> bool:
+        entries = list((state or {}).get("entries") or [])
+        return any(
+            str((entry or {}).get("item_type") or "media").strip().lower() == "widget"
+            for entry in entries
+            if isinstance(entry, dict)
+        )
+
+    def _reconcile_widget_players_for_states(self, monitor_states: dict[int, dict]) -> None:
+        desired_targets: dict[int, int] = {}
+        for monitor_no, state in monitor_states.items():
+            if not self._state_has_widget_entries(state):
+                continue
+            target_monitor_index = state.get("target_monitor_index")
+            if isinstance(target_monitor_index, int) and target_monitor_index >= 0:
+                desired_targets[monitor_no] = int(target_monitor_index)
+
+        with self._lock:
+            existing_players = dict(self._widget_players)
+            desired_monitor_nos = set(desired_targets.keys())
+            stale_monitor_nos = set(existing_players.keys()) - desired_monitor_nos
+            for monitor_no in stale_monitor_nos:
+                player = self._widget_players.pop(monitor_no, None)
+                if player is None:
+                    continue
+                try:
+                    player.stop(stop_widget_runtime=False)
+                except Exception:
+                    pass
+
+        for monitor_no, target_monitor_index in desired_targets.items():
             with self._lock:
                 player = self._widget_players.get(monitor_no)
                 if player is None:
@@ -1647,7 +1676,7 @@ class MultiMonitorPlayback:
             except Exception:
                 prewarm_ok = False
             log_debug(
-                "startup_monitor_widget_prewarm | "
+                "monitor_widget_runtime_reconcile | "
                 f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} ok={prewarm_ok}"
             )
 
@@ -1779,6 +1808,8 @@ class MultiMonitorPlayback:
                 player.stop()
             except Exception:
                 pass
+
+        self._reconcile_widget_players_for_states(monitor_states)
 
     def has_active_playlist(self) -> bool:
         with self._lock:
@@ -2082,17 +2113,12 @@ class PlaybackController:
         self._clone_to_all_monitors = False
         self.multi_monitor_playback = MultiMonitorPlayback(self.media_manager, widget_player=self.player)
 
-        # İlk idle geçişinde mpv'den widget viewer'a geçerken masaüstü parlamasını
-        # azaltmak için widget runtime'ı varsayılan olarak önceden ayağa kaldır.
-        # Varsayılan olarak tek süreç prewarm edilir; tüm monitörlerde widget
-        # prosesleri açmak başlangıçta gereksiz process yükü (ve küçük boş
-        # widget pencereleri) oluşturabiliyor.
+        # Prewarm kararı playlist içeriğine göre update_from_config içinde verilir.
+        # Böylece sadece widget/dashboard kullanılan monitörlerde runtime açılır.
         if (
             os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
             and not _is_widget_viewer_process()
         ):
-            self.player.start_widget_engine_if_needed(clone_to_all_monitors=_prewarm_all_monitors_enabled())
-            self.player.background_widget_engine()
             self.multi_monitor_playback.prewarm_widget_runtimes_on_startup()
 
     def _primary_target_monitor_index(self) -> int | None:
@@ -2504,6 +2530,38 @@ class PlaybackController:
             clone_to_all_monitors=clone_to_all_monitors,
         )
 
+    @staticmethod
+    def _entries_have_widget(entries: list[dict]) -> bool:
+        return any(
+            str((entry or {}).get("item_type") or "media").strip().lower() == "widget"
+            for entry in entries
+            if isinstance(entry, dict)
+        )
+
+    def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
+        has_primary_widget = bool(enabled and self._entries_have_widget(normalized_items))
+        if has_primary_widget:
+            prewarm_ok = False
+            try:
+                prewarm_ok = bool(
+                    self.player.start_widget_engine_if_needed(
+                        target_monitor_index=self._primary_target_monitor_index(),
+                        clone_to_all_monitors=False,
+                    )
+                )
+                if prewarm_ok:
+                    self.player.background_widget_engine()
+            except Exception:
+                prewarm_ok = False
+            log_debug(f"primary_widget_runtime_reconcile | action=ensure ok={prewarm_ok}")
+            return
+
+        try:
+            self.player.stop_widget_engine()
+            log_debug("primary_widget_runtime_reconcile | action=stop ok=True")
+        except Exception:
+            log_debug("primary_widget_runtime_reconcile | action=stop ok=False")
+
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         return False
 
@@ -2550,6 +2608,11 @@ class PlaybackController:
                 normalized_items.append(self._normalize_item(item))
             elif item:
                 normalized_items.append(self._normalize_item({"path": item, "media_type": None, "duration_sec": None}))
+
+        self._reconcile_primary_widget_runtime(
+            enabled=enabled,
+            normalized_items=normalized_items,
+        )
 
         first_items = [
             f"{idx + 1}:{self._item_label(item)}[{item.get('item_type')}]"
