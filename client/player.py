@@ -1398,6 +1398,31 @@ class BorderlessFullscreenPlayer:
                 fallback_processes.append(process)
         return fallback_processes
 
+    @staticmethod
+    def _monitor_index_from_process(process: subprocess.Popen) -> int | None:
+        args = getattr(process, "args", None)
+        if not isinstance(args, (list, tuple)):
+            return None
+        for idx, token in enumerate(args):
+            try:
+                token_text = str(token)
+            except Exception:
+                continue
+            if token_text == "--monitor":
+                if idx + 1 < len(args):
+                    try:
+                        monitor_index = int(str(args[idx + 1]).strip())
+                        return monitor_index if monitor_index >= 0 else None
+                    except Exception:
+                        return None
+            if token_text.startswith("--monitor="):
+                try:
+                    monitor_index = int(token_text.split("=", 1)[1].strip())
+                    return monitor_index if monitor_index >= 0 else None
+                except Exception:
+                    return None
+        return None
+
     def _build_widget_runtime_command(
         self,
         monitor_index: int | None = None,
@@ -1646,6 +1671,24 @@ class BorderlessFullscreenPlayer:
             process for process in self._runtime_processes_snapshot()
             if process and process.poll() is None and process.stdin
         ]
+        if (
+            processes
+            and isinstance(target_monitor_index, int)
+            and target_monitor_index >= 0
+            and not bool(clone_to_all_monitors)
+        ):
+            targeted_processes = [
+                process
+                for process in processes
+                if self._monitor_index_from_process(process) == target_monitor_index
+            ]
+            if targeted_processes:
+                processes = targeted_processes
+            _debug_log(
+                "widget runtime message target filter | "
+                f"type={message_type} target_monitor_index={target_monitor_index} "
+                f"matched_count={len(targeted_processes)} total_count={len(self._runtime_processes_snapshot())}"
+            )
         if not processes:
             _debug_log(
                 "widget runtime message dropped | "
