@@ -772,16 +772,21 @@ def _start_with_pywebview(
         "text_select": False,
     }
     if monitor_bounds is None:
-        window_kwargs["fullscreen"] = True
+        # Warm runtime should start windowed to avoid the white flash that
+        # happens when the first WebView surface is created in fullscreen.
+        # We promote to fullscreen on the first foreground transition.
+        window_kwargs["width"] = 16
+        window_kwargs["height"] = 16
+        window_kwargs["x"] = -32000 if os.name == "nt" else -10000
+        window_kwargs["y"] = -32000 if os.name == "nt" else -10000
+        window_kwargs["fullscreen"] = False
     else:
         x, y, width, height = monitor_bounds
         window_kwargs["x"] = x
         window_kwargs["y"] = y
         window_kwargs["width"] = width
         window_kwargs["height"] = height
-        # Keep true fullscreen even on explicitly targeted monitors.
-        # Windowed mode leaves OS chrome (e.g. Windows taskbar) visible.
-        window_kwargs["fullscreen"] = True
+        window_kwargs["fullscreen"] = False
 
     create_started_at = time.perf_counter()
     window = webview.create_window(**window_kwargs, js_api=debug_bridge)
@@ -794,6 +799,18 @@ def _start_with_pywebview(
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
+        fullscreen_applied = False
+
+        def _enter_fullscreen_once() -> None:
+            nonlocal fullscreen_applied
+            if fullscreen_applied:
+                return
+            try:
+                window.toggle_fullscreen()
+                fullscreen_applied = True
+                _debug_log("pywebview fullscreen promoted on first foreground")
+            except Exception as exc:
+                _debug_log(f"pywebview fullscreen promotion failed | error={exc}")
 
         def dispatch(message: dict) -> None:
             nonlocal shown_once
@@ -846,6 +863,7 @@ def _start_with_pywebview(
             if not shown_once:
                 shown_once = True
                 try:
+                    _enter_fullscreen_once()
                     window.show()
                 except Exception:
                     pass

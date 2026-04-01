@@ -79,16 +79,18 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertEqual(options.monitor_bounds, (1920, 0, 1920, 1080))
 
-    def test_start_with_pywebview_uses_fullscreen_without_monitor_bounds(self):
+    def test_start_with_pywebview_starts_windowed_without_monitor_bounds(self):
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = unittest.mock.Mock()
 
         with patch.dict("sys.modules", {"webview": fake_webview}):
             widget_viewer._start_with_pywebview("https://example.com")
 
-        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
+        self.assertFalse(fake_webview.create_window.call_args.kwargs["fullscreen"])
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 16)
+        self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 16)
 
-    def test_start_with_pywebview_keeps_fullscreen_with_monitor_bounds(self):
+    def test_start_with_pywebview_starts_windowed_with_monitor_bounds(self):
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = unittest.mock.Mock()
 
@@ -99,9 +101,9 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(fake_webview.create_window.call_args.kwargs["y"], 0)
         self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1920)
         self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
-        self.assertTrue(fake_webview.create_window.call_args.kwargs["fullscreen"])
+        self.assertFalse(fake_webview.create_window.call_args.kwargs["fullscreen"])
 
-    def test_start_with_pywebview_background_hides_window_without_offscreen_resize_on_windows(self):
+    def test_start_with_pywebview_background_hides_window_and_promotes_fullscreen_on_foreground(self):
         fake_window = unittest.mock.Mock()
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = fake_window
@@ -136,7 +138,7 @@ class TestWidgetViewer(unittest.TestCase):
 
         fake_window.hide.assert_called()
         fake_window.minimize.assert_not_called()
-        fake_window.toggle_fullscreen.assert_not_called()
+        fake_window.toggle_fullscreen.assert_called_once()
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
         fake_window.show.assert_called_once()
