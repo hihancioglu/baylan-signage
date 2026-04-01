@@ -3926,7 +3926,15 @@ def run_state_cycle():
         # geri dönüş kaçırılmaz.
         _activity_drop_streak += 1
     elif isinstance(previous_idle_sec, (int, float)) and idle_sec >= previous_idle_sec:
-        _activity_drop_streak = 0
+        # Kullanıcı etkileşiminde idle sayaçları çoğunlukla "sert düşüş -> çok düşük
+        # seviyede kısa plato" paterni izliyor (örn. 33s -> 0s -> 0s ...).
+        # Önceki döngüde bir düşüş yakalandıysa, yalnızca düşük idle penceresinde
+        # kalmaya devam edildiği için seriyi sıfırlamayalım; aksi halde doğrulama
+        # sayısına hiç ulaşılamayıp gerçek aktivite kaçabiliyor.
+        if _activity_drop_streak > 0 and idle_sec <= ACTIVITY_RESUME_SEC:
+            _activity_drop_streak += 1
+        else:
+            _activity_drop_streak = 0
 
     if ignore_idle:
         _activity_drop_streak = 0
