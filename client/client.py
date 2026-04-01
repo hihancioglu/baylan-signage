@@ -1636,6 +1636,14 @@ class MultiMonitorPlayback:
             if isinstance(entry, dict)
         )
 
+    @staticmethod
+    def _player_has_visible_widget_content(player: BorderlessFullscreenPlayer | None) -> bool:
+        active_item = getattr(player, "_active_item", None)
+        if not isinstance(active_item, dict):
+            return False
+        active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
+        return active_item_type == "widget"
+
     def _reconcile_widget_players_for_states(self, monitor_states: dict[int, dict]) -> None:
         desired_targets: dict[int, int] = {}
         monitor_nos_without_widgets: set[int] = set()
@@ -1676,6 +1684,7 @@ class MultiMonitorPlayback:
                 if player is None:
                     player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
                     self._widget_players[monitor_no] = player
+            should_background = False
             try:
                 prewarm_ok = bool(
                     player.start_widget_engine_if_needed(
@@ -1683,13 +1692,15 @@ class MultiMonitorPlayback:
                         clone_to_all_monitors=False,
                     )
                 )
-                if prewarm_ok:
+                should_background = prewarm_ok and not self._player_has_visible_widget_content(player)
+                if should_background:
                     player.background_widget_engine()
             except Exception:
                 prewarm_ok = False
             log_debug(
                 "monitor_widget_runtime_reconcile | "
-                f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} ok={prewarm_ok}"
+                f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
+                f"ok={prewarm_ok} backgrounded={should_background if prewarm_ok else False}"
             )
 
 
@@ -2550,10 +2561,19 @@ class PlaybackController:
             if isinstance(entry, dict)
         )
 
+    @staticmethod
+    def _player_has_visible_widget_content(player: BorderlessFullscreenPlayer | None) -> bool:
+        active_item = getattr(player, "_active_item", None)
+        if not isinstance(active_item, dict):
+            return False
+        active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
+        return active_item_type == "widget"
+
     def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
         has_primary_widget = bool(enabled and self._entries_have_widget(normalized_items))
         if has_primary_widget:
             prewarm_ok = False
+            should_background = False
             try:
                 prewarm_ok = bool(
                     self.player.start_widget_engine_if_needed(
@@ -2561,11 +2581,15 @@ class PlaybackController:
                         clone_to_all_monitors=False,
                     )
                 )
-                if prewarm_ok:
+                should_background = prewarm_ok and not self._player_has_visible_widget_content(self.player)
+                if should_background:
                     self.player.background_widget_engine()
             except Exception:
                 prewarm_ok = False
-            log_debug(f"primary_widget_runtime_reconcile | action=ensure ok={prewarm_ok}")
+            log_debug(
+                "primary_widget_runtime_reconcile | "
+                f"action=ensure ok={prewarm_ok} backgrounded={should_background if prewarm_ok else False}"
+            )
             return
 
         try:
