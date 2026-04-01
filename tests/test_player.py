@@ -180,6 +180,52 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(command, [])
 
+    def test_terminate_process_closes_stdin_before_terminate(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.stdin = unittest.mock.Mock()
+        process.wait.return_value = 0
+
+        player._terminate_process(process, timeout_sec=1)
+
+        process.stdin.close.assert_called_once_with()
+        process.terminate.assert_called_once_with()
+
+    def test_widget_runtime_spawn_failure_terminates_already_spawned_processes(self):
+        player = self._build_player()
+        player._python_widget_viewer_runtime_enabled = True
+        player._widget_runtime_processes = []
+        spawned_process = unittest.mock.Mock()
+        spawned_process.poll.return_value = None
+
+        with patch.object(
+            player,
+            "_resolve_widget_runtime_monitor_targets",
+            return_value=[(0, None), (1, None)],
+        ), patch.object(
+            player,
+            "_build_widget_runtime_command",
+            return_value=["python", "viewer.py", "https://example.com"],
+        ), patch.object(
+            player,
+            "_widget_popen_kwargs",
+            return_value={},
+        ), patch.object(
+            player,
+            "_widget_runtime_controller_enabled",
+            return_value=True,
+        ), patch("client.player.subprocess.Popen", side_effect=[spawned_process, RuntimeError("spawn failed")]), patch.object(
+            player,
+            "_terminate_process",
+        ) as terminate_process:
+            started = player.start_widget_engine_if_needed(
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertFalse(started)
+        terminate_process.assert_called_once_with(spawned_process, timeout_sec=1, force_tree=True)
+
     def test_python_widget_viewer_enabled_by_default(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertTrue(BorderlessFullscreenPlayer._prefer_python_widget_viewer())
