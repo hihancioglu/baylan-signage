@@ -288,6 +288,32 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback.stop.assert_not_called()
         self.assertEqual(main.current_state, main.ClientState.PLAYING)
 
+    def test_playing_widget_confirms_activity_when_idle_drop_reaches_low_idle_plateau(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 30.0
+        main._activity_drop_streak = 0
+        main._low_idle_streak = 0
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main.time, "monotonic", return_value=100.0
+        ), patch.object(main.window_manager, "is_window_foreground", return_value=False), patch.object(
+            main, "return_to_erp_window"
+        ) as return_mock:
+            with patch.object(main, "get_idle_seconds", side_effect=[0.0, 0.0, 0.0, 0.0]):
+                for _ in range(4):
+                    main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertGreaterEqual(fake_playback.stop.call_count, 1)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
     def test_playing_media_ignores_low_idle_only_signal_without_drop_confirmation(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
