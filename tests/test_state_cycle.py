@@ -288,6 +288,29 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback.stop.assert_not_called()
         self.assertEqual(main.current_state, main.ClientState.PLAYING)
 
+    def test_playing_media_ignores_low_idle_only_signal_without_drop_confirmation(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 0.01
+        main._activity_drop_streak = 0
+        main._low_idle_streak = 2
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "video"
+        fake_playback._active_item = {"item_type": "media", "local_path": "/tmp/video.mp4"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=0.0
+        ), patch.object(main.time, "monotonic", return_value=100.0), patch.object(
+            main, "return_to_erp_window"
+        ) as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_not_called()
+        fake_playback.stop.assert_not_called()
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
     def test_playing_widget_keeps_idle_overlay_for_warmup_window(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
