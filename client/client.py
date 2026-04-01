@@ -1572,10 +1572,8 @@ class MultiMonitorPlayback:
         self._monitor_states: dict[int, dict] = {}
         self._monitor_versions: dict[int, str] = {}
         self._players: dict[int, BorderlessFullscreenPlayer] = {}
-        # Widget runtime controller process listesinin monitor başına açılan
-        # player instance'larında ayrışmasını engellemek için tüm secondary
-        # widget oynatımlarını tek player üzerinden yürüt.
-        self._widget_player: BorderlessFullscreenPlayer | None = widget_player
+        self._widget_players: dict[int, BorderlessFullscreenPlayer] = {}
+        self._widget_player_fallback: BorderlessFullscreenPlayer | None = widget_player
         self._workers: dict[int, threading.Thread] = {}
         self._running_monitors: dict[int, bool] = {}
         self._lock = threading.Lock()
@@ -1769,6 +1767,9 @@ class MultiMonitorPlayback:
                 player = self._players.get(monitor_no)
                 if player:
                     player.stop()
+                widget_player = self._widget_players.get(monitor_no)
+                if widget_player:
+                    widget_player.stop()
                 worker = self._workers.get(monitor_no)
                 if worker and worker.is_alive():
                     workers.append(worker)
@@ -1777,7 +1778,7 @@ class MultiMonitorPlayback:
 
     def pause(self):
         with self._lock:
-            players = list(self._players.values())
+            players = list(self._players.values()) + list(self._widget_players.values())
         for player in players:
             player.stop()
 
@@ -1853,10 +1854,13 @@ class MultiMonitorPlayback:
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
                 with self._lock:
-                    player = self._widget_player
+                    player = self._widget_players.get(monitor_no)
                     if player is None:
-                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
-                        self._widget_player = player
+                        player = self._widget_player_fallback
+                        if player is None:
+                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        self._widget_players[monitor_no] = player
+                        self._widget_player_fallback = None
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
                         "monitor_widget_launch skipped | "
