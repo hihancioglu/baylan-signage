@@ -1532,7 +1532,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         running_process.stdin = unittest.mock.Mock()
         player._widget_runtime_processes = [running_process]
         player._widget_process = running_process
-        player._last_runtime_signature = ((0,), False)
+        player._last_runtime_signature = (((0, None),), False, 0)
 
         spawned_process = unittest.mock.Mock()
         spawned_process.poll.return_value = None
@@ -1563,7 +1563,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         popen_mock.assert_called_once()
         self.assertEqual(player._widget_runtime_processes, [spawned_process])
         self.assertEqual(player._widget_process, spawned_process)
-        self.assertEqual(player._last_runtime_signature, ((1,), False))
+        self.assertEqual(player._last_runtime_signature, (((1, (0, 0, 1920, 1080)),), False, 1))
 
     def test_start_widget_engine_reuses_when_default_and_explicit_target_match(self):
         player = self._build_player()
@@ -1572,7 +1572,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         running_process.stdin = unittest.mock.Mock()
         player._widget_runtime_processes = [running_process]
         player._widget_process = running_process
-        player._last_runtime_signature = ((0,), False)
+        player._last_runtime_signature = (((0, None),), False, 0)
 
         with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
             player,

@@ -3361,16 +3361,9 @@ def set_state(next_state: ClientState, reason: str):
         log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
         return
 
-    bypass_debounce = (current_state, next_state) in {
-        (ClientState.IDLE_PENDING, ClientState.PLAYING),
-        (ClientState.IDLE_PENDING, ClientState.ACTIVE),
-        (ClientState.PLAYING, ClientState.RETURNING),
-        (ClientState.RETURNING, ClientState.ACTIVE),
-    }
-
-    if not bypass_debounce and not can_switch_state():
+    if not can_switch_state():
         log_debug(
-            "set_state blocked by debounce | "
+            "state switch blocked | "
             f"from={current_state.value} to={next_state.value} reason={reason} "
             f"elapsed={time.time() - last_state_change:.3f}s"
         )
@@ -3831,13 +3824,9 @@ def run_state_cycle():
     if current_state == ClientState.ACTIVE:
         if _playback_has_selected_content() or _playback_has_running_process():
             log_debug(
-                "state_cycle ACTIVE | stopping playback with warm widget runtime "
+                "state_cycle ACTIVE | playback/runtime already warm+hidden, skip redundant stop "
                 f"{_playback_runtime_snapshot()}"
             )
-            # Startup pre-warm ile açılan widget runtime'ı ACTIVE döngüsünde kapatmayalım;
-            # böylece ilk idle girişinde viewer yeniden sıfırdan başlatılmaz.
-            playback.stop(stop_widget_runtime=False)
-            playback._active_widget_signature = None
 
     return idle_sec
 
