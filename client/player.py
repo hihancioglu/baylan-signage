@@ -1367,6 +1367,25 @@ class BorderlessFullscreenPlayer:
 
         return [(0, monitor_bounds_list[0])]
 
+    @staticmethod
+    def _monitor_indexes_from_runtime_signature(
+        runtime_signature: tuple | None,
+    ) -> set[int]:
+        if not isinstance(runtime_signature, tuple) or len(runtime_signature) != 3:
+            return set()
+        targets = runtime_signature[0]
+        if not isinstance(targets, tuple):
+            return set()
+
+        indexes: set[int] = set()
+        for target in targets:
+            if not isinstance(target, tuple) or not target:
+                continue
+            monitor_index = target[0]
+            if isinstance(monitor_index, int) and monitor_index >= 0:
+                indexes.add(monitor_index)
+        return indexes
+
     def _runtime_processes_snapshot(self) -> list[subprocess.Popen]:
         processes = [process for process in self._widget_runtime_processes if process is not None]
         if processes:
@@ -1462,6 +1481,24 @@ class BorderlessFullscreenPlayer:
                 self._widget_process = running_processes[0]
                 self._extra_processes = running_processes[1:]
                 return True
+            # keep_widget_runtime_warm aktifken, başlangıçta tüm monitörler için
+            # prewarm edilen süreçleri hedef-monitor çağrılarında küçültmeyelim.
+            # Aksi halde her ACTIVE/IDLE geçişinde runtime shrink->spawn döngüsü
+            # oluşup flicker/respawn problemi üretebilir.
+            if running_processes and self._keep_widget_runtime_warm:
+                requested_indexes = self._monitor_indexes_from_runtime_signature(runtime_signature)
+                last_indexes = self._monitor_indexes_from_runtime_signature(last_signature)
+                if requested_indexes and requested_indexes.issubset(last_indexes):
+                    _debug_log(
+                        "widget runtime ensure reuse | "
+                        "reason=keep_runtime_warm_monitor_subset "
+                        f"running_count={len(running_processes)} requested_indexes={sorted(requested_indexes)} "
+                        f"last_indexes={sorted(last_indexes)}"
+                    )
+                    self._widget_runtime_processes = running_processes
+                    self._widget_process = running_processes[0]
+                    self._extra_processes = running_processes[1:]
+                    return True
             if running_processes and len(running_processes) == desired_count:
                 _debug_log(
                     "widget runtime ensure restart | "
