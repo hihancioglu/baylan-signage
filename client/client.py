@@ -1791,6 +1791,15 @@ class MultiMonitorPlayback:
             else:
                 player.stop()
 
+    def background_widget_viewers(self):
+        with self._lock:
+            widget_players = list(self._widget_players.values())
+        for player in widget_players:
+            try:
+                player.background_widget_engine()
+            except Exception:
+                pass
+
     def _ensure_worker(self, monitor_no: int):
         with self._lock:
             existing = self._workers.get(monitor_no)
@@ -2547,6 +2556,16 @@ class PlaybackController:
                 self._persist_playback_state()
         self.multi_monitor_playback.pause()
         self.player.stop()
+
+    def background_all_widget_viewers(self):
+        try:
+            self.multi_monitor_playback.background_widget_viewers()
+        except Exception:
+            pass
+        try:
+            self.player.background_widget_engine()
+        except Exception:
+            pass
 
     def _run(self):
         try:
@@ -3646,6 +3665,14 @@ def run_state_cycle():
             f"extra_process_count={extra_count}"
         )
 
+    def _background_widget_viewers() -> None:
+        backgrounder = getattr(playback, "background_all_widget_viewers", None)
+        if callable(backgrounder):
+            try:
+                backgrounder()
+            except Exception:
+                pass
+
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
@@ -3761,6 +3788,7 @@ def run_state_cycle():
             # widget runtime'ı kapatmayalım; bir sonraki idle geçişinde
             # viewer yeniden açılıp gri pencere flash'i oluşturmasın.
             playback.stop(stop_widget_runtime=False)
+            _background_widget_viewers()
             set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s", force=True)
             return idle_sec
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
@@ -3835,6 +3863,7 @@ def run_state_cycle():
         # flash'i oluşturmaz; stop() içinde gerekirse gizleme başarısızlığında
         # runtime otomatik kapatılır.
         playback.stop(stop_widget_runtime=False)
+        _background_widget_viewers()
         set_state(ClientState.ACTIVE, "returned_to_erp", force=True)
 
     if current_state == ClientState.ACTIVE:

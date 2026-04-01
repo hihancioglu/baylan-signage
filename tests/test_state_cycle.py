@@ -131,6 +131,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_playback.start.assert_called_once()
         fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+        fake_playback.background_all_widget_viewers.assert_called_once()
         fake_idle_background.hide.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
@@ -154,6 +155,7 @@ class TestRunStateCycle(unittest.TestCase):
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
         self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        fake_playback.background_all_widget_viewers.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_hides_idle_overlay_when_selected_content_has_no_resolved_name(self):
