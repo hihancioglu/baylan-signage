@@ -217,7 +217,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _prewarm_all_monitors_enabled() -> bool:
-    return _env_bool("WIDGET_PREWARM_ALL_MONITORS", False)
+    return _env_bool("WIDGET_PREWARM_ALL_MONITORS", True)
 
 
 def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
@@ -1987,6 +1987,7 @@ class PlaybackController:
             and not _is_widget_viewer_process()
         ):
             self.player.start_widget_engine_if_needed(clone_to_all_monitors=_prewarm_all_monitors_enabled())
+            self.player.background_widget_engine()
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
