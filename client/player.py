@@ -1434,17 +1434,27 @@ class BorderlessFullscreenPlayer:
                 self._widget_process = running_processes[0]
                 self._extra_processes = running_processes[1:]
                 return True
+            current_signature = (target_monitor_index, clone_to_all_monitors)
+            last_signature = getattr(self, "_last_runtime_signature", None)
             if running_processes and len(running_processes) == desired_count:
+                if last_signature == current_signature:
+                    _debug_log(
+                        "widget runtime ensure reuse | "
+                        "reason=running_count_matches_desired_count "
+                        f"running_count={len(running_processes)} desired_count={desired_count} "
+                        f"signature={current_signature}"
+                    )
+                    self._widget_process = running_processes[0]
+                    return True
                 _debug_log(
-                    "widget runtime ensure reuse | "
-                    "reason=running_count_matches_desired_count "
-                    f"running_count={len(running_processes)} desired_count={desired_count}"
+                    "widget runtime ensure restart | "
+                    "reason=running_count_matches_but_signature_differs "
+                    f"running_count={len(running_processes)} desired_count={desired_count} "
+                    f"last_signature={last_signature} requested_signature={current_signature}"
                 )
-                self._widget_process = running_processes[0]
-                return True
             same_config = (
                 running_processes
-                and getattr(self, "_last_runtime_signature", None) == (target_monitor_index, clone_to_all_monitors)
+                and last_signature == current_signature
             )
             # aynı konfig ise restart ETME
             if same_config:

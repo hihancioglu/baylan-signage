@@ -1525,6 +1525,46 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(terminate_mock.call_count, 2)
         popen_mock.assert_not_called()
 
+    def test_start_widget_engine_restarts_when_signature_differs_even_if_count_matches(self):
+        player = self._build_player()
+        running_process = unittest.mock.Mock()
+        running_process.poll.return_value = None
+        running_process.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [running_process]
+        player._widget_process = running_process
+        player._last_runtime_signature = (0, False)
+
+        spawned_process = unittest.mock.Mock()
+        spawned_process.poll.return_value = None
+        spawned_process.stdin = unittest.mock.Mock()
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player,
+            "_resolve_widget_runtime_monitor_targets",
+            return_value=[(1, (0, 0, 1920, 1080))],
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=["widget_viewer"],
+        ), patch.object(player, "_widget_popen_kwargs", return_value={}), patch(
+            "subprocess.Popen",
+            return_value=spawned_process,
+        ) as popen_mock, patch.object(
+            player,
+            "_terminate_process",
+        ) as terminate_mock:
+            ok = player.start_widget_engine_if_needed(
+                target_monitor_index=1,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        terminate_mock.assert_called_once_with(running_process, timeout_sec=2, force_tree=True)
+        popen_mock.assert_called_once()
+        self.assertEqual(player._widget_runtime_processes, [spawned_process])
+        self.assertEqual(player._widget_process, spawned_process)
+        self.assertEqual(player._last_runtime_signature, (1, False))
+
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
