@@ -1532,7 +1532,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         running_process.stdin = unittest.mock.Mock()
         player._widget_runtime_processes = [running_process]
         player._widget_process = running_process
-        player._last_runtime_signature = (0, False)
+        player._last_runtime_signature = ((0,), False)
 
         spawned_process = unittest.mock.Mock()
         spawned_process.poll.return_value = None
@@ -1563,7 +1563,35 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         popen_mock.assert_called_once()
         self.assertEqual(player._widget_runtime_processes, [spawned_process])
         self.assertEqual(player._widget_process, spawned_process)
-        self.assertEqual(player._last_runtime_signature, (1, False))
+        self.assertEqual(player._last_runtime_signature, ((1,), False))
+
+    def test_start_widget_engine_reuses_when_default_and_explicit_target_match(self):
+        player = self._build_player()
+        running_process = unittest.mock.Mock()
+        running_process.poll.return_value = None
+        running_process.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [running_process]
+        player._widget_process = running_process
+        player._last_runtime_signature = ((0,), False)
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player,
+            "_resolve_widget_runtime_monitor_targets",
+            return_value=[(0, (0, 0, 1920, 1080))],
+        ), patch("subprocess.Popen") as popen_mock, patch.object(
+            player,
+            "_terminate_process",
+        ) as terminate_mock:
+            ok = player.start_widget_engine_if_needed(
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(player._widget_runtime_processes, [running_process])
+        self.assertEqual(player._widget_process, running_process)
+        terminate_mock.assert_not_called()
+        popen_mock.assert_not_called()
 
     def test_play_blocking_stops_widget_runtime_even_when_warm(self):
         player = self._build_player()
