@@ -1795,10 +1795,16 @@ class MultiMonitorPlayback:
         with self._lock:
             widget_players = list(self._widget_players.values())
         for player in widget_players:
-            try:
-                player.background_widget_engine()
-            except Exception:
-                pass
+            backgrounded = False
+            for _ in range(3):
+                try:
+                    backgrounded = bool(player.background_widget_engine())
+                except Exception:
+                    backgrounded = False
+                if backgrounded:
+                    break
+                # Runtime sıcak kalsın; sadece background komutunu kısa aralıkla tekrar dene.
+                time.sleep(0.05)
 
     def _ensure_worker(self, monitor_no: int):
         with self._lock:
