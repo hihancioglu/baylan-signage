@@ -3914,6 +3914,12 @@ def run_state_cycle():
 
     activity_drop_confirmed = _activity_drop_streak >= max(ACTIVITY_DROP_CONFIRM_COUNT, 1)
     low_idle_confirmed = _low_idle_streak >= 3
+    # Widget oynatımında bazı sistemlerde idle sayaçları kullanıcı girdisi olmadan
+    # anlık olarak 0'a düşebiliyor. Bu durumda yalnız low-idle sinyali false-positive
+    # üretip PLAYING -> RETURNING tetikleyebiliyor. Widget akışında low-idle tek
+    # başına yeterli olmasın; en azından düşüş-temelli sinyal de doğrulanmış olsun.
+    if widget_active and low_idle_confirmed and not activity_drop_confirmed:
+        low_idle_confirmed = False
     activity_reason = "none"
     if activity_drop_confirmed:
         activity_reason = "idle_drop+low_idle" if low_idle_confirmed else "idle_drop"
