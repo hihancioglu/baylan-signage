@@ -2412,6 +2412,8 @@ class PlaybackController:
         self,
         playlist_entries: list[dict],
         active_widget_signature: str | None = None,
+        target_monitor_index: int | None = None,
+        clone_to_all_monitors: bool | None = None,
     ) -> None:
         runtime_items: list[dict] = []
         for index, entry in enumerate(playlist_entries):
@@ -2429,7 +2431,12 @@ class PlaybackController:
                 }
             )
 
-        self.player.sync_widget_runtime_playlist(runtime_items, active_signature=active_widget_signature)
+        self.player.sync_widget_runtime_playlist(
+            runtime_items,
+            active_signature=active_widget_signature,
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        )
 
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         return False
@@ -2619,7 +2626,12 @@ class PlaybackController:
                 self._waiting_for_media_logged = False
                 runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
                 log_debug(f"playback loop | entries={len(playlist_entries)} loop_mode={loop_mode} state={runtime_state}")
-                self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=self._active_widget_signature)
+                self._sync_widget_runtime_playlist(
+                    playlist_entries,
+                    active_widget_signature=self._active_widget_signature,
+                    target_monitor_index=self._primary_target_monitor_index(),
+                    clone_to_all_monitors=self._clone_to_all_monitors,
+                )
 
                 if loop_mode == "sequential":
                     playlist_paths = [str(entry.get("local_path") or "") for entry in playlist_entries if entry.get("item_type") != "widget"]
@@ -2748,6 +2760,8 @@ class PlaybackController:
                             self._sync_widget_runtime_playlist(
                                 playlist_entries,
                                 active_widget_signature=self._active_widget_signature,
+                                target_monitor_index=primary_target_monitor_index,
+                                clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
 
                     if ok and not direct_url_widget:
@@ -2762,7 +2776,12 @@ class PlaybackController:
                         continue
 
                     self._active_widget_signature = None
-                    self._sync_widget_runtime_playlist(playlist_entries, active_widget_signature=None)
+                    self._sync_widget_runtime_playlist(
+                        playlist_entries,
+                        active_widget_signature=None,
+                        target_monitor_index=self._primary_target_monitor_index(),
+                        clone_to_all_monitors=self._clone_to_all_monitors,
+                    )
 
                     media_duration_sec = None
                     is_video_media = self.player._is_video(media_path)
