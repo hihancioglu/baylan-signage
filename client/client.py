@@ -1638,6 +1638,13 @@ class MultiMonitorPlayback:
 
     @staticmethod
     def _player_has_visible_widget_content(player: BorderlessFullscreenPlayer | None) -> bool:
+        runtime_visible_checker = getattr(player, "has_visible_widget_runtime_content", None)
+        if callable(runtime_visible_checker):
+            try:
+                if bool(runtime_visible_checker()):
+                    return True
+            except Exception:
+                pass
         active_item = getattr(player, "_active_item", None)
         if not isinstance(active_item, dict):
             return False

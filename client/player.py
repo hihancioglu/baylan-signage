@@ -258,6 +258,7 @@ class BorderlessFullscreenPlayer:
         self._widget_process = None
         self._widget_runtime_processes: list[subprocess.Popen] = []
         self._widget_process_stdin_lock = threading.Lock()
+        self._widget_runtime_is_backgrounded = True
         self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
@@ -1788,10 +1789,12 @@ class BorderlessFullscreenPlayer:
         if sent:
             self._last_widget_signature = widget_signature
             self._active_widget_signature = widget_signature
+            self._widget_runtime_is_backgrounded = False
         return sent
 
     def stop_widget_engine(self) -> None:
         with self._widget_process_lock:
+            self._widget_runtime_is_backgrounded = True
             processes = [
                 process for process in self._runtime_processes_snapshot()
                 if process and process.poll() is None
@@ -1931,7 +1934,16 @@ class BorderlessFullscreenPlayer:
                 "widget runtime background completed | "
                 f"success_count={success_count} failed_count={len(failed_processes)}"
             )
+            self._widget_runtime_is_backgrounded = True
             return True
+
+    def has_visible_widget_runtime_content(self) -> bool:
+        with self._widget_process_lock:
+            runtime_running = any(
+                process and process.poll() is None
+                for process in self._runtime_processes_snapshot()
+            )
+            return runtime_running and not self._widget_runtime_is_backgrounded
 
     def wait_widget_duration(self, duration_sec: int) -> bool:
         deadline = time.monotonic() + max(1, int(duration_sec))
