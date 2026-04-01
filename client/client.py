@@ -1894,11 +1894,13 @@ class MultiMonitorPlayback:
                 with self._lock:
                     player = self._widget_players.get(monitor_no)
                     if player is None:
-                        player = self._widget_player_fallback
-                        if player is None:
-                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        # Secondary monitor widget playback must use a dedicated
+                        # player per monitor. Reusing the shared fallback widget
+                        # player can keep an old runtime bound to another monitor
+                        # (typically monitor index 0), which causes idle->active
+                        # background commands to affect only one display.
+                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
                         self._widget_players[monitor_no] = player
-                        self._widget_player_fallback = None
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
                         "monitor_widget_launch skipped | "
