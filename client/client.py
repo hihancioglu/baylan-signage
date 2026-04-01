@@ -3352,7 +3352,7 @@ def _refresh_call_overlay():
         call_request_overlay.hide()
 
 
-def set_state(next_state: ClientState, reason: str):
+def set_state(next_state: ClientState, reason: str, *, force: bool = False):
     global current_state
     global playing_started_at
     global last_state_change
@@ -3361,7 +3361,7 @@ def set_state(next_state: ClientState, reason: str):
         log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
         return
 
-    if not can_switch_state():
+    if not force and not can_switch_state():
         log_debug(
             "state switch blocked | "
             f"from={current_state.value} to={next_state.value} reason={reason} "
@@ -3633,7 +3633,7 @@ def run_state_cycle():
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
-            set_state(ClientState.EMERGENCY, "emergency_policy_enforced")
+            set_state(ClientState.EMERGENCY, "emergency_policy_enforced", force=True)
         playback.pause()
         return get_idle_seconds()
 
@@ -3641,7 +3641,7 @@ def run_state_cycle():
         idle_background.hide()
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING}:
             playback.stop(stop_widget_runtime=True)
-            set_state(ClientState.ACTIVE, "content_disabled")
+            set_state(ClientState.ACTIVE, "content_disabled", force=True)
         return get_idle_seconds()
 
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
@@ -3712,7 +3712,7 @@ def run_state_cycle():
         if current_state in {ClientState.PLAYING, ClientState.IDLE_PENDING, ClientState.RETURNING}:
             playback.stop(stop_widget_runtime=True)
             return_to_erp_window()
-            set_state(ClientState.ACTIVE, "idle_mode_disabled")
+            set_state(ClientState.ACTIVE, "idle_mode_disabled", force=True)
         return idle_sec
 
     effective_idle_timeout_sec = idle_timeout_sec
@@ -3731,7 +3731,7 @@ def run_state_cycle():
             idle_background.show()
         else:
             idle_background.hide()
-        set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s")
+        set_state(ClientState.IDLE_PENDING, f"idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s", force=True)
 
     if current_state == ClientState.IDLE_PENDING:
         log_debug(
@@ -3745,7 +3745,7 @@ def run_state_cycle():
             # widget runtime'ı kapatmayalım; bir sonraki idle geçişinde
             # viewer yeniden açılıp gri pencere flash'i oluşturmasın.
             playback.stop(stop_widget_runtime=False)
-            set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s")
+            set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s", force=True)
             return idle_sec
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
         # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
@@ -3755,7 +3755,7 @@ def run_state_cycle():
             # Idle overlay'i hemen kapatırsak, player içerik açmadan önce kısa bir
             # pencere oluşabiliyor ve Windows masaüstü görünür kalabiliyor.
             # Önce PLAYING durumuna geçip içerik gerçekten seçildiğinde kapatıyoruz.
-            set_state(ClientState.PLAYING, "player_started")
+            set_state(ClientState.PLAYING, "player_started", force=True)
 
     played_for_sec = time.monotonic() - playing_started_at
     has_selected_content = _playback_has_selected_content()
@@ -3803,7 +3803,7 @@ def run_state_cycle():
             f"idle_sec={idle_sec:.3f} activity_reason={activity_reason} "
             f"erp_is_foreground={erp_is_foreground} foreground_title={foreground_title!r}"
         )
-        set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s")
+        set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s", force=True)
 
     if current_state == ClientState.RETURNING:
         log_debug(
@@ -3819,7 +3819,7 @@ def run_state_cycle():
         # flash'i oluşturmaz; stop() içinde gerekirse gizleme başarısızlığında
         # runtime otomatik kapatılır.
         playback.stop(stop_widget_runtime=False)
-        set_state(ClientState.ACTIVE, "returned_to_erp")
+        set_state(ClientState.ACTIVE, "returned_to_erp", force=True)
 
     if current_state == ClientState.ACTIVE:
         if _playback_has_selected_content() or _playback_has_running_process():

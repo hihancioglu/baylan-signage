@@ -1433,7 +1433,26 @@ class BorderlessFullscreenPlayer:
                 f"running_pids={[getattr(process, 'pid', None) for process in running_processes]}"
             )
             last_signature = getattr(self, "_last_runtime_signature", None)
-            if running_processes and last_signature == runtime_signature:
+            signature_matches = last_signature == runtime_signature
+            if (
+                not signature_matches
+                and isinstance(last_signature, tuple)
+                and len(last_signature) == 3
+                and isinstance(last_signature[0], tuple)
+                and last_signature[1:] == runtime_signature[1:]
+                and len(last_signature[0]) == len(runtime_signature[0])
+            ):
+                signature_matches = all(
+                    (
+                        last_target_index == current_target_index
+                        and (last_bounds is None or last_bounds == current_bounds)
+                    )
+                    for (last_target_index, last_bounds), (current_target_index, current_bounds) in zip(
+                        last_signature[0], runtime_signature[0]
+                    )
+                )
+
+            if running_processes and signature_matches:
                 _debug_log(
                     "widget runtime ensure reuse | "
                     "reason=runtime_signature_matched "
@@ -2631,6 +2650,7 @@ class BorderlessFullscreenPlayer:
                 backgrounded = self.background_widget_engine()
                 if not backgrounded:
                     _debug_log("stop keep-warm requested but background failed | runtime_kept_alive=True")
+                    self.stop_widget_engine()
 
         with self._process_lock:
             self._process = None
