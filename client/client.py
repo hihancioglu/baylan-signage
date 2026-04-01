@@ -1761,7 +1761,12 @@ class MultiMonitorPlayback:
     def stop(self):
         workers: list[threading.Thread] = []
         with self._lock:
-            monitor_numbers = set(self._workers.keys()) | set(self._players.keys()) | set(self._running_monitors.keys())
+            monitor_numbers = (
+                set(self._workers.keys())
+                | set(self._players.keys())
+                | set(self._widget_players.keys())
+                | set(self._running_monitors.keys())
+            )
             for monitor_no in monitor_numbers:
                 self._running_monitors[monitor_no] = False
                 player = self._players.get(monitor_no)
@@ -1769,7 +1774,7 @@ class MultiMonitorPlayback:
                     player.stop()
                 widget_player = self._widget_players.get(monitor_no)
                 if widget_player:
-                    widget_player.stop()
+                    widget_player.stop(stop_widget_runtime=False)
                 worker = self._workers.get(monitor_no)
                 if worker and worker.is_alive():
                     workers.append(worker)
@@ -1779,8 +1784,12 @@ class MultiMonitorPlayback:
     def pause(self):
         with self._lock:
             players = list(self._players.values()) + list(self._widget_players.values())
+            widget_players = list(self._widget_players.values())
         for player in players:
-            player.stop()
+            if player in widget_players:
+                player.stop(stop_widget_runtime=False)
+            else:
+                player.stop()
 
     def _ensure_worker(self, monitor_no: int):
         with self._lock:
