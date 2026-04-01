@@ -805,10 +805,19 @@ def _start_with_pywebview(
                     pass
                 return
             if message.get("type") == "background":
+                hidden = False
                 try:
                     window.hide()
+                    hidden = True
                 except Exception as exc:
                     _debug_log(f"pywebview background transition failed | error={exc}")
+                if os.name == "nt":
+                    try:
+                        window.minimize()
+                        hidden = True
+                    except Exception:
+                        pass
+                if not hidden:
                     try:
                         window.hide()
                     except Exception:
