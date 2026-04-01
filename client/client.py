@@ -1638,8 +1638,11 @@ class MultiMonitorPlayback:
 
     def _reconcile_widget_players_for_states(self, monitor_states: dict[int, dict]) -> None:
         desired_targets: dict[int, int] = {}
+        monitor_nos_without_widgets: set[int] = set()
         for monitor_no, state in monitor_states.items():
-            if not self._state_has_widget_entries(state):
+            has_widgets = self._state_has_widget_entries(state)
+            if not has_widgets:
+                monitor_nos_without_widgets.add(monitor_no)
                 continue
             target_monitor_index = state.get("target_monitor_index")
             if isinstance(target_monitor_index, int) and target_monitor_index >= 0:
@@ -1648,13 +1651,22 @@ class MultiMonitorPlayback:
         with self._lock:
             existing_players = dict(self._widget_players)
             desired_monitor_nos = set(desired_targets.keys())
-            stale_monitor_nos = set(existing_players.keys()) - desired_monitor_nos
+            # Sadece konfigürasyonda açıkça "widget yok" görülen monitörleri
+            # stale sayıp runtime'ı tamamen kapat.
+            # Konfigürasyonda geçici olarak görünmeyen monitörlerde runtime'ı
+            # kapatmak flicker/yeniden başlatma edge-case'lerine neden olabiliyor.
+            stale_monitor_nos = (
+                (set(existing_players.keys()) - desired_monitor_nos)
+                & monitor_nos_without_widgets
+            )
             for monitor_no in stale_monitor_nos:
                 player = self._widget_players.pop(monitor_no, None)
                 if player is None:
                     continue
                 try:
-                    player.stop(stop_widget_runtime=False)
+                    # Bu monitörde artık widget yoksa runtime'ı sıcak tutmayalım;
+                    # aksi halde monitör başına arka planda gereksiz process kalıyor.
+                    player.stop(stop_widget_runtime=True)
                 except Exception:
                     pass
 
