@@ -1793,18 +1793,32 @@ class MultiMonitorPlayback:
 
     def background_widget_viewers(self):
         with self._lock:
-            widget_players = list(self._widget_players.values())
-        for player in widget_players:
+            monitor_player_pairs = list(self._widget_players.items())
+        log_debug(
+            "multi_monitor background request | "
+            f"widget_player_count={len(monitor_player_pairs)} "
+            f"monitor_nos={[monitor_no for monitor_no, _ in monitor_player_pairs]}"
+        )
+        for monitor_no, player in monitor_player_pairs:
             backgrounded = False
-            for _ in range(3):
+            for attempt in range(1, 4):
                 try:
                     backgrounded = bool(player.background_widget_engine())
                 except Exception:
                     backgrounded = False
+                log_debug(
+                    "multi_monitor background attempt | "
+                    f"monitor_no={monitor_no} attempt={attempt} success={backgrounded}"
+                )
                 if backgrounded:
                     break
                 # Runtime sıcak kalsın; sadece background komutunu kısa aralıkla tekrar dene.
                 time.sleep(0.05)
+            if not backgrounded:
+                log_debug(
+                    "multi_monitor background failed | "
+                    f"monitor_no={monitor_no} reason=runtime_not_backgrounded"
+                )
 
     def _ensure_worker(self, monitor_no: int):
         with self._lock:

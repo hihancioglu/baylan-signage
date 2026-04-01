@@ -1810,25 +1810,70 @@ class BorderlessFullscreenPlayer:
             pass
 
     def background_widget_engine(self) -> bool:
+        def _monitor_hint_from_process(process: subprocess.Popen) -> str:
+            args = getattr(process, "args", None)
+            if isinstance(args, (list, tuple)):
+                normalized_args = [str(token) for token in args]
+                for idx, token in enumerate(normalized_args):
+                    if token == "--monitor" and idx + 1 < len(normalized_args):
+                        return normalized_args[idx + 1]
+                    if token.startswith("--monitor="):
+                        return token.split("=", 1)[1]
+            return "unknown"
+
         with self._widget_process_lock:
             processes = [
                 process for process in self._runtime_processes_snapshot()
                 if process and process.poll() is None and process.stdin
             ]
+            _debug_log(
+                "widget runtime background begin | "
+                f"running_processes={len(processes)}"
+            )
             if not processes:
+                _debug_log(
+                    "widget runtime background skipped | "
+                    "reason=no_live_runtime_process"
+                )
                 self._widget_process = None
                 self._widget_runtime_processes = []
                 return False
 
-            try:
-                with self._widget_process_stdin_lock:
-                    for process in processes:
+            success_count = 0
+            failed_processes: list[str] = []
+            with self._widget_process_stdin_lock:
+                for process in processes:
+                    process_pid = getattr(process, "pid", None)
+                    monitor_hint = _monitor_hint_from_process(process)
+                    try:
                         process.stdin.write('{"type":"background"}\n')
                         process.stdin.flush()
-                return True
-            except Exception as exc:
-                _safe_print(f"⚠️ widget runtime background moduna alınamadı: {exc}")
+                        success_count += 1
+                        _debug_log(
+                            "widget runtime background sent | "
+                            f"pid={process_pid} monitor={monitor_hint}"
+                        )
+                    except Exception as exc:
+                        failed_processes.append(f"pid={process_pid} monitor={monitor_hint} error={exc}")
+                        _debug_log(
+                            "widget runtime background send failed | "
+                            f"pid={process_pid} monitor={monitor_hint} error={exc}"
+                        )
+
+            if success_count == 0:
+                _safe_print("⚠️ widget runtime background moduna alınamadı: canlı süreçlere mesaj gönderilemedi")
                 return False
+
+            if failed_processes:
+                _safe_print(
+                    "⚠️ bazı widget runtime süreçleri background moduna alınamadı: "
+                    + " | ".join(failed_processes[:5])
+                )
+            _debug_log(
+                "widget runtime background completed | "
+                f"success_count={success_count} failed_count={len(failed_processes)}"
+            )
+            return True
 
     def wait_widget_duration(self, duration_sec: int) -> bool:
         deadline = time.monotonic() + max(1, int(duration_sec))
