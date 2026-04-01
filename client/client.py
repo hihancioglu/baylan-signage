@@ -1576,6 +1576,7 @@ class MultiMonitorPlayback:
         self._widget_player_fallback: BorderlessFullscreenPlayer | None = widget_player
         self._workers: dict[int, threading.Thread] = {}
         self._running_monitors: dict[int, bool] = {}
+        self._startup_widget_prewarm_done = False
         self._lock = threading.Lock()
 
     @staticmethod
@@ -1619,6 +1620,37 @@ class MultiMonitorPlayback:
             if mapped_index is not None:
                 return int(mapped_index)
         return max(0, int(monitor_no) - 1)
+
+    def prewarm_widget_runtimes_on_startup(self):
+        with self._lock:
+            if self._startup_widget_prewarm_done:
+                return
+            self._startup_widget_prewarm_done = True
+
+        connected_count = self._connected_monitor_count() or 1
+        for monitor_no in range(2, int(connected_count) + 1):
+            target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
+            with self._lock:
+                player = self._widget_players.get(monitor_no)
+                if player is None:
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                    self._widget_players[monitor_no] = player
+            try:
+                prewarm_ok = bool(
+                    player.start_widget_engine_if_needed(
+                        target_monitor_index=target_monitor_index,
+                        clone_to_all_monitors=False,
+                    )
+                )
+                if prewarm_ok:
+                    player.background_widget_engine()
+            except Exception:
+                prewarm_ok = False
+            log_debug(
+                "startup_monitor_widget_prewarm | "
+                f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} ok={prewarm_ok}"
+            )
+
 
     def update_from_config(self, monitor_playlists_payload: dict | None):
         monitor_states: dict[int, dict] = {}
@@ -2061,6 +2093,7 @@ class PlaybackController:
         ):
             self.player.start_widget_engine_if_needed(clone_to_all_monitors=_prewarm_all_monitors_enabled())
             self.player.background_widget_engine()
+            self.multi_monitor_playback.prewarm_widget_runtimes_on_startup()
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
