@@ -1729,14 +1729,14 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.player = _FakePlaybackPlayer()
         return controller
 
-    def test_prewarms_widget_runtime_by_default_on_startup(self):
+    def test_does_not_prewarm_widget_runtime_without_playlist_on_startup(self):
         from client.client import PlaybackController
 
         fake_player = unittest.mock.Mock()
         with patch("client.client.BorderlessFullscreenPlayer", return_value=fake_player), patch.dict("os.environ", {}, clear=False):
             PlaybackController(_FakeGuiRuntime())
 
-        fake_player.start_widget_engine_if_needed.assert_called_once()
+        fake_player.start_widget_engine_if_needed.assert_not_called()
 
     def test_can_disable_widget_runtime_prewarm_via_env(self):
         from client.client import PlaybackController
@@ -1750,6 +1750,58 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             PlaybackController(_FakeGuiRuntime())
 
         fake_player.start_widget_engine_if_needed.assert_not_called()
+
+    def test_update_from_config_prewarms_primary_widget_runtime_when_widget_exists(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        controller.media_manager.sync_playlist_entries.return_value = []
+        controller.media_manager.load_last_successful_playlist_entries.return_value = []
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = False
+        controller.player = unittest.mock.Mock()
+
+        controller.update_from_config(
+            {
+                "enabled": True,
+                "videos": [
+                    {
+                        "item_type": "widget",
+                        "widget_url": "https://example.com/w",
+                        "duration_sec": 10,
+                    }
+                ],
+                "playlist_version": "v1",
+                "monitor_playlists": {},
+            }
+        )
+
+        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.stop_widget_engine.assert_not_called()
+
+    def test_update_from_config_stops_primary_widget_runtime_when_only_video_exists(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        controller.media_manager.sync_playlist_entries.return_value = []
+        controller.media_manager.load_last_successful_playlist_entries.return_value = []
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = False
+        controller.player = unittest.mock.Mock()
+
+        controller.update_from_config(
+            {
+                "enabled": True,
+                "videos": [{"path": "https://example.com/video.mp4", "media_type": "video"}],
+                "playlist_version": "v1",
+                "monitor_playlists": {},
+            }
+        )
+
+        controller.player.start_widget_engine_if_needed.assert_not_called()
+        controller.player.stop_widget_engine.assert_called_once()
 
     def test_disables_mpv_playlist_when_image_has_custom_duration(self):
         controller = self._build_controller()
@@ -2883,6 +2935,63 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         state = multi_monitor._monitor_states[2]
         self.assertEqual(len(state["entries"]), 1)
         self.assertEqual(state["entries"][0]["item_type"], "widget")
+
+    def test_multi_monitor_reconciles_widget_runtime_players_to_widget_monitor_count(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        media_manager.sync_playlist_entries.return_value = []
+
+        monitor2_player = unittest.mock.Mock()
+        monitor3_player = unittest.mock.Mock()
+        created_players = [monitor2_player, monitor3_player]
+
+        with patch("client.client.os.name", "posix"), patch(
+            "client.client.BorderlessFullscreenPlayer",
+            side_effect=created_players,
+        ) as player_cls:
+            multi_monitor = MultiMonitorPlayback(media_manager)
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "enabled": True,
+                        "videos": [{"item_type": "widget", "widget_url": "https://example.com/w2", "duration_sec": 15}],
+                        "playlist_version": "w2",
+                        "loop_mode": "sequential",
+                    },
+                    "3": {
+                        "enabled": True,
+                        "videos": [{"item_type": "widget", "widget_url": "https://example.com/w3", "duration_sec": 15}],
+                        "playlist_version": "w3",
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+            self.assertEqual(set(multi_monitor._widget_players.keys()), {2, 3})
+            self.assertEqual(player_cls.call_count, 2)
+            monitor2_player.start_widget_engine_if_needed.assert_called_once()
+            monitor3_player.start_widget_engine_if_needed.assert_called_once()
+
+            multi_monitor.update_from_config(
+                {
+                    "2": {
+                        "enabled": True,
+                        "videos": [{"path": "https://example.com/v2.mp4", "media_type": "video"}],
+                        "playlist_version": "m2",
+                        "loop_mode": "sequential",
+                    },
+                    "3": {
+                        "enabled": True,
+                        "videos": [{"item_type": "widget", "widget_url": "https://example.com/w3", "duration_sec": 15}],
+                        "playlist_version": "w3",
+                        "loop_mode": "sequential",
+                    },
+                }
+            )
+
+        self.assertEqual(set(multi_monitor._widget_players.keys()), {3})
+        monitor2_player.stop.assert_called_with(stop_widget_runtime=False)
 
     def test_multi_monitor_playback_defaults_enabled_to_true_when_flag_missing(self):
         from client.client import MultiMonitorPlayback
