@@ -1626,6 +1626,8 @@ class BorderlessFullscreenPlayer:
                 self._last_runtime_signature = runtime_signature
                 return True
             except FileNotFoundError as exc:
+                for process in spawned_processes:
+                    self._terminate_process(process, timeout_sec=1, force_tree=True)
                 _debug_log(
                     "widget runtime spawn FileNotFoundError | "
                     f"filename={exc.filename} strerror={exc.strerror} cwd={Path.cwd()} command={command}"
@@ -1635,6 +1637,8 @@ class BorderlessFullscreenPlayer:
                 self._widget_runtime_processes = []
                 return False
             except Exception as exc:
+                for process in spawned_processes:
+                    self._terminate_process(process, timeout_sec=1, force_tree=True)
                 _safe_print(f"⚠️ widget runtime engine başlatılamadı: {exc}")
                 self._widget_process = None
                 self._widget_runtime_processes = []
@@ -2798,6 +2802,7 @@ class BorderlessFullscreenPlayer:
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen, timeout_sec: float, force_tree: bool = False) -> None:
+        BorderlessFullscreenPlayer._close_process_stdin(process)
         if force_tree and os.name == "nt":
             pid = getattr(process, "pid", None)
             if isinstance(pid, int) and pid > 0:
@@ -2830,6 +2835,16 @@ class BorderlessFullscreenPlayer:
                     BorderlessFullscreenPlayer._run_taskkill_tree(pid)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _close_process_stdin(process: subprocess.Popen | None) -> None:
+        stdin_stream = getattr(process, "stdin", None)
+        if not stdin_stream:
+            return
+        try:
+            stdin_stream.close()
+        except Exception:
+            pass
 
 
     def last_play_was_interrupted(self) -> bool:
