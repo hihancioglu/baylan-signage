@@ -217,7 +217,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _prewarm_all_monitors_enabled() -> bool:
-    return _env_bool("WIDGET_PREWARM_ALL_MONITORS", True)
+    return _env_bool("WIDGET_PREWARM_ALL_MONITORS", False)
 
 
 def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
