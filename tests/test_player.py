@@ -3061,6 +3061,52 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             clone_to_all_monitors=False,
         )
 
+    def test_multi_monitor_pause_keeps_widget_runtime_warm_in_background(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        media_player = unittest.mock.Mock()
+        widget_player = unittest.mock.Mock()
+
+        multi_monitor._players[1] = media_player
+        multi_monitor._widget_players[2] = widget_player
+
+        multi_monitor.pause()
+
+        media_player.stop.assert_called_once_with()
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+
+    def test_multi_monitor_stop_keeps_widget_runtime_warm_in_background(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        media_player = unittest.mock.Mock()
+        widget_player = unittest.mock.Mock()
+
+        multi_monitor._running_monitors[1] = True
+        multi_monitor._players[1] = media_player
+        multi_monitor._widget_players[1] = widget_player
+
+        multi_monitor.stop()
+
+        media_player.stop.assert_called_once_with()
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+
+    def test_multi_monitor_stop_visits_widget_only_monitors(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        multi_monitor = MultiMonitorPlayback(media_manager)
+        widget_player = unittest.mock.Mock()
+
+        multi_monitor._widget_players[3] = widget_player
+
+        multi_monitor.stop()
+
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+
     def test_update_from_config_disables_clone_when_monitor_four_has_playlist(self):
         from client.client import PlaybackController
 
