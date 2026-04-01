@@ -1900,13 +1900,19 @@ class MultiMonitorPlayback:
                     f"widget_count={len((widget_config or {}).get('widgets') or [])} "
                     f"duration_sec={widget_duration_sec}"
                 )
-                player.play_widget_blocking(
+                widget_play_ok = player.play_widget_blocking(
                     widget_url,
                     int(widget_duration_sec),
                     widget_config=widget_config,
                     target_monitor_index=widget_target_monitor_index,
                     clone_to_all_monitors=widget_clone_enabled,
                 )
+                if not widget_play_ok:
+                    log_debug(
+                        "monitor_widget_launch backoff | "
+                        f"monitor_no={monitor_no} reason=playback_failed sleep_sec=1.0"
+                    )
+                    time.sleep(1.0)
             else:
                 with self._lock:
                     player = self._players.get(monitor_no)
