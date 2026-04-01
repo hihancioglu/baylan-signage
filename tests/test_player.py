@@ -1435,6 +1435,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         args = run_mock.call_args.args[0]
         self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
         self.assertIn("widget_engine", args[3])
+        self.assertIn("msedgewebview2.exe", args[3])
         self.assertEqual(args[4], "engine")
         self.assertIn("widget_engine.html", args[5])
 
@@ -1451,6 +1452,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         run_mock.assert_called_once()
         args = run_mock.call_args.args[0]
         self.assertEqual(args[:3], ["powershell", "-NoProfile", "-Command"])
+        self.assertIn("msedgewebview2.exe", args[3])
         self.assertEqual(args[4], "source")
         self.assertEqual(args[5], "https://widgets.example.com/screen?id=42")
 
