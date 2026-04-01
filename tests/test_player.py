@@ -1029,6 +1029,22 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             {"widgets": [{"type": "iframe", "url": "https://example.com/dashboard"}]},
         )
 
+    def test_update_widget_layout_without_signature_still_sends_message(self):
+        player = self._build_player()
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            ok = player.update_widget_layout(
+                "https://example.com/no-signature",
+                widget_config=None,
+                widget_signature=None,
+            )
+
+        self.assertTrue(ok)
+        sender.assert_called_once()
+        sent_message = sender.call_args.args[0]
+        self.assertEqual(sent_message["type"], "layout_update")
+        self.assertIsNone(sent_message["payload"]["signature"])
+
 
     def test_play_media_in_widget_runtime_clears_stale_stop_flag(self):
         player = self._build_player()
@@ -1345,7 +1361,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         widget_process.stdin.flush.assert_called_once_with()
         self.assertIs(player._widget_process, widget_process)
 
-    def test_stop_falls_back_to_stop_widget_engine_when_background_fails(self):
+    def test_stop_does_not_stop_widget_engine_when_background_fails(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
         widget_process.poll.return_value = None
@@ -1357,7 +1373,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         ) as stop_widget_engine:
             player.stop(stop_widget_runtime=False)
 
-        stop_widget_engine.assert_called_once_with()
+        stop_widget_engine.assert_not_called()
 
     def test_stop_widget_runtime_cleans_detached_widget_browser_when_runtime_not_running(self):
         player = self._build_player()

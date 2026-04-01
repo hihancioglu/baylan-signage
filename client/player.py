@@ -1703,7 +1703,7 @@ class BorderlessFullscreenPlayer:
         if widget_signature and widget_signature == getattr(self, "_active_widget_signature", None):
             _debug_log(f"update_widget_layout skipped | signature_unchanged={widget_signature}")
             return True
-        if widget_signature == self._last_widget_signature:
+        if widget_signature and widget_signature == self._last_widget_signature:
             return True
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
         if payload is None:
@@ -2686,8 +2686,7 @@ class BorderlessFullscreenPlayer:
             elif not stop_widget_runtime:
                 backgrounded = self.background_widget_engine()
                 if not backgrounded:
-                    _debug_log("stop keep-warm requested but background failed | runtime_kept_alive=True")
-                    self.stop_widget_engine()
+                    _debug_log("stop keep-warm requested but background failed | runtime_kept_alive=False")
 
         with self._process_lock:
             self._process = None
