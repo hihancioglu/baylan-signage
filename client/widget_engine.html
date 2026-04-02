@@ -139,19 +139,46 @@
       return fallback;
     }
 
-    function isCellCoveredByColSpan(widgets, index, cols) {
-      if (!Array.isArray(widgets) || index <= 0 || cols <= 1) return false;
-      const colIndex = index % cols;
-      for (let offset = 1; offset <= colIndex; offset += 1) {
-        const leftIndex = index - offset;
-        const leftWidget = widgets[leftIndex];
-        if (!leftWidget || typeof leftWidget !== "object") continue;
-        const leftSpan = parseSpanValue(leftWidget, ["col_span", "colspan", "column_span", "merge_cols"], 1);
-        if (leftSpan > offset) {
+    function isCellCoveredByPreviousSpan(widgets, index, cols) {
+      if (!Array.isArray(widgets) || index <= 0 || cols <= 0) return false;
+      const targetRow = Math.floor(index / cols);
+      const targetCol = index % cols;
+      for (let probe = 0; probe < index; probe += 1) {
+        const widget = widgets[probe];
+        if (!widget || typeof widget !== "object") continue;
+        const probeRow = Math.floor(probe / cols);
+        const probeCol = probe % cols;
+        const colSpan = parseSpanValue(widget, ["col_span", "colspan", "column_span", "merge_cols"], 1);
+        const rowSpan = parseSpanValue(widget, ["row_span", "rowspan", "merge_rows"], 1);
+        if (
+          targetRow >= probeRow &&
+          targetRow < (probeRow + rowSpan) &&
+          targetCol >= probeCol &&
+          targetCol < (probeCol + colSpan)
+        ) {
           return true;
         }
       }
       return false;
+    }
+
+    function normalizeIframeUrl(rawValue) {
+      const value = String(rawValue || "").trim();
+      if (!value) return "";
+      const decoded = value
+        .replace(/&quot;/gi, "\"")
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&amp;/gi, "&");
+      const iframeSrcMatch = decoded.match(/<iframe[\s\S]*?\bsrc\s*=\s*(['"])(.*?)\1/i);
+      const rawSrcMatch = decoded.match(/\bsrc\s*=\s*(['"])(.*?)\1/i);
+      const candidate = String(iframeSrcMatch && iframeSrcMatch[2] ? iframeSrcMatch[2] : (rawSrcMatch && rawSrcMatch[2] ? rawSrcMatch[2] : value)).trim();
+      if (!candidate) return "";
+      if (/^(https?:|file:|blob:|data:)/i.test(candidate)) return candidate;
+      if (candidate.startsWith("//")) return `${window.location.protocol}${candidate}`;
+      if (candidate.startsWith("/")) return `${window.location.origin}${candidate}`;
+      return `https://${candidate}`;
     }
 
     function buildIframeFallback(url) {
@@ -479,12 +506,15 @@
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
       (config.widgets || []).forEach((w, index) => {
-        if (isCellCoveredByColSpan(config.widgets, index, cols)) {
+        if (isCellCoveredByPreviousSpan(config.widgets, index, cols)) {
           return;
         }
+        const rowIndex = Math.floor(index / cols);
         const colIndex = index % cols;
         const maxColSpan = Math.max(1, cols - colIndex);
+        const maxRowSpan = Math.max(1, Number(config.rows || Math.ceil(widgetCount / cols) || 1) - rowIndex);
         const colSpan = Math.max(1, Math.min(maxColSpan, parseSpanValue(w, ["col_span", "colspan", "column_span", "merge_cols"], 1)));
+        const rowSpan = Math.max(1, Math.min(maxRowSpan, parseSpanValue(w, ["row_span", "rowspan", "merge_rows"], 1)));
         const widgetType = String((w && w.type) || "").toLowerCase();
         if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
@@ -492,10 +522,13 @@
           if (colSpan > 1) {
             wrapper.style.gridColumn = `span ${colSpan}`;
           }
+          if (rowSpan > 1) {
+            wrapper.style.gridRow = `span ${rowSpan}`;
+          }
 
           const frame = document.createElement("iframe");
           frame.className = "widget";
-          frame.src = w.url;
+          frame.src = normalizeIframeUrl(w.url);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay";
@@ -547,6 +580,9 @@
           if (colSpan > 1) {
             card.style.gridColumn = `span ${colSpan}`;
           }
+          if (rowSpan > 1) {
+            card.style.gridRow = `span ${rowSpan}`;
+          }
           card.innerHTML = w.html || "";
           container.appendChild(card);
           return;
@@ -556,6 +592,9 @@
           embed.className = "widget card";
           if (colSpan > 1) {
             embed.style.gridColumn = `span ${colSpan}`;
+          }
+          if (rowSpan > 1) {
+            embed.style.gridRow = `span ${rowSpan}`;
           }
           embed.innerHTML = w.html || "";
           Array.from(embed.querySelectorAll("script")).forEach((scriptNode) => {
@@ -576,6 +615,9 @@
           if (colSpan > 1) {
             mediaWidget.style.gridColumn = `span ${colSpan}`;
           }
+          if (rowSpan > 1) {
+            mediaWidget.style.gridRow = `span ${rowSpan}`;
+          }
           container.appendChild(mediaWidget);
           return;
         }
@@ -584,6 +626,9 @@
           empty.className = "widget empty-cell";
           if (colSpan > 1) {
             empty.style.gridColumn = `span ${colSpan}`;
+          }
+          if (rowSpan > 1) {
+            empty.style.gridRow = `span ${rowSpan}`;
           }
           container.appendChild(empty);
           return;
