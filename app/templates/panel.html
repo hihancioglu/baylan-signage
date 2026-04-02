@@ -370,6 +370,7 @@
                       <option value="iframe">Iframe / URL</option>
                       <option value="video">Video</option>
                       <option value="image">Görsel</option>
+                      <option value="playlist">Playlist</option>
                     </select>
                   </div>
                   <div class="mb-3" id="dashboard-cell-modal-source-wrap">
@@ -383,6 +384,10 @@
                   <div class="mb-0 d-none" id="dashboard-cell-modal-image-wrap">
                     <label class="form-label">Medyadan Görsel Seç</label>
                     <select id="dashboard-cell-modal-image" class="form-select" onchange="pickDashboardModalImageSource()"></select>
+                  </div>
+                  <div class="mb-0 d-none" id="dashboard-cell-modal-playlist-wrap">
+                    <label class="form-label">Playlist Seç</label>
+                    <select id="dashboard-cell-modal-playlist" class="form-select" onchange="pickDashboardModalPlaylistSource()"></select>
                   </div>
                 </div>
                 <div class="modal-footer">
@@ -1109,7 +1114,7 @@ function normalizeDashboardRowItems(cells, cols, rows = dashboardRows()){
     const cell = values[index];
     if(!cell || typeof cell !== 'object') return {type: 'empty', source: '', colSpan: 1, rowSpan: 1};
     const rawType = String(cell.type || 'empty').trim().toLowerCase();
-    const type = ['iframe', 'url', 'video', 'image'].includes(rawType) ? rawType : 'empty';
+    const type = ['iframe', 'url', 'video', 'image', 'playlist'].includes(rawType) ? rawType : 'empty';
     const rawColSpan = Math.floor(Number(cell.colSpan ?? cell.col_span ?? cell.colspan ?? cell.merge_cols ?? 1) || 1);
     const rawRowSpan = Math.floor(Number(cell.rowSpan ?? cell.row_span ?? cell.rowspan ?? cell.merge_rows ?? 1) || 1);
     const colIndex = index % Math.max(1, cols);
@@ -1150,6 +1155,20 @@ function dashboardImageOptionsHtml(selectedSource = ''){
     options.push(`<option value="${escapeHtml(sourceUrl)}"${selectedAttr}>${escapeHtml(asset.name || sourceUrl)}</option>`);
   });
   return options.join('');
+}
+
+function dashboardPlaylistOptionsHtml(selectedSource = ''){
+  const normalized = String(selectedSource || '').trim();
+  const selectedId = normalized.replace(/^playlist:/i, '').trim();
+  const options = (cachedPlaylists || [])
+    .map((playlist) => {
+      const id = String(playlist.id);
+      const selected = id === selectedId ? 'selected' : '';
+      const statusLabel = playlist.enabled ? '' : ' (pasif)';
+      return `<option value="${id}" ${selected}>${escapeHtml(playlist.name || `Playlist ${id}`)}${statusLabel}</option>`;
+    })
+    .join('');
+  return `<option value="">Playlist seçin</option>${options}`;
 }
 
 function isDashboardCellCovered(cells, index, cols){
@@ -1206,7 +1225,9 @@ function renderDashboardEditorGrid(){
     if(cell.colSpan > 1) cellEl.style.gridColumn = `span ${cell.colSpan}`;
     if(cell.rowSpan > 1) cellEl.style.gridRow = `span ${cell.rowSpan}`;
 
-    const typeLabel = cell.type === 'empty' ? 'Boş' : (cell.type === 'iframe' ? 'Iframe/URL' : cell.type.toUpperCase());
+    const typeLabel = cell.type === 'empty'
+      ? 'Boş'
+      : (cell.type === 'iframe' ? 'Iframe/URL' : (cell.type === 'playlist' ? 'Playlist' : cell.type.toUpperCase()));
     cellEl.innerHTML = `<span class="dashboard-editor-label">${dashboardCellLabel(index, cols)}</span>
       <strong>${escapeHtml(typeLabel)}${(cell.colSpan > 1 || cell.rowSpan > 1) ? ` (${cell.rowSpan}x${cell.colSpan})` : ''}</strong>
       <span class="dashboard-editor-value">${escapeHtml(cell.source || 'İçerik yok')}</span>`;
@@ -1357,7 +1378,7 @@ function openDashboardCellModal(index){
   document.getElementById('dashboard-cell-modal-title').textContent = `${dashboardCellLabel(index, cols)} Ayarları`;
   const modalType = document.getElementById('dashboard-cell-modal-type');
   const normalizedType = cell.type === 'url' ? 'iframe' : cell.type;
-  modalType.value = ['empty', 'iframe', 'video', 'image'].includes(normalizedType) ? normalizedType : 'empty';
+  modalType.value = ['empty', 'iframe', 'video', 'image', 'playlist'].includes(normalizedType) ? normalizedType : 'empty';
   document.getElementById('dashboard-cell-modal-source').value = cell.source || '';
   const videoSelect = document.getElementById('dashboard-cell-modal-video');
   videoSelect.innerHTML = dashboardVideoOptionsHtml(cell.source || '');
@@ -1365,6 +1386,10 @@ function openDashboardCellModal(index){
   const imageSelect = document.getElementById('dashboard-cell-modal-image');
   imageSelect.innerHTML = dashboardImageOptionsHtml(cell.source || '');
   if(cell.source) imageSelect.value = cell.source;
+  const playlistSelect = document.getElementById('dashboard-cell-modal-playlist');
+  playlistSelect.innerHTML = dashboardPlaylistOptionsHtml(cell.source || '');
+  const currentPlaylistId = String(cell.source || '').replace(/^playlist:/i, '').trim();
+  if(currentPlaylistId) playlistSelect.value = currentPlaylistId;
   onDashboardModalTypeChange();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('dashboard-cell-modal')).show();
 }
@@ -1375,14 +1400,22 @@ function onDashboardModalTypeChange(){
   const sourceWrap = document.getElementById('dashboard-cell-modal-source-wrap');
   const videoWrap = document.getElementById('dashboard-cell-modal-video-wrap');
   const imageWrap = document.getElementById('dashboard-cell-modal-image-wrap');
+  const playlistWrap = document.getElementById('dashboard-cell-modal-playlist-wrap');
   sourceInput.disabled = type === 'empty';
   if(type === 'empty') sourceInput.value = '';
+  if(type === 'playlist'){
+    const playlistId = String(document.getElementById('dashboard-cell-modal-playlist').value || '').trim();
+    sourceInput.value = playlistId ? `playlist:${playlistId}` : '';
+  }
   sourceInput.placeholder = type === 'video'
     ? '/media/video.mp4 veya https://...'
-    : (type === 'image' ? '/media/image.png veya https://...' : 'https://... veya /media/...');
-  sourceWrap.classList.toggle('d-none', type === 'empty');
+    : (type === 'image'
+      ? '/media/image.png veya https://...'
+      : (type === 'playlist' ? 'playlist:1' : 'https://... veya /media/...'));
+  sourceWrap.classList.toggle('d-none', type === 'empty' || type === 'playlist');
   videoWrap.classList.toggle('d-none', type !== 'video');
   imageWrap.classList.toggle('d-none', type !== 'image');
+  playlistWrap.classList.toggle('d-none', type !== 'playlist');
 }
 
 function pickDashboardModalVideoSource(){
@@ -1393,6 +1426,11 @@ function pickDashboardModalVideoSource(){
 function pickDashboardModalImageSource(){
   const source = document.getElementById('dashboard-cell-modal-image').value || '';
   document.getElementById('dashboard-cell-modal-source').value = source;
+}
+
+function pickDashboardModalPlaylistSource(){
+  const playlistId = String(document.getElementById('dashboard-cell-modal-playlist').value || '').trim();
+  document.getElementById('dashboard-cell-modal-source').value = playlistId ? `playlist:${playlistId}` : '';
 }
 
 function saveDashboardModalCell(){
@@ -1433,6 +1471,7 @@ function syncDashboardBuilderFromContent(content){
       if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'playlist') return {type: 'playlist', source: `playlist:${String(w.playlist_id || '').trim()}`, colSpan, rowSpan};
       return {type: 'empty', source: '', colSpan, rowSpan};
     });
 
@@ -1464,6 +1503,13 @@ function syncDashboardToContent(){
       };
       if(cell.type === 'video') return {type: 'video', url: cell.source, ...mergedCell};
       if(cell.type === 'image') return {type: 'image', url: cell.source, ...mergedCell};
+      if(cell.type === 'playlist'){
+        const playlistId = Number(String(cell.source || '').replace(/^playlist:/i, '').trim());
+        if(Number.isFinite(playlistId) && playlistId > 0){
+          return {type: 'playlist', playlist_id: playlistId, ...mergedCell};
+        }
+        return {type: 'empty', ...mergedCell};
+      }
       return {type: 'iframe', url: cell.source, ...mergedCell};
     })
   };
@@ -1605,6 +1651,7 @@ function updateWidgetPreview(){
       if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'playlist') return {type: 'playlist', source: `playlist:${String(w.playlist_id || '').trim()}`, colSpan, rowSpan};
       return {type: 'empty', source: '', colSpan, rowSpan};
     });
     const rows = Math.max(1, Number(config.rows) || Math.ceil(Math.max(cells.length, 1) / cols));
@@ -1629,6 +1676,10 @@ function updateWidgetPreview(){
         const imageUrl = normalizeMediaUrl(cell.source);
         if(!imageUrl) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Görsel kaynağı boş</div>`;
         return `<div class="dashboard-cell"${spanStyle}><img class="live-frame" src="${escapeHtml(imageUrl)}" alt="Dashboard image" style="object-fit:contain;" /></div>`;
+      }
+      if(cell.type === 'playlist'){
+        const playlistLabel = escapeHtml(String(cell.source || '').replace(/^playlist:/i, '').trim() || 'Tanımsız');
+        return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Playlist #${playlistLabel}</div>`;
       }
       const url = normalizeUrl(cell.source);
       if(!url) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;

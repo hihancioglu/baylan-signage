@@ -470,7 +470,101 @@
       return wrapper;
     }
 
+    function createPlaylistWidget(w, widgetIndex = -1) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "widget media-widget";
+      const items = Array.isArray(w.items) ? w.items.filter((item) => item && typeof item === "object") : [];
+      if (!items.length) {
+        wrapper.classList.add("empty-cell");
+        return wrapper;
+      }
+
+      const loopMode = String(w.loop_mode || "sequential").toLowerCase();
+      let activeIndex = 0;
+      let timeoutHandle = null;
+
+      const clearScheduledAdvance = () => {
+        if (timeoutHandle) {
+          window.clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+      };
+
+      const nextIndex = () => {
+        if (!items.length) return 0;
+        if (loopMode === "random") return Math.floor(Math.random() * items.length);
+        return (activeIndex + 1) % items.length;
+      };
+
+      const renderItem = (index) => {
+        clearScheduledAdvance();
+        if (!items.length) return;
+        wrapper.classList.remove("empty-cell");
+        activeIndex = Math.max(0, Math.min(items.length - 1, Number(index) || 0));
+        const item = items[activeIndex];
+        wrapper.innerHTML = "";
+
+        const itemType = String(item.type || "").toLowerCase();
+        if (itemType === "image" || itemType === "video") {
+          const mediaWidget = createMediaWidget(item, widgetIndex);
+          mediaWidget.classList.remove("widget");
+          wrapper.appendChild(mediaWidget.firstChild || mediaWidget);
+          const durationSec = Number(item.duration_sec || 0);
+          if (itemType === "image" && durationSec > 0) {
+            timeoutHandle = window.setTimeout(() => renderItem(nextIndex()), durationSec * 1000);
+          } else if (itemType === "video") {
+            const video = wrapper.querySelector("video");
+            if (video) {
+              video.loop = false;
+              video.addEventListener("ended", () => renderItem(nextIndex()), { once: true });
+              if (durationSec > 0) {
+                timeoutHandle = window.setTimeout(() => renderItem(nextIndex()), durationSec * 1000);
+              }
+            }
+          }
+          return;
+        }
+
+        if (itemType === "iframe") {
+          const frame = document.createElement("iframe");
+          frame.className = "widget";
+          frame.src = normalizeIframeUrl(item.url);
+          frame.loading = "eager";
+          frame.referrerPolicy = "no-referrer";
+          frame.allow = "autoplay";
+          frame.allowFullscreen = true;
+          wrapper.appendChild(frame);
+        } else if (itemType === "card" || itemType === "html" || itemType === "embed") {
+          const embed = document.createElement("div");
+          embed.className = "widget card";
+          embed.innerHTML = String(item.html || item.content || "");
+          wrapper.appendChild(embed);
+        } else {
+          wrapper.classList.add("empty-cell");
+          return;
+        }
+
+        const durationSec = Number(item.duration_sec || 0);
+        if (durationSec > 0) {
+          timeoutHandle = window.setTimeout(() => renderItem(nextIndex()), durationSec * 1000);
+        }
+      };
+
+      wrapper.__cleanup = () => clearScheduledAdvance();
+      renderItem(0);
+      return wrapper;
+    }
+
     function cleanupMediaElements(container) {
+      container.querySelectorAll(".media-widget, .widget").forEach((node) => {
+        if (node && typeof node.__cleanup === "function") {
+          try {
+            node.__cleanup();
+          } catch (_err) {
+            // noop
+          }
+        }
+      });
       container.querySelectorAll("video").forEach((video) => {
         try {
           video.pause();
@@ -619,6 +713,17 @@
             mediaWidget.style.gridRow = `span ${rowSpan}`;
           }
           container.appendChild(mediaWidget);
+          return;
+        }
+        if (widgetType === "playlist") {
+          const playlistWidget = createPlaylistWidget(w, index);
+          if (colSpan > 1) {
+            playlistWidget.style.gridColumn = `span ${colSpan}`;
+          }
+          if (rowSpan > 1) {
+            playlistWidget.style.gridRow = `span ${rowSpan}`;
+          }
+          container.appendChild(playlistWidget);
           return;
         }
         if (widgetType === "empty") {

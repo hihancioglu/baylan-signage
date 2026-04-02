@@ -464,6 +464,20 @@ def _dashboard_widget_payload(content: str) -> dict | None:
             normalized_widgets.append({"type": "card", "html": html})
             continue
 
+        if widget_type == "playlist":
+            playlist_id = widget.get("playlist_id") or widget.get("playlistId") or widget.get("source")
+            try:
+                parsed_playlist_id = int(str(playlist_id).replace("playlist:", "").strip())
+            except (TypeError, ValueError):
+                parsed_playlist_id = None
+            if not parsed_playlist_id or parsed_playlist_id <= 0:
+                normalized_widgets.append({"type": "empty"})
+                continue
+            normalized_widget = {"type": "playlist", "playlist_id": parsed_playlist_id}
+            _apply_widget_span(normalized_widget, widget)
+            normalized_widgets.append(normalized_widget)
+            continue
+
         if widget_type == "empty":
             normalized_widgets.append({"type": "empty"})
 
@@ -481,6 +495,58 @@ def _dashboard_widget_payload(content: str) -> dict | None:
     if isinstance(rows, int) and rows > 0:
         payload["rows"] = rows
     return payload
+
+
+def _resolve_dashboard_playlist_widget(
+    db,
+    playlist_id: int,
+    runtime_vars: dict[str, str],
+    widgets_by_id: dict[int, dict],
+) -> dict | None:
+    playlist = db.query(Playlist).filter_by(id=int(playlist_id)).first()
+    if not playlist or not playlist.enabled:
+        return None
+
+    items = (
+        db.query(PlaylistItem)
+        .filter_by(playlist_id=playlist.id)
+        .order_by(PlaylistItem.order_no)
+        .all()
+    )
+    if not items:
+        return None
+
+    resolved_items: list[dict] = []
+    for item in items:
+        item_type = str(item.item_type or "media").strip().lower()
+        if item_type == "widget":
+            widget_def = widgets_by_id.get(item.widget_id) if item.widget_id else None
+            widget_type = str((widget_def or {}).get("type") or "").strip().lower()
+            widget_content = _apply_widget_runtime_vars((widget_def or {}).get("content") or "", runtime_vars)
+            if widget_type == "url" and widget_content:
+                resolved_items.append({"type": "iframe", "url": str(widget_content).strip(), "duration_sec": item.duration_sec})
+            elif widget_type == "html":
+                resolved_items.append({"type": "card", "html": str(widget_content), "duration_sec": item.duration_sec})
+            continue
+
+        media_path = _apply_widget_runtime_vars(item.path or "", runtime_vars)
+        if not media_path:
+            continue
+        media_type = str(item.media_type or _media_kind_from_path(media_path)).strip().lower()
+        if media_type == "image":
+            resolved_items.append({"type": "image", "url": media_path, "duration_sec": item.duration_sec})
+        else:
+            resolved_items.append({"type": "video", "url": media_path, "duration_sec": item.duration_sec})
+
+    if not resolved_items:
+        return None
+
+    return {
+        "type": "playlist",
+        "playlist_id": playlist.id,
+        "loop_mode": playlist.loop_mode or "sequential",
+        "items": resolved_items,
+    }
 
 
 def _parse_bool(value, default: bool = False) -> bool:
@@ -989,6 +1055,29 @@ def _build_playlist_runtime_payload(db, playlist, runtime_vars, widgets_by_id, m
                 elif widget_type == "dashboard":
                     parsed_dashboard_payload = _dashboard_widget_payload(widget_def.get("content") or "")
                     if parsed_dashboard_payload:
+                        resolved_widgets = []
+                        for dashboard_widget in parsed_dashboard_payload.get("widgets", []):
+                            if (
+                                isinstance(dashboard_widget, dict)
+                                and str(dashboard_widget.get("type") or "").strip().lower() == "playlist"
+                            ):
+                                resolved_playlist_widget = _resolve_dashboard_playlist_widget(
+                                    db,
+                                    dashboard_widget.get("playlist_id"),
+                                    runtime_vars,
+                                    widgets_by_id,
+                                )
+                                if resolved_playlist_widget:
+                                    if dashboard_widget.get("col_span"):
+                                        resolved_playlist_widget["col_span"] = dashboard_widget.get("col_span")
+                                    if dashboard_widget.get("row_span"):
+                                        resolved_playlist_widget["row_span"] = dashboard_widget.get("row_span")
+                                    resolved_widgets.append(resolved_playlist_widget)
+                                else:
+                                    resolved_widgets.append({"type": "empty"})
+                                continue
+                            resolved_widgets.append(dashboard_widget)
+                        parsed_dashboard_payload["widgets"] = resolved_widgets
                         widget_payload = parsed_dashboard_payload
                         widget_payload["name"] = widget_def.get("name") or ""
                     widget_url = None
