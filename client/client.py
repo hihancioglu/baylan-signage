@@ -1581,7 +1581,11 @@ class MultiMonitorPlayback:
 
     @staticmethod
     def _use_windows_display_ids() -> bool:
-        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
+        # Varsayılanı kapalı tutuyoruz: paneldeki monitor_no değerleri
+        # çoğu kurulumda 1..N sıralı mantıksal slot olarak kullanılıyor.
+        # Windows "Identify" ID bazlı eşleme ancak açıkça istendiğinde
+        # devreye girmeli.
+        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _secondary_monitor_widgets_enabled() -> bool:

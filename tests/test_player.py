@@ -2979,7 +2979,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
     def test_multi_monitor_playback_target_monitor_index_uses_windows_monitor_id_mapping(self):
         from client.client import MultiMonitorPlayback
 
-        with patch("client.client.os.name", "nt"), patch.object(
+        with patch("client.client.os.name", "nt"), patch.dict("client.client.os.environ", {"MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS": "1"}, clear=False), patch.object(
             MultiMonitorPlayback,
             "_windows_monitor_id_to_index_map",
             return_value={1: 2, 2: 0, 3: 1},
