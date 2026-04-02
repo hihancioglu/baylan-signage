@@ -1664,6 +1664,14 @@ class MultiMonitorPlayback:
             time.sleep(0.05)
         return False
 
+    def has_visible_widget_runtime_content(self) -> bool:
+        with self._lock:
+            widget_players = list(self._widget_players.values())
+        for player in widget_players:
+            if self._player_has_visible_widget_content(player):
+                return True
+        return False
+
     def _reconcile_widget_players_for_states(self, monitor_states: dict[int, dict]) -> None:
         desired_targets: dict[int, int] = {}
         monitor_nos_without_widgets: set[int] = set()
@@ -2606,6 +2614,7 @@ class PlaybackController:
             prewarm_ok = False
             should_background = False
             backgrounded = False
+            secondary_visible = False
             visible_content = self._player_has_visible_widget_content(self.player)
             try:
                 prewarm_ok = bool(
@@ -2615,7 +2624,17 @@ class PlaybackController:
                     )
                 )
                 visible_content = self._player_has_visible_widget_content(self.player)
-                should_background = prewarm_ok and not visible_content
+                secondary_widget_visibility_checker = getattr(
+                    self.multi_monitor_playback,
+                    "has_visible_widget_runtime_content",
+                    None,
+                )
+                if callable(secondary_widget_visibility_checker):
+                    try:
+                        secondary_visible = bool(secondary_widget_visibility_checker())
+                    except Exception:
+                        secondary_visible = False
+                should_background = prewarm_ok and not visible_content and not secondary_visible
                 if should_background:
                     backgrounded = self.multi_monitor_playback._background_widget_player_runtime(self.player)
             except Exception:
@@ -2623,6 +2642,7 @@ class PlaybackController:
             log_debug(
                 "primary_widget_runtime_reconcile | "
                 f"action=ensure ok={prewarm_ok} visible={visible_content} "
+                f"secondary_visible={secondary_visible} "
                 f"backgrounded={backgrounded if prewarm_ok else False}"
             )
             return
