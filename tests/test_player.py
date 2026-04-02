@@ -2996,6 +2996,28 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ):
             self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 2)
 
+    def test_windows_monitor_id_map_normalizer_compacts_sparse_ids(self):
+        from client.player import BorderlessFullscreenPlayer
+
+        id_to_index = BorderlessFullscreenPlayer._normalize_windows_monitor_id_entries(
+            [
+                (0, 0, 1920, 1080, 1, True),
+                (1920, 0, 1920, 1080, 3, False),
+            ]
+        )
+        self.assertEqual(id_to_index, {1: 0, 2: 1})
+
+    def test_windows_monitor_id_map_normalizer_keeps_dense_ids(self):
+        from client.player import BorderlessFullscreenPlayer
+
+        id_to_index = BorderlessFullscreenPlayer._normalize_windows_monitor_id_entries(
+            [
+                (0, 0, 1920, 1080, 1, True),
+                (1920, 0, 1920, 1080, 2, False),
+            ]
+        )
+        self.assertEqual(id_to_index, {1: 0, 2: 1})
+
     def test_windows_display_id_map_sanitizer_rejects_sparse_or_huge_ids(self):
         from client.player import BorderlessFullscreenPlayer
 
