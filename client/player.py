@@ -407,6 +407,44 @@ class BorderlessFullscreenPlayer:
         return unique_monitor_rects
 
     @staticmethod
+    def _normalize_windows_monitor_id_entries(
+        monitor_entries: list[tuple[int, int, int, int, int | None, bool]],
+    ) -> dict[int, int]:
+        if not monitor_entries:
+            return {}
+
+        sorted_entries = sorted(
+            monitor_entries,
+            key=lambda item: (item[0], item[1], 0 if item[5] else 1),
+        )
+        unique_entries: list[tuple[int, int, int, int, int | None, bool]] = []
+        seen_rects: set[tuple[int, int, int, int]] = set()
+        for left, top, width, height, windows_id, is_primary in sorted_entries:
+            rect = (left, top, width, height)
+            if rect in seen_rects:
+                continue
+            seen_rects.add(rect)
+            unique_entries.append((left, top, width, height, windows_id, is_primary))
+
+        explicit_ids = sorted(
+            {
+                int(windows_id)
+                for *_rect, windows_id, _is_primary in unique_entries
+                if isinstance(windows_id, int) and windows_id > 0
+            }
+        )
+        has_dense_explicit_ids = bool(explicit_ids) and explicit_ids == list(range(1, explicit_ids[-1] + 1))
+
+        id_to_index: dict[int, int] = {}
+        for monitor_index, (_left, _top, _width, _height, windows_id, _is_primary) in enumerate(unique_entries):
+            if has_dense_explicit_ids and isinstance(windows_id, int) and windows_id > 0:
+                normalized_monitor_id = int(windows_id)
+            else:
+                normalized_monitor_id = monitor_index + 1
+            id_to_index[normalized_monitor_id] = monitor_index
+        return id_to_index
+
+    @staticmethod
     def _windows_monitor_id_to_index_map() -> dict[int, int]:
         # Windows Display Settings kimlikleri (DISPLAY1, DISPLAY2, ...)
         # MONITORINFOEXW::szDevice alanından okunur. Ancak Windows "Ekranı
@@ -452,7 +490,7 @@ class BorderlessFullscreenPlayer:
         )
 
         MONITORINFOF_PRIMARY = 1
-        monitor_entries: list[tuple[int, int, int, int, int, bool]] = []
+        monitor_entries: list[tuple[int, int, int, int, int | None, bool]] = []
 
         def _collect_monitor(monitor_handle, _hdc, rect_ptr, _data):
             if not rect_ptr:
@@ -467,23 +505,16 @@ class BorderlessFullscreenPlayer:
                     device_name = str(monitor_info.szDevice or "")
                     normalized_device_name = device_name.strip().upper()
                     display_id = gdi_name_to_display_id.get(normalized_device_name)
-                    windows_id: int | None = None
-                    if display_id is not None:
-                        windows_id = int(display_id)
-                    else:
-                        match = re.search(r"DISPLAY(\d+)", device_name, re.IGNORECASE)
-                        if match:
-                            windows_id = int(match.group(1))
-                    if windows_id is not None:
-                        is_primary = bool(int(monitor_info.dwFlags) & MONITORINFOF_PRIMARY)
-                        monitor_entries.append((
-                            int(rect.left),
-                            int(rect.top),
-                            width,
-                            height,
-                            windows_id,
-                            is_primary,
-                        ))
+                    windows_id: int | None = int(display_id) if display_id is not None else None
+                    is_primary = bool(int(monitor_info.dwFlags) & MONITORINFOF_PRIMARY)
+                    monitor_entries.append((
+                        int(rect.left),
+                        int(rect.top),
+                        width,
+                        height,
+                        windows_id,
+                        is_primary,
+                    ))
             except Exception:
                 return 1
             return 1
@@ -493,23 +524,7 @@ class BorderlessFullscreenPlayer:
         except Exception:
             return {}
 
-        if not monitor_entries:
-            return {}
-
-        # Eşleme, _windows_connected_monitor_bounds ile aynı geometri bazlı
-        # sırayı kullanmalı; aksi halde DISPLAY2/DISPLAY3 gibi ID'ler
-        # dikey hizası farklı monitörlerde yer değiştirmiş görünebiliyor.
-        monitor_entries.sort(key=lambda item: (item[0], item[1], 0 if item[5] else 1))
-
-        id_to_index: dict[int, int] = {}
-        seen_rects: set[tuple[int, int, int, int]] = set()
-        for left, top, width, height, windows_id, _is_primary in monitor_entries:
-            rect = (left, top, width, height)
-            if rect in seen_rects:
-                continue
-            seen_rects.add(rect)
-            id_to_index[windows_id] = len(seen_rects) - 1
-        return id_to_index
+        return BorderlessFullscreenPlayer._normalize_windows_monitor_id_entries(monitor_entries)
 
     @staticmethod
     def _windows_gdi_device_name_to_display_id_map() -> dict[str, int]:
