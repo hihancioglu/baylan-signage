@@ -380,6 +380,10 @@
                     <label class="form-label">Medyadan Video Seç</label>
                     <select id="dashboard-cell-modal-video" class="form-select" onchange="pickDashboardModalVideoSource()"></select>
                   </div>
+                  <div class="mb-0 d-none" id="dashboard-cell-modal-image-wrap">
+                    <label class="form-label">Medyadan Görsel Seç</label>
+                    <select id="dashboard-cell-modal-image" class="form-select" onchange="pickDashboardModalImageSource()"></select>
+                  </div>
                 </div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-outline-danger me-auto" onclick="clearDashboardModalCell()">Temizle</button>
@@ -989,6 +993,12 @@ function refreshDashboardVideoPickers(){
     modalPicker.innerHTML = dashboardVideoOptionsHtml(currentSource);
     if(currentSource) modalPicker.value = currentSource;
   }
+  const modalImagePicker = document.getElementById('dashboard-cell-modal-image');
+  if(modalImagePicker){
+    const currentSource = String(document.getElementById('dashboard-cell-modal-source')?.value || '').trim();
+    modalImagePicker.innerHTML = dashboardImageOptionsHtml(currentSource);
+    if(currentSource) modalImagePicker.value = currentSource;
+  }
 }
 
 
@@ -1123,6 +1133,18 @@ function dashboardVideoOptionsHtml(selectedSource = ''){
   const videoAssets = (cachedMediaAssets || []).filter(a => String(a.content_type || '').toLowerCase().startsWith('video/'));
   const options = ['<option value="">Medyadan video seçin</option>'];
   videoAssets.forEach((asset) => {
+    const sourceUrl = String(asset.url || '').trim();
+    const selectedAttr = selected && selected === sourceUrl ? ' selected' : '';
+    options.push(`<option value="${escapeHtml(sourceUrl)}"${selectedAttr}>${escapeHtml(asset.name || sourceUrl)}</option>`);
+  });
+  return options.join('');
+}
+
+function dashboardImageOptionsHtml(selectedSource = ''){
+  const selected = String(selectedSource || '').trim();
+  const imageAssets = (cachedMediaAssets || []).filter(a => String(a.content_type || '').toLowerCase().startsWith('image/'));
+  const options = ['<option value="">Medyadan görsel seçin</option>'];
+  imageAssets.forEach((asset) => {
     const sourceUrl = String(asset.url || '').trim();
     const selectedAttr = selected && selected === sourceUrl ? ' selected' : '';
     options.push(`<option value="${escapeHtml(sourceUrl)}"${selectedAttr}>${escapeHtml(asset.name || sourceUrl)}</option>`);
@@ -1340,6 +1362,9 @@ function openDashboardCellModal(index){
   const videoSelect = document.getElementById('dashboard-cell-modal-video');
   videoSelect.innerHTML = dashboardVideoOptionsHtml(cell.source || '');
   if(cell.source) videoSelect.value = cell.source;
+  const imageSelect = document.getElementById('dashboard-cell-modal-image');
+  imageSelect.innerHTML = dashboardImageOptionsHtml(cell.source || '');
+  if(cell.source) imageSelect.value = cell.source;
   onDashboardModalTypeChange();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('dashboard-cell-modal')).show();
 }
@@ -1349,15 +1374,24 @@ function onDashboardModalTypeChange(){
   const sourceInput = document.getElementById('dashboard-cell-modal-source');
   const sourceWrap = document.getElementById('dashboard-cell-modal-source-wrap');
   const videoWrap = document.getElementById('dashboard-cell-modal-video-wrap');
+  const imageWrap = document.getElementById('dashboard-cell-modal-image-wrap');
   sourceInput.disabled = type === 'empty';
   if(type === 'empty') sourceInput.value = '';
-  sourceInput.placeholder = type === 'video' ? '/media/video.mp4 veya https://...' : 'https://... veya /media/...';
+  sourceInput.placeholder = type === 'video'
+    ? '/media/video.mp4 veya https://...'
+    : (type === 'image' ? '/media/image.png veya https://...' : 'https://... veya /media/...');
   sourceWrap.classList.toggle('d-none', type === 'empty');
   videoWrap.classList.toggle('d-none', type !== 'video');
+  imageWrap.classList.toggle('d-none', type !== 'image');
 }
 
 function pickDashboardModalVideoSource(){
   const source = document.getElementById('dashboard-cell-modal-video').value || '';
+  document.getElementById('dashboard-cell-modal-source').value = source;
+}
+
+function pickDashboardModalImageSource(){
+  const source = document.getElementById('dashboard-cell-modal-image').value || '';
   document.getElementById('dashboard-cell-modal-source').value = source;
 }
 
