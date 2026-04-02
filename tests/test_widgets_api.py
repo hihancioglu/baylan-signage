@@ -172,6 +172,78 @@ class TestWidgetsApi(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["duration_sec"], 12)
 
+    def test_dashboard_frame_playlist_is_resolved_into_runtime_payload(self):
+        client = self.main.app.test_client()
+        with patch("app.main._auth_failed", return_value=False):
+            create_group = client.post("/api/groups", json={"name": "Dashboard Playlist Group"})
+            self.assertEqual(create_group.status_code, 200)
+            gid = create_group.get_json().get("id")
+
+            db = self.main.db_session()
+            try:
+                db.add(self.main.Device(hostname="screen-dashboard"))
+                db.commit()
+            finally:
+                db.close()
+
+            bind_group = client.post(f"/api/devices/screen-dashboard/group/{gid}")
+            self.assertEqual(bind_group.status_code, 200)
+
+            media_playlist = client.post("/api/playlists", json={"name": "Dashboard Frame Playlist", "enabled": True})
+            self.assertEqual(media_playlist.status_code, 200)
+            frame_playlist_id = media_playlist.get_json().get("id")
+            db = self.main.db_session()
+            try:
+                media_asset = self.main.MediaAsset(
+                    original_name="demo.jpg",
+                    stored_name="demo.jpg",
+                    relative_path="uploads/demo.jpg",
+                )
+                db.add(media_asset)
+                db.commit()
+                media_id = media_asset.id
+            finally:
+                db.close()
+            media_item = client.post(
+                f"/api/playlists/{frame_playlist_id}/items",
+                json={"item_type": "media", "media_id": media_id, "duration_sec": 7},
+            )
+            self.assertEqual(media_item.status_code, 200)
+
+            dashboard_payload = {
+                "columns": 1,
+                "rows": 1,
+                "widgets": [{"type": "playlist", "playlist_id": frame_playlist_id}],
+            }
+            create_widget = client.post(
+                "/api/widgets",
+                json={"name": "Playlist Dashboard", "type": "dashboard", "content": self.main.json.dumps(dashboard_payload)},
+            )
+            self.assertEqual(create_widget.status_code, 200)
+            dashboard_widget_id = create_widget.get_json().get("id")
+
+            main_playlist = client.post("/api/playlists", json={"name": "Main Dashboard Playlist", "enabled": True})
+            self.assertEqual(main_playlist.status_code, 200)
+            main_playlist_id = main_playlist.get_json().get("id")
+            widget_item = client.post(
+                f"/api/playlists/{main_playlist_id}/items",
+                json={"item_type": "widget", "widget_id": dashboard_widget_id},
+            )
+            self.assertEqual(widget_item.status_code, 200)
+
+            bind_playlist = client.post(f"/api/groups/{gid}/playlist/{main_playlist_id}")
+            self.assertEqual(bind_playlist.status_code, 200)
+
+            config_payload = self.main.build_config("screen-dashboard")
+            videos = (config_payload or {}).get("videos") or []
+            self.assertEqual(len(videos), 1)
+            widget_payload = videos[0].get("widget_payload") or {}
+            widgets = widget_payload.get("widgets") or []
+            self.assertEqual(len(widgets), 1)
+            self.assertEqual(widgets[0].get("type"), "playlist")
+            self.assertEqual(widgets[0].get("playlist_id"), frame_playlist_id)
+            self.assertEqual(len(widgets[0].get("items") or []), 1)
+
     def test_widget_playlist_item_rejects_non_positive_duration_sec(self):
         client = self.main.app.test_client()
         with patch("app.main._auth_failed", return_value=False):
