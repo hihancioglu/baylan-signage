@@ -1649,11 +1649,7 @@ class MultiMonitorPlayback:
                     return True
             except Exception:
                 pass
-        active_item = getattr(player, "_active_item", None)
-        if not isinstance(active_item, dict):
-            return False
-        active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
-        return active_item_type == "widget"
+        return False
 
     @staticmethod
     def _background_widget_player_runtime(player: BorderlessFullscreenPlayer | None) -> bool:
@@ -2606,9 +2602,13 @@ class PlaybackController:
                     return True
             except Exception:
                 pass
-        active_item = getattr(player, "_active_item", None)
-        if not isinstance(active_item, dict):
-            return False
+        return False
+
+    def _primary_has_visible_widget_content(self) -> bool:
+        if self._player_has_visible_widget_content(self.player):
+            return True
+        with self._lock:
+            active_item = dict(self._active_item) if isinstance(self._active_item, dict) else {}
         active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
         return active_item_type == "widget"
 
@@ -2619,7 +2619,7 @@ class PlaybackController:
             should_background = False
             backgrounded = False
             secondary_visible = False
-            visible_content = self._player_has_visible_widget_content(self.player)
+            visible_content = self._primary_has_visible_widget_content()
             try:
                 prewarm_ok = bool(
                     self.player.start_widget_engine_if_needed(
@@ -2627,7 +2627,7 @@ class PlaybackController:
                         clone_to_all_monitors=False,
                     )
                 )
-                visible_content = self._player_has_visible_widget_content(self.player)
+                visible_content = self._primary_has_visible_widget_content()
                 secondary_widget_visibility_checker = getattr(
                     self.multi_monitor_playback,
                     "has_visible_widget_runtime_content",
