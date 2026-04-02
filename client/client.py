@@ -1585,7 +1585,7 @@ class MultiMonitorPlayback:
         # çoğu kurulumda 1..N sıralı mantıksal slot olarak kullanılıyor.
         # Windows "Identify" ID bazlı eşleme ancak açıkça istendiğinde
         # devreye girmeli.
-        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "0").strip().lower() in {"1", "true", "yes", "on"}
+        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _secondary_monitor_widgets_enabled() -> bool:
@@ -1696,13 +1696,12 @@ class MultiMonitorPlayback:
                 & monitor_nos_without_widgets
             )
             for monitor_no in stale_monitor_nos:
+                keep_runtime_warm = bool(desired_monitor_nos)
                 player = self._widget_players.pop(monitor_no, None)
                 if player is None:
                     continue
                 try:
-                    # Bu monitörde artık widget yoksa runtime'ı sıcak tutmayalım;
-                    # aksi halde monitör başına arka planda gereksiz process kalıyor.
-                    player.stop(stop_widget_runtime=True)
+                    player.stop(stop_widget_runtime=not keep_runtime_warm)
                 except Exception:
                     pass
 
@@ -2045,12 +2044,9 @@ class MultiMonitorPlayback:
                 with self._lock:
                     player = self._widget_players.get(monitor_no)
                     if player is None:
-                        # Secondary monitor widget playback must use a dedicated
-                        # player per monitor. Reusing the shared fallback widget
-                        # player can keep an old runtime bound to another monitor
-                        # (typically monitor index 0), which causes idle->active
-                        # background commands to affect only one display.
-                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        player = self._widget_player_fallback
+                        if player is None:
+                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
                         self._widget_players[monitor_no] = player
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
