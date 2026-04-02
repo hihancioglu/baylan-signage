@@ -2986,6 +2986,16 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         ):
             self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 1)
 
+    def test_multi_monitor_playback_target_monitor_index_defaults_to_positional_mapping(self):
+        from client.client import MultiMonitorPlayback
+
+        with patch("client.client.os.name", "nt"), patch.dict("client.client.os.environ", {}, clear=True), patch.object(
+            MultiMonitorPlayback,
+            "_windows_monitor_id_to_index_map",
+            return_value={1: 2, 2: 0, 3: 1},
+        ):
+            self.assertEqual(MultiMonitorPlayback._target_monitor_index_for_monitor_no(3), 2)
+
     def test_multi_monitor_playback_target_monitor_index_can_disable_windows_monitor_mapping(self):
         from client.client import MultiMonitorPlayback
 
