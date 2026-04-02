@@ -1706,6 +1706,7 @@ class MultiMonitorPlayback:
                     self._widget_players[monitor_no] = player
             should_background = False
             backgrounded = False
+            visible_content = self._player_has_visible_widget_content(player)
             try:
                 prewarm_ok = bool(
                     player.start_widget_engine_if_needed(
@@ -1713,7 +1714,8 @@ class MultiMonitorPlayback:
                         clone_to_all_monitors=False,
                     )
                 )
-                should_background = prewarm_ok
+                visible_content = self._player_has_visible_widget_content(player)
+                should_background = prewarm_ok and not visible_content
                 if should_background:
                     backgrounded = self._background_widget_player_runtime(player)
             except Exception:
@@ -1721,7 +1723,7 @@ class MultiMonitorPlayback:
             log_debug(
                 "monitor_widget_runtime_reconcile | "
                 f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
-                f"ok={prewarm_ok} visible={self._player_has_visible_widget_content(player)} "
+                f"ok={prewarm_ok} visible={visible_content} "
                 f"backgrounded={backgrounded if prewarm_ok else False}"
             )
 
@@ -2604,6 +2606,7 @@ class PlaybackController:
             prewarm_ok = False
             should_background = False
             backgrounded = False
+            visible_content = self._player_has_visible_widget_content(self.player)
             try:
                 prewarm_ok = bool(
                     self.player.start_widget_engine_if_needed(
@@ -2611,14 +2614,15 @@ class PlaybackController:
                         clone_to_all_monitors=False,
                     )
                 )
-                should_background = prewarm_ok
+                visible_content = self._player_has_visible_widget_content(self.player)
+                should_background = prewarm_ok and not visible_content
                 if should_background:
                     backgrounded = self.multi_monitor_playback._background_widget_player_runtime(self.player)
             except Exception:
                 prewarm_ok = False
             log_debug(
                 "primary_widget_runtime_reconcile | "
-                f"action=ensure ok={prewarm_ok} visible={self._player_has_visible_widget_content(self.player)} "
+                f"action=ensure ok={prewarm_ok} visible={visible_content} "
                 f"backgrounded={backgrounded if prewarm_ok else False}"
             )
             return
