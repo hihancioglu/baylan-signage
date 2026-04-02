@@ -1752,9 +1752,15 @@ class MultiMonitorPlayback:
 
         use_display_id_selection = (
             os.name == "nt"
-            and use_windows_display_ids
             and bool(windows_monitor_map)
             and 1 in parsed_monitor_numbers
+            and (
+                use_windows_display_ids
+                or (
+                    primary_monitor_id is not None
+                    and int(primary_monitor_id) != 1
+                )
+            )
         )
         windows_map_is_reliable = len(windows_monitor_map) > 1
 
@@ -1830,11 +1836,13 @@ class MultiMonitorPlayback:
                 local_entries = []
 
             entries = list(local_entries or []) + widget_items
-            target_monitor_index = (
-                self._target_monitor_index_for_monitor_no(monitor_no)
-                if use_display_id_selection
-                else max(0, monitor_no - 1)
-            )
+            target_monitor_index = max(0, monitor_no - 1)
+            if use_display_id_selection:
+                mapped_index = windows_monitor_map.get(int(monitor_no))
+                if mapped_index is not None:
+                    target_monitor_index = int(mapped_index)
+                else:
+                    target_monitor_index = self._target_monitor_index_for_monitor_no(monitor_no)
             monitor_states[monitor_no] = {
                 "enabled": bool(enabled and entries),
                 "entries": entries,
