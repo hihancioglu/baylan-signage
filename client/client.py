@@ -3985,7 +3985,12 @@ def run_state_cycle():
         # Önceki döngüde bir düşüş yakalandıysa, yalnızca düşük idle penceresinde
         # kalmaya devam edildiği için seriyi sıfırlamayalım; aksi halde doğrulama
         # sayısına hiç ulaşılamayıp gerçek aktivite kaçabiliyor.
-        if _activity_drop_streak > 0 and idle_sec <= ACTIVITY_RESUME_SEC:
+        # Bazı istasyonlarda tek seferlik mouse hareketinden sonra idle çok hızlı
+        # şekilde 0 -> 0.6 -> 1.2 ... yükseliyor. Sadece ACTIVITY_RESUME_SEC (1s)
+        # ile sınırlarsak seri 3. örnekte sıfırlanıp PLAYING -> RETURNING kaçabiliyor.
+        # Önceden bir "sert düşüş" yakalandıysa, kısa bir yükseliş penceresinde de
+        # seriyi koruyalım.
+        if _activity_drop_streak > 0 and idle_sec <= max(ACTIVITY_RESUME_SEC, ACTIVITY_IDLE_DROP_SEC):
             _activity_drop_streak += 1
         else:
             _activity_drop_streak = 0
