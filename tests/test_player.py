@@ -1862,6 +1862,41 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.player.start_widget_engine_if_needed.assert_called_once()
         controller.player.background_widget_engine.assert_not_called()
 
+    def test_update_from_config_does_not_background_primary_widget_when_secondary_widget_is_visible(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        controller.media_manager.sync_playlist_entries.return_value = []
+        controller.media_manager.load_last_successful_playlist_entries.return_value = []
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = False
+        controller.multi_monitor_playback.has_visible_widget_runtime_content.return_value = True
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+        controller.player._active_item = {
+            "item_type": "media",
+            "path": "https://example.com/video.mp4",
+        }
+
+        controller.update_from_config(
+            {
+                "enabled": True,
+                "videos": [
+                    {
+                        "item_type": "widget",
+                        "widget_url": "https://example.com/w",
+                        "duration_sec": 10,
+                    }
+                ],
+                "playlist_version": "v1",
+                "monitor_playlists": {},
+            }
+        )
+
+        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.background_widget_engine.assert_not_called()
+
     def test_update_from_config_stops_primary_widget_runtime_when_only_video_exists(self):
         from client.client import PlaybackController
 
