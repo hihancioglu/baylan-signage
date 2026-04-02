@@ -1581,10 +1581,11 @@ class MultiMonitorPlayback:
 
     @staticmethod
     def _use_windows_display_ids() -> bool:
-        # Varsayılanı açık tutuyoruz: paneldeki monitor_no değerleri
-        # Windows "Identify" ID mantığıyla eşlenerek hedef monitör
-        # belirlenir. Gerekirse env ile kapatılabilir.
-        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "1").strip().lower() in {"1", "true", "yes", "on"}
+        # Varsayılanı kapalı tutuyoruz: paneldeki monitor_no değeri
+        # doğrudan 1-bazlı sıralı monitör index'i olarak yorumlanır.
+        # Windows "Identify" ID eşlemesi gerekli kurulumlarda env ile
+        # tekrar açılabilir.
+        return os.getenv("MONITOR_PLAYLIST_USE_WINDOWS_DISPLAY_IDS", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _secondary_monitor_widgets_enabled() -> bool:
