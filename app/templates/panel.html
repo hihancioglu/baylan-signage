@@ -850,14 +850,29 @@ function formatHealthMetricValue(value, suffix = ''){
   return `${value}${suffix}`;
 }
 
+function normalizeHealthMetrics(metrics){
+  if(!metrics) return null;
+  if(typeof metrics === 'string'){
+    try{
+      const parsed = JSON.parse(metrics);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    }catch(_err){
+      return null;
+    }
+  }
+  if(typeof metrics === 'object') return metrics;
+  return null;
+}
+
 function buildHealthTooltip(metrics){
-  if(!metrics || typeof metrics !== 'object') return '';
+  const normalizedMetrics = normalizeHealthMetrics(metrics);
+  if(!normalizedMetrics) return 'Agent sağlık metrikleri henüz raporlanmadı.';
   const lines = [
-    `CPU load: ${formatHealthMetricValue(metrics.cpu_load_percent, '%')}`,
-    `Memory pressure: ${formatHealthMetricValue(metrics.memory_pressure_percent, '%')}`,
-    `Responsiveness delay: ${formatHealthMetricValue(metrics.responsiveness_delay_seconds, 's')}`,
-    `Sustained high CPU: ${metrics.sustained_high_cpu === null || metrics.sustained_high_cpu === undefined ? '-' : (metrics.sustained_high_cpu ? 'YES' : 'NO')}`,
-    `Sustained high CPU seconds: ${formatHealthMetricValue(metrics.sustained_high_cpu_seconds, 's')}`,
+    `CPU load: ${formatHealthMetricValue(normalizedMetrics.cpu_load_percent, '%')}`,
+    `Memory pressure: ${formatHealthMetricValue(normalizedMetrics.memory_pressure_percent, '%')}`,
+    `Responsiveness delay: ${formatHealthMetricValue(normalizedMetrics.responsiveness_delay_seconds, 's')}`,
+    `Sustained high CPU: ${normalizedMetrics.sustained_high_cpu === null || normalizedMetrics.sustained_high_cpu === undefined ? '-' : (normalizedMetrics.sustained_high_cpu ? 'YES' : 'NO')}`,
+    `Sustained high CPU seconds: ${formatHealthMetricValue(normalizedMetrics.sustained_high_cpu_seconds, 's')}`,
   ];
   return lines.join(' | ');
 }
