@@ -587,20 +587,28 @@ def _read_cpu_temperature_from_windows() -> str | None:
 
     try:
         for command in (
-            "$ohm = Get-CimInstance -Namespace root/OpenHardwareMonitor -ClassName Sensor -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
-            "Select-Object -First 1 -ExpandProperty Value; "
-            "if ($ohm) { [string]$ohm; return }; "
-            "$acpi = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
-            "Select-Object -ExpandProperty CurrentTemperature; "
-            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }",
-            "$ohm = Get-WmiObject -Namespace root/OpenHardwareMonitor -Class Sensor -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
-            "Select-Object -First 1 -ExpandProperty Value; "
-            "if ($ohm) { [string]$ohm; return }; "
-            "$acpi = Get-WmiObject -Namespace root/wmi -Class MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
-            "Select-Object -ExpandProperty CurrentTemperature; "
-            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }",
+            "$ErrorActionPreference = 'SilentlyContinue'; "
+            "$hasCim = Get-Command Get-CimInstance -ErrorAction SilentlyContinue; "
+            "if ($hasCim) { "
+            "  $ohm = Get-CimInstance -Namespace root/OpenHardwareMonitor -ClassName Sensor | "
+            "    Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
+            "    Select-Object -First 1 -ExpandProperty Value; "
+            "  if ($ohm -ne $null) { [string]$ohm; exit 0 }; "
+            "  $acpi = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | "
+            "    Select-Object -ExpandProperty CurrentTemperature; "
+            "  if ($acpi) { $acpi | ForEach-Object { [string]$_ }; exit 0 } "
+            "}",
+            "$ErrorActionPreference = 'SilentlyContinue'; "
+            "$hasWmi = Get-Command Get-WmiObject -ErrorAction SilentlyContinue; "
+            "if ($hasWmi) { "
+            "  $ohm = Get-WmiObject -Namespace root/OpenHardwareMonitor -Class Sensor | "
+            "    Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
+            "    Select-Object -First 1 -ExpandProperty Value; "
+            "  if ($ohm -ne $null) { [string]$ohm; exit 0 }; "
+            "  $acpi = Get-WmiObject -Namespace root/wmi -Class MSAcpi_ThermalZoneTemperature | "
+            "    Select-Object -ExpandProperty CurrentTemperature; "
+            "  if ($acpi) { $acpi | ForEach-Object { [string]$_ }; exit 0 } "
+            "}",
         ):
             output = _run_powershell(command)
             if output.strip():
