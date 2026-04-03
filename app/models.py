@@ -26,6 +26,7 @@ class Device(Base):
     content_enabled = Column(Boolean)
     last_client_update_status = Column(String(256))
     last_client_updater_status = Column(String(256))
+    cpu_temperature = Column(String(64))
 
 
 class Group(Base):
