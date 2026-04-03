@@ -89,14 +89,32 @@
               <div class="card-body">
                 <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
                   <h2 class="h4 mb-0">Cihazlar</h2>
-                  <div class="d-flex flex-wrap gap-2 small">
+                  <div class="d-flex flex-wrap gap-2 small align-items-center">
                     <span class="badge text-bg-success" id="online-count">Online: 0</span>
                     <span class="badge text-bg-secondary" id="offline-count">Offline: 0</span>
+                    <div class="dropdown">
+                      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                        Kolonlar
+                      </button>
+                      <div class="dropdown-menu dropdown-menu-end p-2" id="device-column-menu"></div>
+                    </div>
                   </div>
                 </div>
                 <div class="table-responsive">
                   <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light"><tr><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('inventory_id')">InventoryID</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('device_status')">Durum</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th><th><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th><th>İşlem</th></tr></thead>
+                    <thead class="table-light">
+                      <tr>
+                        <th data-device-col="alias"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th>
+                        <th data-device-col="inventory_id"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('inventory_id')">InventoryID</button></th>
+                        <th data-device-col="hostname"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th>
+                        <th data-device-col="agent_version"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th>
+                        <th data-device-col="device_status"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('device_status')">Durum</button></th>
+                        <th data-device-col="state_text"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th>
+                        <th data-device-col="content_text"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th>
+                        <th data-device-col="group"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th>
+                        <th data-device-col="actions">İşlem</th>
+                      </tr>
+                    </thead>
                     <tbody id="devices-body"></tbody>
                   </table>
                 </div>
@@ -617,6 +635,19 @@ let cachedWidgets = [];
 let cachedCallManagement = { enabled_hostnames: [], active_calls: [] };
 let deviceSortField = 'is_online';
 let deviceSortDirection = 'desc';
+const DEVICE_COLUMNS_STORAGE_KEY = 'panel_device_visible_columns_v1';
+const DEVICE_COLUMNS = [
+  { key: 'alias', label: 'Alias' },
+  { key: 'inventory_id', label: 'InventoryID' },
+  { key: 'hostname', label: 'Hostname' },
+  { key: 'agent_version', label: 'Versiyon' },
+  { key: 'device_status', label: 'Durum' },
+  { key: 'state_text', label: 'State' },
+  { key: 'content_text', label: 'İçerik' },
+  { key: 'group', label: 'Grup' },
+  { key: 'actions', label: 'İşlem' }
+];
+let visibleDeviceColumns = new Set(DEVICE_COLUMNS.map(col => col.key));
 const widgetTemplates = {
   clock: {
     name: 'Dijital Saat',
@@ -782,6 +813,67 @@ function sortDevices(field){
   renderDevicesTable();
 }
 
+function loadVisibleDeviceColumns(){
+  try{
+    const raw = localStorage.getItem(DEVICE_COLUMNS_STORAGE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(!Array.isArray(parsed)) return;
+    const validKeys = new Set(DEVICE_COLUMNS.map(col => col.key));
+    const filtered = parsed.filter(key => validKeys.has(key));
+    if(filtered.length > 0){
+      visibleDeviceColumns = new Set(filtered);
+    }
+  }catch(_err){
+    visibleDeviceColumns = new Set(DEVICE_COLUMNS.map(col => col.key));
+  }
+}
+
+function saveVisibleDeviceColumns(){
+  try{
+    localStorage.setItem(DEVICE_COLUMNS_STORAGE_KEY, JSON.stringify([...visibleDeviceColumns]));
+  }catch(_err){
+    // no-op
+  }
+}
+
+function toggleDeviceColumn(columnKey){
+  if(!columnKey) return;
+  if(visibleDeviceColumns.has(columnKey)){
+    if(visibleDeviceColumns.size === 1){
+      alert('En az bir kolon görünür kalmalı.');
+      return;
+    }
+    visibleDeviceColumns.delete(columnKey);
+  }else{
+    visibleDeviceColumns.add(columnKey);
+  }
+  saveVisibleDeviceColumns();
+  applyDeviceColumnVisibility();
+}
+
+function renderDeviceColumnControls(){
+  const menu = document.getElementById('device-column-menu');
+  if(!menu) return;
+  menu.innerHTML = DEVICE_COLUMNS.map(col => {
+    const checked = visibleDeviceColumns.has(col.key) ? 'checked' : '';
+    return `<label class="dropdown-item d-flex align-items-center gap-2 small"><input class="form-check-input mt-0" type="checkbox" ${checked} onchange="toggleDeviceColumn('${col.key}')"><span>${escapeHtml(col.label)}</span></label>`;
+  }).join('');
+}
+
+function applyDeviceColumnVisibility(){
+  const isVisible = (key) => visibleDeviceColumns.has(key);
+  document.querySelectorAll('th[data-device-col]').forEach(th => {
+    const key = th.dataset.deviceCol;
+    th.classList.toggle('d-none', !isVisible(key));
+  });
+  document.querySelectorAll('#devices-body td[data-device-col]').forEach(td => {
+    const key = td.dataset.deviceCol;
+    td.classList.toggle('d-none', !isVisible(key));
+  });
+  renderDeviceColumnControls();
+}
+
 function renderDevicesTable(){
   const body = document.getElementById('devices-body');
   if(!body) return;
@@ -834,9 +926,10 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td>${renderDeviceStatusBadge(d)}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
     body.appendChild(tr);
   });
+  applyDeviceColumnVisibility();
   initHealthTooltips();
 }
 
@@ -2789,6 +2882,8 @@ async function loadLogs(){
 
 async function init(){
   activateSection('section-devices');
+  loadVisibleDeviceColumns();
+  renderDeviceColumnControls();
   await loadDevices();
   await loadWidgets();
   await loadGroupsPlaylists();
@@ -2799,8 +2894,8 @@ async function init(){
   await loadAnnouncements();
   await loadCallManagement();
   onTargetChange();
-onAnnouncementModeChange();
-document.getElementById('announce-mode').addEventListener('change', onAnnouncementModeChange);
+  onAnnouncementModeChange();
+  document.getElementById('announce-mode').addEventListener('change', onAnnouncementModeChange);
   await loadFallbackMediaSetting();
   await loadUpdater();
   await loadClientUpdater();
