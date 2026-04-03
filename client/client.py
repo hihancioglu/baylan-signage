@@ -549,37 +549,64 @@ def _read_cpu_temperature_from_windows() -> str | None:
         return None
 
     def _run_powershell(command: str) -> str:
+        shells = []
+        for shell_name in ("powershell", "powershell.exe", "pwsh", "pwsh.exe"):
+            if shutil.which(shell_name):
+                shells.append(shell_name)
+        if not shells:
+            shells = ["powershell"]
+
         startupinfo = None
         if hasattr(subprocess, "STARTUPINFO"):
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
             startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-            startupinfo=startupinfo,
-            creationflags=creationflags,
-        )
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip().replace("\n", " ")
-            log_debug(f"cpu_temp(win): powershell returned code={result.returncode} stderr='{stderr}'")
-            return ""
-        return result.stdout or ""
+        for shell_name in shells:
+            try:
+                result = subprocess.run(
+                    [shell_name, "-NoProfile", "-NonInteractive", "-Command", command],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                    startupinfo=startupinfo,
+                    creationflags=creationflags,
+                )
+            except FileNotFoundError:
+                log_debug(f"cpu_temp(win): shell '{shell_name}' not found")
+                continue
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip().replace("\n", " ")
+                log_debug(
+                    f"cpu_temp(win): shell '{shell_name}' returned code={result.returncode} stderr='{stderr}'"
+                )
+                continue
+            return result.stdout or ""
+        return ""
 
     try:
-        output = _run_powershell(
+        for command in (
             "$ohm = Get-CimInstance -Namespace root/OpenHardwareMonitor -ClassName Sensor -ErrorAction SilentlyContinue | "
             "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
             "Select-Object -First 1 -ExpandProperty Value; "
             "if ($ohm) { [string]$ohm; return }; "
             "$acpi = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
             "Select-Object -ExpandProperty CurrentTemperature; "
-            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }"
-        )
+            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }",
+            "$ohm = Get-WmiObject -Namespace root/OpenHardwareMonitor -Class Sensor -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
+            "Select-Object -First 1 -ExpandProperty Value; "
+            "if ($ohm) { [string]$ohm; return }; "
+            "$acpi = Get-WmiObject -Namespace root/wmi -Class MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
+            "Select-Object -ExpandProperty CurrentTemperature; "
+            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }",
+        ):
+            output = _run_powershell(command)
+            if output.strip():
+                break
+        else:
+            output = ""
     except Exception as exc:
         log_debug(f"cpu_temp(win): powershell execution failed: {exc}")
         return None
