@@ -542,5 +542,55 @@ class TestCpuTemperatureWindowsReader(unittest.TestCase):
         self.assertEqual(value, "42.1°C")
 
 
+class TestHealthPayloadScoring(unittest.TestCase):
+    def setUp(self):
+        self.orig_started_at = main._health_started_at
+        self.orig_high_cpu_seconds = main._health_high_cpu_seconds
+        self.orig_payload = dict(main._last_health_payload)
+
+    def tearDown(self):
+        main._health_started_at = self.orig_started_at
+        main._health_high_cpu_seconds = self.orig_high_cpu_seconds
+        main._last_health_payload.clear()
+        main._last_health_payload.update(self.orig_payload)
+
+    def test_health_reports_warning_on_high_cpu_and_delay(self):
+        main._health_started_at = main.time.monotonic() - 300
+        main._health_high_cpu_seconds = 0
+
+        psutil_mock = Mock()
+        psutil_mock.cpu_percent.return_value = 88.0
+        psutil_mock.virtual_memory.return_value = Mock(percent=70.0)
+        with patch.object(main.importlib, "import_module", return_value=psutil_mock), patch.object(
+            main.time, "time", side_effect=[100.0, 101.15]
+        ), patch.object(main.time, "sleep"):
+            payload = main._get_cpu_temperature_payload()
+
+        self.assertEqual(payload["health"], "WARNING")
+
+    def test_health_reports_critical_on_very_high_memory(self):
+        main._health_started_at = main.time.monotonic() - 300
+        main._health_high_cpu_seconds = 0
+
+        psutil_mock = Mock()
+        psutil_mock.cpu_percent.return_value = 55.0
+        psutil_mock.virtual_memory.return_value = Mock(percent=92.0)
+        with patch.object(main.importlib, "import_module", return_value=psutil_mock), patch.object(
+            main.time, "time", side_effect=[200.0, 201.02]
+        ), patch.object(main.time, "sleep"):
+            payload = main._get_cpu_temperature_payload()
+
+        self.assertEqual(payload["health"], "CRITICAL")
+
+    def test_health_keeps_previous_status_during_bootstrap_window(self):
+        main._health_started_at = main.time.monotonic()
+        main._last_health_payload["health"] = "WARNING"
+
+        with patch.object(main.importlib, "import_module") as import_mock:
+            payload = main._get_cpu_temperature_payload()
+        import_mock.assert_not_called()
+        self.assertEqual(payload["health"], "WARNING")
+
+
 if __name__ == "__main__":
     unittest.main()

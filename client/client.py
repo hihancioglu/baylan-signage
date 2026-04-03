@@ -357,15 +357,20 @@ _last_update_statuses: dict[str, str] = {
     "client": "",
     "client_updater": "",
 }
-_last_cpu_temperature_lock = threading.Lock()
-_last_cpu_temperature_value = "N/A"
-_last_cpu_temperature_checked_at = 0.0
-_last_health_payload: dict[str, object] = {
-    "cpu": 0,
-    "lag": False,
-    "fps_drop": False,
-    "health": "OK",
-}
+_health_lock = threading.Lock()
+_health_high_cpu_seconds = 0
+_health_started_at = time.monotonic()
+_last_health_payload: dict[str, str] = {"health": "OK"}
+HEALTH_IGNORE_UPTIME_SEC = max(0, int(os.getenv("HEALTH_IGNORE_UPTIME_SEC", "120")))
+HEALTH_CPU_WARNING_THRESHOLD = float(os.getenv("HEALTH_CPU_WARNING_THRESHOLD", "70"))
+HEALTH_CPU_HIGH_THRESHOLD = float(os.getenv("HEALTH_CPU_HIGH_THRESHOLD", "85"))
+HEALTH_CPU_RISK_THRESHOLD = float(os.getenv("HEALTH_CPU_RISK_THRESHOLD", "90"))
+HEALTH_CPU_SUSTAINED_SECONDS = max(1, int(os.getenv("HEALTH_CPU_SUSTAINED_SECONDS", "20")))
+HEALTH_DELAY_WARNING_THRESHOLD = float(os.getenv("HEALTH_DELAY_WARNING_THRESHOLD", "1.1"))
+HEALTH_DELAY_CRITICAL_THRESHOLD = float(os.getenv("HEALTH_DELAY_CRITICAL_THRESHOLD", "1.3"))
+HEALTH_DELAY_SCORE_THRESHOLD = float(os.getenv("HEALTH_DELAY_SCORE_THRESHOLD", "1.2"))
+HEALTH_MEM_WARNING_THRESHOLD = float(os.getenv("HEALTH_MEM_WARNING_THRESHOLD", "75"))
+HEALTH_MEM_CRITICAL_THRESHOLD = float(os.getenv("HEALTH_MEM_CRITICAL_THRESHOLD", "90"))
 
 
 def resolve_local_updater_version() -> str:
@@ -662,41 +667,58 @@ def _read_cpu_temperature() -> str | None:
 
 
 def _get_cpu_temperature_payload() -> dict[str, object]:
-    global _last_cpu_temperature_checked_at, _last_cpu_temperature_value
+    global _health_high_cpu_seconds
 
-    now = time.monotonic()
-    with _last_cpu_temperature_lock:
-        if now - _last_cpu_temperature_checked_at >= 120:
-            _last_cpu_temperature_checked_at = now
-            measured_value = _read_cpu_temperature()
-            _last_cpu_temperature_value = measured_value or "N/A"
-            log_debug(
-                "cpu_temp: payload refreshed "
-                f"value={_last_cpu_temperature_value} measured={bool(measured_value)} "
-                f"next_refresh_in_sec=120"
-            )
+    uptime_sec = time.monotonic() - _health_started_at
+    if uptime_sec < HEALTH_IGNORE_UPTIME_SEC:
+        return dict(_last_health_payload)
+
+    try:
+        psutil_module = importlib.import_module("psutil")
+    except Exception:
+        log_warning("⚠️ health check için psutil yüklenemedi, son sağlık durumu korunuyor.")
+        return dict(_last_health_payload)
+
+    cpu = float(psutil_module.cpu_percent(interval=1))
+    mem = float(psutil_module.virtual_memory().percent)
+    delay_start = time.time()
+    time.sleep(1)
+    delay = time.time() - delay_start
+
+    with _health_lock:
+        if cpu > HEALTH_CPU_HIGH_THRESHOLD:
+            _health_high_cpu_seconds += 1
         else:
-            age_sec = int(now - _last_cpu_temperature_checked_at)
-            log_debug(
-                f"cpu_temp: using cached payload value={_last_cpu_temperature_value} age_sec={age_sec}"
-            )
+            _health_high_cpu_seconds = 0
 
-        numeric_cpu = 0
-        temp_text = str(_last_cpu_temperature_value or "").strip().replace("°C", "").replace(",", ".")
-        try:
-            numeric_cpu = int(round(float(temp_text)))
-        except ValueError:
-            numeric_cpu = 0
-        health = "WARNING" if numeric_cpu >= 90 else "OK"
-        _last_health_payload.update(
-            {
-                "cpu": numeric_cpu,
-                "lag": False,
-                "fps_drop": False,
-                "health": health,
-            }
-        )
-        return {"cpu_temperature": _last_cpu_temperature_value, **_last_health_payload}
+        score = 0
+        if cpu > HEALTH_CPU_HIGH_THRESHOLD:
+            score += 2
+        if _health_high_cpu_seconds > HEALTH_CPU_SUSTAINED_SECONDS:
+            score += 2
+        if delay > HEALTH_DELAY_SCORE_THRESHOLD:
+            score += 3
+        if mem > 85:
+            score += 1
+
+        if score <= 2:
+            health = "OK"
+        elif score <= 5:
+            health = "WARNING"
+        else:
+            health = "CRITICAL"
+
+        if cpu >= HEALTH_CPU_RISK_THRESHOLD and health == "OK":
+            health = "WARNING"
+        if delay >= HEALTH_DELAY_CRITICAL_THRESHOLD or mem >= HEALTH_MEM_CRITICAL_THRESHOLD:
+            health = "CRITICAL"
+        elif (delay >= HEALTH_DELAY_WARNING_THRESHOLD or mem >= HEALTH_MEM_WARNING_THRESHOLD) and health == "OK":
+            health = "WARNING"
+        elif cpu >= HEALTH_CPU_WARNING_THRESHOLD and health == "OK":
+            health = "WARNING"
+
+        _last_health_payload["health"] = health
+        return dict(_last_health_payload)
 
 
 def flush_and_shutdown_logging():
