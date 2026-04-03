@@ -537,35 +537,51 @@ def _read_cpu_temperature_from_windows() -> str | None:
     if not platform.system().lower().startswith("win"):
         return None
 
-    try:
+    def _run_powershell(command: str) -> str:
+        startupinfo = None
+        if hasattr(subprocess, "STARTUPINFO"):
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+            startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                "(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | "
-                "Select-Object -ExpandProperty CurrentTemperature -ErrorAction SilentlyContinue)",
-            ],
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             text=True,
             timeout=3,
             check=False,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout or ""
+
+    try:
+        output = _run_powershell(
+            "$ohm = Get-CimInstance -Namespace root/OpenHardwareMonitor -ClassName Sensor -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
+            "Select-Object -First 1 -ExpandProperty Value; "
+            "if ($ohm) { [string]$ohm; return }; "
+            "$acpi = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
+            "Select-Object -ExpandProperty CurrentTemperature; "
+            "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }"
         )
     except Exception:
         return None
 
-    if result.returncode != 0:
-        return None
-
-    for line in (result.stdout or "").splitlines():
+    for line in output.splitlines():
         text = str(line).strip()
         if not text:
             continue
         try:
-            raw_value = float(text)
+            raw_value = float(text.replace(",", "."))
         except ValueError:
             continue
-        celsius = (raw_value / 10.0) - 273.15
+        celsius = raw_value
+        # Some WMI classes return tenths of Kelvin.
+        if raw_value > 200:
+            celsius = (raw_value / 10.0) - 273.15
         if -40 <= celsius <= 140:
             return f"{celsius:.1f}°C"
     return None
