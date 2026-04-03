@@ -789,8 +789,29 @@ def _apply_widget_runtime_vars(value, runtime_vars: dict[str, str]):
     return value
 
 
-def _extract_cpu_temperature(data: dict | None) -> str | None:
+def _extract_device_health(data: dict | None) -> str | None:
     payload = data or {}
+    health_value = payload.get("health")
+    if health_value is not None:
+        normalized_health = str(health_value).strip().upper()
+        if normalized_health:
+            return normalized_health
+
+    cpu_raw = payload.get("cpu")
+    lag_raw = payload.get("lag")
+    fps_drop_raw = payload.get("fps_drop")
+    if cpu_raw is not None or lag_raw is not None or fps_drop_raw is not None:
+        cpu = None
+        try:
+            cpu = float(str(cpu_raw).replace(",", ".")) if cpu_raw is not None else None
+        except ValueError:
+            cpu = None
+        lag = bool(lag_raw)
+        fps_drop = bool(fps_drop_raw)
+        if lag or fps_drop or (cpu is not None and cpu >= 90):
+            return "WARNING"
+        return "OK"
+
     for key in ("cpu_temperature", "cpu_temp", "cpuTemp", "cpu"):
         raw_value = payload.get(key)
         if raw_value is None:
@@ -1358,7 +1379,7 @@ def handle_register(data):
         device.last_content_name = data.get("content_name") or ""
         device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
         device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
-        device.cpu_temperature = _extract_cpu_temperature(data) or device.cpu_temperature
+        device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
         device.is_online = True
         device.last_seen = datetime.now(timezone.utc)
 
@@ -1393,7 +1414,7 @@ def handle_heartbeat(data):
             device.last_content_name = data.get("content_name") or ""
             device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
             device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
-            device.cpu_temperature = _extract_cpu_temperature(data) or device.cpu_temperature
+            device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
             device.is_online = True
             db.commit()
     finally:
