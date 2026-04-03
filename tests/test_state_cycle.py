@@ -510,5 +510,37 @@ class TestRuntimeTmpCleanup(unittest.TestCase):
             self.assertFalse(stale_dir.exists())
 
 
+class TestCpuTemperatureWindowsReader(unittest.TestCase):
+    def test_windows_reader_uses_cmdlet_availability_guards(self):
+        run_calls: list[list[str]] = []
+
+        def _run_side_effect(args, **_kwargs):
+            run_calls.append(args)
+            return Mock(returncode=0, stdout="3152\n", stderr="")
+
+        with patch.object(main.platform, "system", return_value="Windows"), patch.object(
+            main.shutil, "which", side_effect=lambda shell: shell == "powershell"
+        ), patch.object(main.subprocess, "run", side_effect=_run_side_effect):
+            value = main._read_cpu_temperature_from_windows()
+
+        self.assertEqual(value, "42.1°C")
+        self.assertGreaterEqual(len(run_calls), 1)
+        self.assertIn("Get-Command Get-CimInstance", run_calls[0][4])
+
+    def test_windows_reader_tries_wmi_fallback_when_cim_returns_empty(self):
+        def _run_side_effect(args, **_kwargs):
+            command = args[4]
+            if "Get-Command Get-CimInstance" in command:
+                return Mock(returncode=0, stdout="", stderr="")
+            return Mock(returncode=0, stdout="3152\n", stderr="")
+
+        with patch.object(main.platform, "system", return_value="Windows"), patch.object(
+            main.shutil, "which", side_effect=lambda shell: shell == "powershell"
+        ), patch.object(main.subprocess, "run", side_effect=_run_side_effect):
+            value = main._read_cpu_temperature_from_windows()
+
+        self.assertEqual(value, "42.1°C")
+
+
 if __name__ == "__main__":
     unittest.main()
