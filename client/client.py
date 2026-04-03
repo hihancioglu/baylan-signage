@@ -357,6 +357,9 @@ _last_update_statuses: dict[str, str] = {
     "client": "",
     "client_updater": "",
 }
+_last_cpu_temperature_lock = threading.Lock()
+_last_cpu_temperature_value = "N/A"
+_last_cpu_temperature_checked_at = 0.0
 
 
 def resolve_local_updater_version() -> str:
@@ -508,6 +511,82 @@ def _get_update_status_payload() -> dict[str, str]:
             "client_update_status": _last_update_statuses.get("client", ""),
             "client_updater_status": _last_update_statuses.get("client_updater", ""),
         }
+
+
+def _read_cpu_temperature_from_psutil() -> str | None:
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        temperatures = psutil.sensors_temperatures() or {}
+    except Exception:
+        return None
+
+    for entries in temperatures.values():
+        for entry in entries or []:
+            current = getattr(entry, "current", None)
+            if current is None:
+                continue
+            return f"{float(current):.1f}°C"
+    return None
+
+
+def _read_cpu_temperature_from_windows() -> str | None:
+    if not platform.system().lower().startswith("win"):
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | "
+                "Select-Object -ExpandProperty CurrentTemperature -ErrorAction SilentlyContinue)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    for line in (result.stdout or "").splitlines():
+        text = str(line).strip()
+        if not text:
+            continue
+        try:
+            raw_value = float(text)
+        except ValueError:
+            continue
+        celsius = (raw_value / 10.0) - 273.15
+        if -40 <= celsius <= 140:
+            return f"{celsius:.1f}°C"
+    return None
+
+
+def _read_cpu_temperature() -> str | None:
+    windows_value = _read_cpu_temperature_from_windows()
+    if windows_value:
+        return windows_value
+    return _read_cpu_temperature_from_psutil()
+
+
+def _get_cpu_temperature_payload() -> dict[str, str]:
+    global _last_cpu_temperature_checked_at, _last_cpu_temperature_value
+
+    now = time.monotonic()
+    with _last_cpu_temperature_lock:
+        if now - _last_cpu_temperature_checked_at >= 120:
+            _last_cpu_temperature_checked_at = now
+            _last_cpu_temperature_value = _read_cpu_temperature() or "N/A"
+        return {"cpu_temperature": _last_cpu_temperature_value}
 
 
 def flush_and_shutdown_logging():
@@ -3711,6 +3790,7 @@ def connect():
             "agent_version": CLIENT_VERSION,
             "updater_version": get_runtime_updater_version(),
             "content_name": playback.current_content_name(),
+            **_get_cpu_temperature_payload(),
             **_get_update_status_payload(),
         },
     )
@@ -4247,6 +4327,7 @@ def main():
                                 "agent_version": CLIENT_VERSION,
                                 "updater_version": get_runtime_updater_version(),
                                 "content_name": playback.current_content_name(),
+                                **_get_cpu_temperature_payload(),
                                 **_get_update_status_payload(),
                             },
                         )
