@@ -92,6 +92,8 @@ $clientPyInstallerArgs = @(
     "state_machine"
     "--hidden-import"
     "websocket"
+    "--hidden-import"
+    "psutil"
     "--distpath"
     $OutputDir
     $ClientScript
