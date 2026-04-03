@@ -360,6 +360,12 @@ _last_update_statuses: dict[str, str] = {
 _last_cpu_temperature_lock = threading.Lock()
 _last_cpu_temperature_value = "N/A"
 _last_cpu_temperature_checked_at = 0.0
+_last_health_payload: dict[str, object] = {
+    "cpu": 0,
+    "lag": False,
+    "fps_drop": False,
+    "health": "OK",
+}
 
 
 def resolve_local_updater_version() -> str:
@@ -655,7 +661,7 @@ def _read_cpu_temperature() -> str | None:
     return psutil_value
 
 
-def _get_cpu_temperature_payload() -> dict[str, str]:
+def _get_cpu_temperature_payload() -> dict[str, object]:
     global _last_cpu_temperature_checked_at, _last_cpu_temperature_value
 
     now = time.monotonic()
@@ -674,7 +680,23 @@ def _get_cpu_temperature_payload() -> dict[str, str]:
             log_debug(
                 f"cpu_temp: using cached payload value={_last_cpu_temperature_value} age_sec={age_sec}"
             )
-        return {"cpu_temperature": _last_cpu_temperature_value}
+
+        numeric_cpu = 0
+        temp_text = str(_last_cpu_temperature_value or "").strip().replace("°C", "").replace(",", ".")
+        try:
+            numeric_cpu = int(round(float(temp_text)))
+        except ValueError:
+            numeric_cpu = 0
+        health = "WARNING" if numeric_cpu >= 90 else "OK"
+        _last_health_payload.update(
+            {
+                "cpu": numeric_cpu,
+                "lag": False,
+                "fps_drop": False,
+                "health": health,
+            }
+        )
+        return {"cpu_temperature": _last_cpu_temperature_value, **_last_health_payload}
 
 
 def flush_and_shutdown_logging():
