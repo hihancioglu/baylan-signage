@@ -72,6 +72,7 @@ UPDATE_ROOT.mkdir(parents=True, exist_ok=True)
 SCREENSHOT_ROOT = Path(os.getenv("SCREENSHOT_ROOT", "data/screenshots")).resolve()
 SCREENSHOT_ROOT.mkdir(parents=True, exist_ok=True)
 LATEST_SCREENSHOTS = {}  # hostname -> metadata
+LATEST_HEALTH_METRICS = {}  # hostname -> latest health metrics payload
 
 connected = {}      # hostname -> sid
 sid_to_host = {}    # sid -> hostname
@@ -822,6 +823,37 @@ def _extract_device_health(data: dict | None) -> str | None:
     return None
 
 
+def _to_float_or_none(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int_or_none(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(str(value).replace(",", ".")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_health_metrics(data: dict | None) -> dict | None:
+    payload = data or {}
+    metrics = {
+        "cpu_load_percent": _to_float_or_none(payload.get("cpu_load_percent") or payload.get("cpu")),
+        "memory_pressure_percent": _to_float_or_none(payload.get("memory_pressure_percent") or payload.get("mem")),
+        "responsiveness_delay_seconds": _to_float_or_none(payload.get("responsiveness_delay_seconds") or payload.get("delay")),
+        "sustained_high_cpu_seconds": _to_int_or_none(payload.get("sustained_high_cpu_seconds")),
+        "sustained_high_cpu": payload.get("sustained_high_cpu"),
+    }
+    has_any_value = any(value is not None for value in metrics.values())
+    return metrics if has_any_value else None
+
+
 def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_name=None):
     media_by_relative_path = media_by_relative_path or {}
     media_by_stored_name = media_by_stored_name or {}
@@ -850,6 +882,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         "agent_version": device.agent_version,
         "updater_version": device.updater_version,
         "cpu_temperature": device.cpu_temperature,
+        "health_metrics": LATEST_HEALTH_METRICS.get(device.hostname),
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
@@ -1380,6 +1413,9 @@ def handle_register(data):
         device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
         device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
         device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
+        health_metrics = _extract_health_metrics(data)
+        if health_metrics:
+            LATEST_HEALTH_METRICS[hostname] = health_metrics
         device.is_online = True
         device.last_seen = datetime.now(timezone.utc)
 
@@ -1415,6 +1451,9 @@ def handle_heartbeat(data):
             device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
             device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
             device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
+            health_metrics = _extract_health_metrics(data)
+            if health_metrics:
+                LATEST_HEALTH_METRICS[hostname] = health_metrics
             device.is_online = True
             db.commit()
     finally:
