@@ -865,7 +865,9 @@ function buildHealthTooltip(metrics){
 function renderHealthBadge(value, metrics){
   const health = String(value || '').trim().toUpperCase();
   const tooltip = buildHealthTooltip(metrics);
-  const titleAttr = tooltip ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="${escapeHtml(tooltip)}"` : '';
+  const titleAttr = tooltip
+    ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-container="body" data-bs-title="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}"`
+    : '';
   if(health === 'CRITICAL'){
     return `<span class="badge text-bg-danger"${titleAttr}>CRITICAL</span>`;
   }
@@ -879,10 +881,18 @@ function renderHealthBadge(value, metrics){
 }
 
 function initHealthTooltips(){
+  if(typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
   document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
-    bootstrap.Tooltip.getOrCreateInstance(el);
+    bootstrap.Tooltip.getOrCreateInstance(el, { container: 'body' });
   });
 }
+
+document.addEventListener('mouseover', event => {
+  const tooltipTarget = event.target?.closest?.('[data-bs-toggle="tooltip"]');
+  if(!tooltipTarget) return;
+  if(typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+  bootstrap.Tooltip.getOrCreateInstance(tooltipTarget, { container: 'body' });
+});
 
 async function showDeviceScreenshot(encodedHostname, triggerButton){
   const hostname = decodeURIComponent(encodedHostname || '');
