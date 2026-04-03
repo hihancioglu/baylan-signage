@@ -834,6 +834,7 @@ function renderDevicesTable(){
     tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td>${renderHealthBadge(d.cpu_temperature, d.health_metrics)}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
     body.appendChild(tr);
   });
+  initHealthTooltips();
 }
 
 function getHealthRank(value){
@@ -864,7 +865,7 @@ function buildHealthTooltip(metrics){
 function renderHealthBadge(value, metrics){
   const health = String(value || '').trim().toUpperCase();
   const tooltip = buildHealthTooltip(metrics);
-  const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : '';
+  const titleAttr = tooltip ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="${escapeHtml(tooltip)}"` : '';
   if(health === 'CRITICAL'){
     return `<span class="badge text-bg-danger"${titleAttr}>CRITICAL</span>`;
   }
@@ -875,6 +876,12 @@ function renderHealthBadge(value, metrics){
     return `<span class="badge text-bg-success"${titleAttr}>OK</span>`;
   }
   return '<span class="text-secondary">-</span>';
+}
+
+function initHealthTooltips(){
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    bootstrap.Tooltip.getOrCreateInstance(el);
+  });
 }
 
 async function showDeviceScreenshot(encodedHostname, triggerButton){
