@@ -718,6 +718,11 @@ def _get_cpu_temperature_payload() -> dict[str, object]:
             health = "WARNING"
 
         _last_health_payload["health"] = health
+        _last_health_payload["cpu_load_percent"] = round(cpu, 1)
+        _last_health_payload["memory_pressure_percent"] = round(mem, 1)
+        _last_health_payload["responsiveness_delay_seconds"] = round(delay, 2)
+        _last_health_payload["sustained_high_cpu_seconds"] = int(_health_high_cpu_seconds)
+        _last_health_payload["sustained_high_cpu"] = bool(_health_high_cpu_seconds > HEALTH_CPU_SUSTAINED_SECONDS)
         return dict(_last_health_payload)
 
 

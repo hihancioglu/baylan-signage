@@ -831,25 +831,48 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td>${renderHealthBadge(d.cpu_temperature)}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
+    tr.innerHTML = `<td><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td>${escapeHtml(d.hostname||'')}</td><td>${escapeHtml(d.agent_version||'-')}</td><td>${renderHealthBadge(d.cpu_temperature, d.health_metrics)}</td><td><span class="${d.is_online?'status-online':'status-offline'}">${d.is_online?'Online':'Offline'}</span></td><td>${escapeHtml(formatHeartbeatUtc3(d.last_seen))}</td><td>${escapeHtml(stateText)}</td><td>${escapeHtml(contentText)}</td><td>${escapeHtml(d.group||'-')}</td><td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
     body.appendChild(tr);
   });
 }
 
 function getHealthRank(value){
   const health = String(value || '').trim().toUpperCase();
+  if(health === 'CRITICAL') return 3;
   if(health === 'WARNING') return 2;
   if(health === 'OK') return 1;
   return 0;
 }
 
-function renderHealthBadge(value){
+function formatHealthMetricValue(value, suffix = ''){
+  if(value === null || value === undefined || value === '') return '-';
+  return `${value}${suffix}`;
+}
+
+function buildHealthTooltip(metrics){
+  if(!metrics || typeof metrics !== 'object') return '';
+  const lines = [
+    `CPU load: ${formatHealthMetricValue(metrics.cpu_load_percent, '%')}`,
+    `Memory pressure: ${formatHealthMetricValue(metrics.memory_pressure_percent, '%')}`,
+    `Responsiveness delay: ${formatHealthMetricValue(metrics.responsiveness_delay_seconds, 's')}`,
+    `Sustained high CPU: ${metrics.sustained_high_cpu === null || metrics.sustained_high_cpu === undefined ? '-' : (metrics.sustained_high_cpu ? 'YES' : 'NO')}`,
+    `Sustained high CPU seconds: ${formatHealthMetricValue(metrics.sustained_high_cpu_seconds, 's')}`,
+  ];
+  return lines.join(' | ');
+}
+
+function renderHealthBadge(value, metrics){
   const health = String(value || '').trim().toUpperCase();
+  const tooltip = buildHealthTooltip(metrics);
+  const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : '';
+  if(health === 'CRITICAL'){
+    return `<span class="badge text-bg-danger"${titleAttr}>CRITICAL</span>`;
+  }
   if(health === 'WARNING'){
-    return '<span class="badge text-bg-warning">WARNING</span>';
+    return `<span class="badge text-bg-warning"${titleAttr}>WARNING</span>`;
   }
   if(health === 'OK'){
-    return '<span class="badge text-bg-success">OK</span>';
+    return `<span class="badge text-bg-success"${titleAttr}>OK</span>`;
   }
   return '<span class="text-secondary">-</span>';
 }
