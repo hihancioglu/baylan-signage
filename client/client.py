@@ -361,6 +361,8 @@ _health_lock = threading.Lock()
 _health_high_cpu_seconds = 0
 _health_started_at = time.monotonic()
 _last_health_payload: dict[str, str] = {"health": "OK"}
+_health_bootstrap_last_logged_remaining_sec: int | None = None
+_health_bootstrap_completed_logged = False
 HEALTH_IGNORE_UPTIME_SEC = max(0, int(os.getenv("HEALTH_IGNORE_UPTIME_SEC", "120")))
 HEALTH_CPU_WARNING_THRESHOLD = float(os.getenv("HEALTH_CPU_WARNING_THRESHOLD", "70"))
 HEALTH_CPU_HIGH_THRESHOLD = float(os.getenv("HEALTH_CPU_HIGH_THRESHOLD", "85"))
@@ -668,10 +670,30 @@ def _read_cpu_temperature() -> str | None:
 
 def _get_cpu_temperature_payload() -> dict[str, object]:
     global _health_high_cpu_seconds
+    global _health_bootstrap_last_logged_remaining_sec, _health_bootstrap_completed_logged
 
     uptime_sec = time.monotonic() - _health_started_at
     if uptime_sec < HEALTH_IGNORE_UPTIME_SEC:
+        remaining_sec = max(0, int(HEALTH_IGNORE_UPTIME_SEC - uptime_sec))
+        should_log_bootstrap = (
+            _health_bootstrap_last_logged_remaining_sec is None
+            or remaining_sec // 10 != _health_bootstrap_last_logged_remaining_sec // 10
+        )
+        if should_log_bootstrap:
+            _health_bootstrap_last_logged_remaining_sec = remaining_sec
+            log_debug(
+                "health bootstrap window active | "
+                f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
+                f"remaining={remaining_sec}s returning_last_payload={dict(_last_health_payload)}"
+            )
         return dict(_last_health_payload)
+    if not _health_bootstrap_completed_logged:
+        _health_bootstrap_completed_logged = True
+        log_debug(
+            "health bootstrap window completed | "
+            f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
+            "health metrics will now be measured on each heartbeat"
+        )
 
     try:
         psutil_module = importlib.import_module("psutil")
@@ -723,6 +745,13 @@ def _get_cpu_temperature_payload() -> dict[str, object]:
         _last_health_payload["responsiveness_delay_seconds"] = round(delay, 2)
         _last_health_payload["sustained_high_cpu_seconds"] = int(_health_high_cpu_seconds)
         _last_health_payload["sustained_high_cpu"] = bool(_health_high_cpu_seconds > HEALTH_CPU_SUSTAINED_SECONDS)
+        log_debug(
+            "health metrics measured | "
+            f"health={_last_health_payload['health']} cpu={_last_health_payload['cpu_load_percent']} "
+            f"mem={_last_health_payload['memory_pressure_percent']} "
+            f"delay={_last_health_payload['responsiveness_delay_seconds']} "
+            f"high_cpu_sec={_last_health_payload['sustained_high_cpu_seconds']}"
+        )
         return dict(_last_health_payload)
 
 
