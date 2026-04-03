@@ -517,24 +517,35 @@ def _read_cpu_temperature_from_psutil() -> str | None:
     try:
         import psutil  # type: ignore
     except Exception:
+        log_debug("cpu_temp(psutil): psutil import failed, skipping psutil reader")
         return None
 
     try:
         temperatures = psutil.sensors_temperatures() or {}
-    except Exception:
+    except Exception as exc:
+        log_debug(f"cpu_temp(psutil): sensors_temperatures failed: {exc}")
         return None
 
-    for entries in temperatures.values():
+    if not temperatures:
+        log_debug("cpu_temp(psutil): no temperature sensors returned")
+        return None
+
+    for sensor_name, entries in temperatures.items():
         for entry in entries or []:
             current = getattr(entry, "current", None)
             if current is None:
                 continue
-            return f"{float(current):.1f}°C"
+            value = f"{float(current):.1f}°C"
+            label = getattr(entry, "label", "") or getattr(entry, "name", "") or "unnamed"
+            log_debug(f"cpu_temp(psutil): selected sensor='{sensor_name}' label='{label}' value={value}")
+            return value
+    log_debug("cpu_temp(psutil): sensors present but no readable current temperature")
     return None
 
 
 def _read_cpu_temperature_from_windows() -> str | None:
     if not platform.system().lower().startswith("win"):
+        log_debug("cpu_temp(win): non-windows platform, skipping windows reader")
         return None
 
     def _run_powershell(command: str) -> str:
@@ -554,6 +565,8 @@ def _read_cpu_temperature_from_windows() -> str | None:
             creationflags=creationflags,
         )
         if result.returncode != 0:
+            stderr = (result.stderr or "").strip().replace("\n", " ")
+            log_debug(f"cpu_temp(win): powershell returned code={result.returncode} stderr='{stderr}'")
             return ""
         return result.stdout or ""
 
@@ -567,7 +580,8 @@ def _read_cpu_temperature_from_windows() -> str | None:
             "Select-Object -ExpandProperty CurrentTemperature; "
             "if ($acpi) { $acpi | ForEach-Object { [string]$_ }; return }"
         )
-    except Exception:
+    except Exception as exc:
+        log_debug(f"cpu_temp(win): powershell execution failed: {exc}")
         return None
 
     for line in output.splitlines():
@@ -583,15 +597,27 @@ def _read_cpu_temperature_from_windows() -> str | None:
         if raw_value > 200:
             celsius = (raw_value / 10.0) - 273.15
         if -40 <= celsius <= 140:
-            return f"{celsius:.1f}°C"
+            value = f"{celsius:.1f}°C"
+            log_debug(f"cpu_temp(win): parsed raw={raw_value} value={value}")
+            return value
+    preview = output.strip().replace("\n", " ")
+    if preview:
+        preview = preview[:200]
+    log_debug(f"cpu_temp(win): no valid temperature parsed from output='{preview}'")
     return None
 
 
 def _read_cpu_temperature() -> str | None:
     windows_value = _read_cpu_temperature_from_windows()
     if windows_value:
+        log_debug(f"cpu_temp: using windows reader value={windows_value}")
         return windows_value
-    return _read_cpu_temperature_from_psutil()
+    psutil_value = _read_cpu_temperature_from_psutil()
+    if psutil_value:
+        log_debug(f"cpu_temp: using psutil reader value={psutil_value}")
+    else:
+        log_debug("cpu_temp: all readers returned empty value")
+    return psutil_value
 
 
 def _get_cpu_temperature_payload() -> dict[str, str]:
@@ -601,7 +627,18 @@ def _get_cpu_temperature_payload() -> dict[str, str]:
     with _last_cpu_temperature_lock:
         if now - _last_cpu_temperature_checked_at >= 120:
             _last_cpu_temperature_checked_at = now
-            _last_cpu_temperature_value = _read_cpu_temperature() or "N/A"
+            measured_value = _read_cpu_temperature()
+            _last_cpu_temperature_value = measured_value or "N/A"
+            log_debug(
+                "cpu_temp: payload refreshed "
+                f"value={_last_cpu_temperature_value} measured={bool(measured_value)} "
+                f"next_refresh_in_sec=120"
+            )
+        else:
+            age_sec = int(now - _last_cpu_temperature_checked_at)
+            log_debug(
+                f"cpu_temp: using cached payload value={_last_cpu_temperature_value} age_sec={age_sec}"
+            )
         return {"cpu_temperature": _last_cpu_temperature_value}
 
 
