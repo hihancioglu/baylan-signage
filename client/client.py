@@ -2398,6 +2398,7 @@ class PlaybackController:
         self._fallback_warning_emitted = False
         self._configured_fallback: list[dict] = []
         self._fallback_only_mode = False
+        self._transient_fallback_active = False
         self._version = None
         self._loop_mode = "sequential"
         self._lock = threading.Lock()
@@ -3005,13 +3006,19 @@ class PlaybackController:
             progress_callback=self._on_sync_progress,
         )
         if local_entries:
+            should_interrupt_transient_fallback = False
             with self._lock:
+                should_interrupt_transient_fallback = self._transient_fallback_active
                 self._playlist_entries = [self._normalize_item(entry) for entry in local_entries]
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
+                self._transient_fallback_active = False
             if was_fallback_only_mode:
                 self.player.stop()
+            elif should_interrupt_transient_fallback:
+                self.player.stop()
+                print("⏭️ Geçici fallback kesildi, hazır playlist başlatılıyor")
             print(f"📼 Playlist cache refreshed | version={playlist_version} items={len(local_entries)}")
             return
 
@@ -3073,7 +3080,12 @@ class PlaybackController:
         try:
             while self._running:
                 with self._lock:
-                    playlist_entries = [self._normalize_item(entry) for entry in self._effective_playlist(list(self._playlist_entries))]
+                    playlist_cache_entries = list(self._playlist_entries)
+                    effective_entries = self._effective_playlist(playlist_cache_entries)
+                    self._transient_fallback_active = (
+                        bool(effective_entries) and not playlist_cache_entries and not self._fallback_only_mode
+                    )
+                    playlist_entries = [self._normalize_item(entry) for entry in effective_entries]
                     sync_in_progress = self._sync_in_progress
                     loop_mode = self._loop_mode
 

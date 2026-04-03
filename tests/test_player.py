@@ -2760,6 +2760,39 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         player.stop.assert_called_once()
 
+    def test_update_from_config_interrupts_transient_fallback_when_playlist_ready(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        controller.player = player
+
+        controller._fallback_only_mode = False
+        controller._transient_fallback_active = True
+        controller._version = "ver-old"
+        controller._playlist_entries = []
+
+        with patch.object(
+            controller.media_manager,
+            "sync_playlist_entries",
+            return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}],
+        ):
+            controller.update_from_config(
+                {
+                    "enabled": True,
+                    "videos": [{"path": "https://example.com/a.mp4", "media_type": "video", "duration_sec": None}],
+                    "playlist_version": "ver-new",
+                    "media_signatures": {},
+                    "loop_mode": "sequential",
+                }
+            )
+
+        player.stop.assert_called_once()
+        self.assertFalse(controller._transient_fallback_active)
+        self.assertEqual(controller._version, "ver-new")
+        self.assertEqual(len(controller._playlist_entries), 1)
+
     def test_update_from_config_prefers_top_level_payload_when_monitor1_playlist_is_empty(self):
         from client.client import PlaybackController
 
