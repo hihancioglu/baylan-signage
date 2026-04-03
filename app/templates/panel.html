@@ -910,7 +910,7 @@ function renderDeviceStatusBadge(device){
       ? 'Son heartbeat bilgisi yok.'
       : `Son heartbeat (UTC+3): ${lastHeartbeat}`;
     const titleAttr = ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-container="body" data-bs-title="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}"`;
-    return `<span class="badge text-bg-success"${titleAttr}>Offline</span>`;
+    return `<span class="badge text-bg-danger"${titleAttr}>Offline</span>`;
   }
   return renderHealthBadge(device.cpu_temperature, device.health_metrics);
 }
