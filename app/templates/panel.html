@@ -786,6 +786,7 @@ function sortDevices(field){
 function renderDevicesTable(){
   const body = document.getElementById('devices-body');
   if(!body) return;
+  disposeHealthTooltips();
 
   const onlineCount = (cachedDevices || []).filter(d => d.is_online).length;
   const offlineCount = (cachedDevices || []).length - onlineCount;
@@ -902,12 +903,25 @@ function initHealthTooltips(){
   });
 }
 
+function disposeHealthTooltips(){
+  if(typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    const instance = bootstrap.Tooltip.getInstance(el);
+    if(instance) instance.dispose();
+  });
+  document.querySelectorAll('.tooltip').forEach(el => el.remove());
+}
+
 document.addEventListener('mouseover', event => {
   const tooltipTarget = event.target?.closest?.('[data-bs-toggle="tooltip"]');
   if(!tooltipTarget) return;
   if(typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
   bootstrap.Tooltip.getOrCreateInstance(tooltipTarget, { container: 'body' });
 });
+
+document.addEventListener('scroll', () => {
+  disposeHealthTooltips();
+}, true);
 
 async function showDeviceScreenshot(encodedHostname, triggerButton){
   const hostname = decodeURIComponent(encodedHostname || '');
