@@ -37,6 +37,7 @@ def ensure_sqlite_schema():
             "content_enabled": "BOOLEAN",
             "last_client_update_status": "VARCHAR(256)",
             "last_client_updater_status": "VARCHAR(256)",
+            "cpu_temperature": "VARCHAR(64)",
         },
         "playlists": {
             "type": "VARCHAR(32) DEFAULT 'normal' NOT NULL",

@@ -789,6 +789,18 @@ def _apply_widget_runtime_vars(value, runtime_vars: dict[str, str]):
     return value
 
 
+def _extract_cpu_temperature(data: dict | None) -> str | None:
+    payload = data or {}
+    for key in ("cpu_temperature", "cpu_temp", "cpuTemp", "cpu"):
+        raw_value = payload.get(key)
+        if raw_value is None:
+            continue
+        value = str(raw_value).strip()
+        if value:
+            return value
+    return None
+
+
 def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_name=None):
     media_by_relative_path = media_by_relative_path or {}
     media_by_stored_name = media_by_stored_name or {}
@@ -816,6 +828,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         "last_content_display_name": _resolve_media_display_name(device.last_content_name, media_by_relative_path, media_by_stored_name),
         "agent_version": device.agent_version,
         "updater_version": device.updater_version,
+        "cpu_temperature": device.cpu_temperature,
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
@@ -1345,6 +1358,7 @@ def handle_register(data):
         device.last_content_name = data.get("content_name") or ""
         device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
         device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
+        device.cpu_temperature = _extract_cpu_temperature(data) or device.cpu_temperature
         device.is_online = True
         device.last_seen = datetime.now(timezone.utc)
 
@@ -1379,6 +1393,7 @@ def handle_heartbeat(data):
             device.last_content_name = data.get("content_name") or ""
             device.last_client_update_status = data.get("client_update_status") or device.last_client_update_status
             device.last_client_updater_status = data.get("client_updater_status") or device.last_client_updater_status
+            device.cpu_temperature = _extract_cpu_temperature(data) or device.cpu_temperature
             device.is_online = True
             db.commit()
     finally:

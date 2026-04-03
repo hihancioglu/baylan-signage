@@ -568,7 +568,14 @@ class TestConfigPush(unittest.TestCase):
     def test_devices_api_includes_agent_version(self):
         db = self.main.db_session()
         try:
-            db.add(self.main.Device(hostname="pc-ver", agent_version="build-20260101120000", is_online=True))
+            db.add(
+                self.main.Device(
+                    hostname="pc-ver",
+                    agent_version="build-20260101120000",
+                    cpu_temperature="63.2°C",
+                    is_online=True,
+                )
+            )
             db.commit()
         finally:
             db.close()
@@ -581,6 +588,7 @@ class TestConfigPush(unittest.TestCase):
         target = next((d for d in devices if d.get("hostname") == "pc-ver"), None)
         self.assertIsNotNone(target)
         self.assertEqual(target.get("agent_version"), "build-20260101120000")
+        self.assertEqual(target.get("cpu_temperature"), "63.2°C")
 
     def test_update_device_alias_can_persist_inventory_id(self):
         db = self.main.db_session()
@@ -626,6 +634,7 @@ class TestConfigPush(unittest.TestCase):
                 "ip": "127.0.0.1",
                 "agent_version": "build-client-1",
                 "updater_version": "build-updater-1",
+                "cpu_temp": "57.4°C",
                 "client_update_status": "ok:build-client-1",
                 "client_updater_status": "ok:build-updater-1",
             },
@@ -638,6 +647,7 @@ class TestConfigPush(unittest.TestCase):
                 "state": "IDLE",
                 "agent_version": "build-client-2",
                 "updater_version": "build-updater-2",
+                "cpu_temperature": "61.8°C",
                 "client_update_status": "failed:build-client-2:update_size_mismatch",
                 "client_updater_status": "failed:build-updater-2:update_size_mismatch",
             },
@@ -652,6 +662,7 @@ class TestConfigPush(unittest.TestCase):
             self.assertEqual(device.updater_version, "build-updater-2")
             self.assertEqual(device.last_client_update_status, "failed:build-client-2:update_size_mismatch")
             self.assertEqual(device.last_client_updater_status, "failed:build-updater-2:update_size_mismatch")
+            self.assertEqual(device.cpu_temperature, "61.8°C")
         finally:
             db.close()
 
