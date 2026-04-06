@@ -892,6 +892,30 @@ def _has_multiple_connected_monitors() -> bool:
         return False
 
 
+def _resolve_idle_overlay_monitor_bounds() -> tuple[int, int, int, int] | None:
+    if os.name != "nt":
+        return None
+    try:
+        active_bounds = BorderlessFullscreenPlayer._windows_active_monitor_bounds()
+    except Exception:
+        active_bounds = None
+    if (
+        isinstance(active_bounds, tuple)
+        and len(active_bounds) == 4
+        and all(isinstance(value, int) for value in active_bounds)
+        and active_bounds[2] > 0
+        and active_bounds[3] > 0
+    ):
+        return active_bounds
+    try:
+        monitor_bounds = BorderlessFullscreenPlayer._windows_connected_monitor_bounds()
+    except Exception:
+        monitor_bounds = []
+    if monitor_bounds:
+        return monitor_bounds[0]
+    return None
+
+
 def release_instance_lock() -> None:
     global instance_lock_fd, instance_mutex_handle
     if instance_lock_fd is not None:
@@ -1355,7 +1379,16 @@ class GuiRuntime:
                 return
             idle_window = tk.Toplevel(root)
             idle_window.configure(bg="black")
-            idle_window.attributes("-fullscreen", True)
+            monitor_bounds = _resolve_idle_overlay_monitor_bounds()
+            if monitor_bounds is None:
+                idle_window.attributes("-fullscreen", True)
+            else:
+                x, y, width, height = monitor_bounds
+                idle_window.geometry(f"{width}x{height}+{x}+{y}")
+                log_debug(
+                    "idle_overlay geometry set | "
+                    f"monitor_bounds=({x}, {y}, {width}, {height})"
+                )
             idle_window.attributes("-topmost", True)
             idle_window.overrideredirect(True)
             idle_window.title("Baylan Idle Background")
