@@ -592,5 +592,41 @@ class TestHealthPayloadScoring(unittest.TestCase):
         self.assertEqual(payload["health"], "WARNING")
 
 
+class TestIdleOverlayMonitorBounds(unittest.TestCase):
+    def test_resolve_idle_overlay_prefers_active_monitor_bounds(self):
+        with patch.object(main.os, "name", "nt"), patch.object(
+            main.BorderlessFullscreenPlayer,
+            "_windows_active_monitor_bounds",
+            return_value=(-1920, -65, 1536, 960),
+        ), patch.object(
+            main.BorderlessFullscreenPlayer,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ):
+            bounds = main._resolve_idle_overlay_monitor_bounds()
+
+        self.assertEqual(bounds, (-1920, -65, 1536, 960))
+
+    def test_resolve_idle_overlay_falls_back_to_first_connected_monitor(self):
+        with patch.object(main.os, "name", "nt"), patch.object(
+            main.BorderlessFullscreenPlayer,
+            "_windows_active_monitor_bounds",
+            return_value=None,
+        ), patch.object(
+            main.BorderlessFullscreenPlayer,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ):
+            bounds = main._resolve_idle_overlay_monitor_bounds()
+
+        self.assertEqual(bounds, (0, 0, 1920, 1080))
+
+    def test_resolve_idle_overlay_returns_none_outside_windows(self):
+        with patch.object(main.os, "name", "posix"):
+            bounds = main._resolve_idle_overlay_monitor_bounds()
+
+        self.assertIsNone(bounds)
+
+
 if __name__ == "__main__":
     unittest.main()
