@@ -1092,6 +1092,27 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIsNone(sent_message["payload"]["signature"])
 
 
+    def test_update_widget_layout_resends_same_signature_when_runtime_backgrounded(self):
+        player = self._build_player()
+        player._active_widget_signature = "sig-1"
+        player._last_widget_signature = "sig-1"
+        player._widget_runtime_is_backgrounded = True
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            ok = player.update_widget_layout(
+                "example.com/dashboard",
+                widget_config=None,
+                widget_signature="sig-1",
+            )
+
+        self.assertTrue(ok)
+        sender.assert_called_once()
+        sent_message = sender.call_args.args[0]
+        self.assertEqual(sent_message["type"], "layout_update")
+        self.assertEqual(sent_message["payload"]["signature"], "sig-1")
+        self.assertFalse(player._widget_runtime_is_backgrounded)
+
+
     def test_play_media_in_widget_runtime_clears_stale_stop_flag(self):
         player = self._build_player()
         player._stop_requested = True
