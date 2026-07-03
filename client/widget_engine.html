@@ -297,9 +297,19 @@
       });
 
       window.setTimeout(() => {
-        if (!settled && !loadedAtLeastOnce) {
+        if (settled || loadedAtLeastOnce) return;
+
+        const state = inspectIframeState(frame);
+        if (state && state.status === "blocked") {
           block();
+          return;
         }
+
+        // Bazı dashboard sayfaları (özellikle sürekli açık kalan bağlantılar ya da
+        // tarayıcıya özel gömülü görünümler) load olayını geç tetikleyebilir veya hiç
+        // tetiklemeyebilir. Bu durumda 30 saniye sonra kullanıcıya hatalı bir
+        // X-Frame/CSP uyarısı göstermek yerine iframe'i ekranda bırakıyoruz.
+        success();
       }, maxWaitMs);
     }
 
