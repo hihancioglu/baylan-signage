@@ -226,7 +226,7 @@
         }
 
         if (locationHref === "about:blank") {
-          return { status: "blocked" };
+          return { status: "loading" };
         }
 
         return { status: "ready" };
@@ -283,7 +283,14 @@
         window.setTimeout(verifyFrame, pollMs);
       };
 
-      frame.addEventListener("error", block);
+      frame.addEventListener("error", () => {
+        if (settled) return;
+        if (!loadedAtLeastOnce) {
+          block();
+          return;
+        }
+        verifyFrame();
+      });
       frame.addEventListener("load", () => {
         loadedAtLeastOnce = true;
         verifyFrame();
