@@ -71,6 +71,29 @@
       }
     }
 
+    function keepParentDocumentVisible() {
+      // WebView/Chromium bazen pencerede birden fazla iframe varken odak almayan
+      // dashboard'u arka plandaymış gibi değerlendiriyor. Parent dokümanı sürekli
+      // görünür tutup visibility olayını yayınlamak, aynı ekrandaki tüm iframe'lerin
+      // veri akışını mouse tıklaması beklemeden başlatmasına yardımcı olur.
+      try {
+        Object.defineProperty(document, "hidden", { value: false, configurable: true });
+        Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+      } catch (_err) {
+        // Bazı backend'ler bu property'leri yeniden tanımlatmayabilir.
+      }
+      try {
+        window.dispatchEvent(new Event("focus"));
+        window.dispatchEvent(new Event("pageshow"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      } catch (_err) {
+        // noop
+      }
+    }
+
+    keepParentDocumentVisible();
+    window.setInterval(keepParentDocumentVisible, 5000);
+
     function parseConfig() {
       const params = new URLSearchParams(window.location.search);
       const configB64 = params.get("config_b64");
@@ -313,6 +336,7 @@
       let tick = 0;
       let stopped = false;
       let rafHandle = 0;
+      const wrapper = frame.parentElement;
 
       const forceCompositeRefresh = () => {
         if (stopped || !frame.isConnected) return;
@@ -320,6 +344,9 @@
         const nudge = tick % 2 === 0 ? "translateZ(0)" : "translate3d(0,0,0)";
         frame.style.transform = nudge;
         frame.style.opacity = tick % 2 === 0 ? "1" : "0.99999";
+        if (wrapper) {
+          wrapper.style.transform = tick % 2 === 0 ? "translateZ(0)" : "translate3d(0,0,0)";
+        }
         frame.getBoundingClientRect();
         rafHandle = window.requestAnimationFrame(() => {
           if (stopped || !frame.isConnected) return;
@@ -327,25 +354,45 @@
         });
       };
 
+      const activateIframeSurface = () => {
+        if (stopped || !frame.isConnected) return;
+        keepParentDocumentVisible();
+        try {
+          frame.focus({ preventScroll: true });
+        } catch (_err) {
+          try { frame.focus(); } catch (_innerErr) { /* noop */ }
+        }
+        ["pointerover", "pointerenter", "mouseover", "mouseenter"].forEach((eventName) => {
+          try {
+            frame.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+          } catch (_err) {
+            // noop
+          }
+        });
+        forceCompositeRefresh();
+      };
+
       // Edge WebView2/Chromium bazen aynı ekrandaki cross-origin iframe'lerden
       // yalnızca odak alanı düzenli boyuyor; mouse ile tıklayınca diğer frame'in
-      // canlanması bundan kaynaklanıyor. İçeriğe erişemesek bile compositor katmanını
-      // periyodik olarak dürterek iki iframe'in de yeniden boyanmasını sağlıyoruz.
-      const timer = window.setInterval(forceCompositeRefresh, 1000);
-      [50, 250, 750, 1500, 3000].forEach((delayMs) => window.setTimeout(forceCompositeRefresh, delayMs));
+      // canlanması bundan kaynaklanıyor. İçeriğe erişemesek bile iframe yüzeyini
+      // odak/visibility/compositor açısından düzenli olarak aktif tutuyoruz.
+      const repaintTimer = window.setInterval(forceCompositeRefresh, 1000);
+      const activationTimer = window.setInterval(activateIframeSurface, 2000);
+      [50, 250, 750, 1500, 3000].forEach((delayMs) => window.setTimeout(activateIframeSurface, delayMs));
       ["load", "focus", "mouseenter", "pointerenter"].forEach((eventName) => {
-        frame.addEventListener(eventName, forceCompositeRefresh);
+        frame.addEventListener(eventName, activateIframeSurface);
       });
       debugLog("iframe repaint watchdog start", { widgetIndex, url: frame.src });
 
       return () => {
         stopped = true;
-        window.clearInterval(timer);
+        window.clearInterval(repaintTimer);
+        window.clearInterval(activationTimer);
         if (rafHandle) {
           window.cancelAnimationFrame(rafHandle);
         }
         ["load", "focus", "mouseenter", "pointerenter"].forEach((eventName) => {
-          frame.removeEventListener(eventName, forceCompositeRefresh);
+          frame.removeEventListener(eventName, activateIframeSurface);
         });
       };
     }
@@ -599,6 +646,7 @@
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
           frame.allowFullscreen = true;
+          frame.tabIndex = 0;
           activeIframeCleanup = startIframeRepaintWatchdog(frame, widgetIndex);
           wrapper.appendChild(frame);
         } else if (itemType === "card" || itemType === "html" || itemType === "embed") {
@@ -697,6 +745,7 @@
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
           frame.allowFullscreen = true;
+          frame.tabIndex = 0;
 
           const keepIframeActive = () => {
             try {
