@@ -8,8 +8,8 @@
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
-    .iframe-widget { position: relative; }
-    iframe.widget { width: 100%; height: 100%; }
+    .iframe-widget { position: relative; isolation: isolate; transform: translateZ(0); }
+    iframe.widget { width: 100%; height: 100%; display: block; transform: translateZ(0); will-change: transform, opacity; backface-visibility: hidden; }
     .iframe-fallback {
       display: none;
       position: absolute;
@@ -309,6 +309,47 @@
       }, maxWaitMs);
     }
 
+    function startIframeRepaintWatchdog(frame, widgetIndex = -1) {
+      let tick = 0;
+      let stopped = false;
+      let rafHandle = 0;
+
+      const forceCompositeRefresh = () => {
+        if (stopped || !frame.isConnected) return;
+        tick += 1;
+        const nudge = tick % 2 === 0 ? "translateZ(0)" : "translate3d(0,0,0)";
+        frame.style.transform = nudge;
+        frame.style.opacity = tick % 2 === 0 ? "1" : "0.99999";
+        frame.getBoundingClientRect();
+        rafHandle = window.requestAnimationFrame(() => {
+          if (stopped || !frame.isConnected) return;
+          frame.style.opacity = "1";
+        });
+      };
+
+      // Edge WebView2/Chromium bazen aynı ekrandaki cross-origin iframe'lerden
+      // yalnızca odak alanı düzenli boyuyor; mouse ile tıklayınca diğer frame'in
+      // canlanması bundan kaynaklanıyor. İçeriğe erişemesek bile compositor katmanını
+      // periyodik olarak dürterek iki iframe'in de yeniden boyanmasını sağlıyoruz.
+      const timer = window.setInterval(forceCompositeRefresh, 1000);
+      [50, 250, 750, 1500, 3000].forEach((delayMs) => window.setTimeout(forceCompositeRefresh, delayMs));
+      ["load", "focus", "mouseenter", "pointerenter"].forEach((eventName) => {
+        frame.addEventListener(eventName, forceCompositeRefresh);
+      });
+      debugLog("iframe repaint watchdog start", { widgetIndex, url: frame.src });
+
+      return () => {
+        stopped = true;
+        window.clearInterval(timer);
+        if (rafHandle) {
+          window.cancelAnimationFrame(rafHandle);
+        }
+        ["load", "focus", "mouseenter", "pointerenter"].forEach((eventName) => {
+          frame.removeEventListener(eventName, forceCompositeRefresh);
+        });
+      };
+    }
+
     const widgetPlaylistCache = new Map();
     let activeWidgetSignature = null;
     let lastRenderedSignature = null;
@@ -495,12 +536,23 @@
       const loopMode = String(w.loop_mode || "sequential").toLowerCase();
       let activeIndex = 0;
       let timeoutHandle = null;
+      let activeIframeCleanup = null;
 
       const clearScheduledAdvance = () => {
         if (timeoutHandle) {
           window.clearTimeout(timeoutHandle);
           timeoutHandle = null;
         }
+      };
+
+      const cleanupActiveIframe = () => {
+        if (typeof activeIframeCleanup !== "function") return;
+        try {
+          activeIframeCleanup();
+        } catch (_err) {
+          // noop
+        }
+        activeIframeCleanup = null;
       };
 
       const nextIndex = () => {
@@ -511,6 +563,7 @@
 
       const renderItem = (index) => {
         clearScheduledAdvance();
+        cleanupActiveIframe();
         if (!items.length) return;
         wrapper.classList.remove("empty-cell");
         activeIndex = Math.max(0, Math.min(items.length - 1, Number(index) || 0));
@@ -544,8 +597,9 @@
           frame.src = normalizeIframeUrl(item.url);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay";
+          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
           frame.allowFullscreen = true;
+          activeIframeCleanup = startIframeRepaintWatchdog(frame, widgetIndex);
           wrapper.appendChild(frame);
         } else if (itemType === "card" || itemType === "html" || itemType === "embed") {
           const embed = document.createElement("div");
@@ -563,7 +617,10 @@
         }
       };
 
-      wrapper.__cleanup = () => clearScheduledAdvance();
+      wrapper.__cleanup = () => {
+        clearScheduledAdvance();
+        cleanupActiveIframe();
+      };
       renderItem(0);
       return wrapper;
     }
@@ -638,7 +695,7 @@
           frame.src = normalizeIframeUrl(w.url);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay";
+          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
           frame.allowFullscreen = true;
 
           const keepIframeActive = () => {
@@ -693,7 +750,11 @@
           });
 
           const keepAliveTimer = window.setInterval(keepIframeActive, 5000);
-          wrapper.__cleanup = () => window.clearInterval(keepAliveTimer);
+          const stopIframeRepaintWatchdog = startIframeRepaintWatchdog(frame, index);
+          wrapper.__cleanup = () => {
+            window.clearInterval(keepAliveTimer);
+            stopIframeRepaintWatchdog();
+          };
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
