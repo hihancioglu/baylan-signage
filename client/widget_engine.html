@@ -240,8 +240,6 @@
       let settled = false;
       let loadedAtLeastOnce = false;
       const maxWaitMs = 30000;
-      const pollMs = 1500;
-      const deadline = Date.now() + maxWaitMs;
       const maxTransientRetries = 4;
       const retryDelayMs = 1000;
       let transientRetryCount = 0;
@@ -260,40 +258,38 @@
         settled = true;
       };
 
-      const verifyFrame = () => {
-        if (settled || !loadedAtLeastOnce) return;
-        const state = inspectIframeState(frame);
-        if (!state || state.status === "ready") {
-          success();
-          return;
-        }
-        if (state.status === "transient_connection" && transientRetryCount < maxTransientRetries) {
-          transientRetryCount += 1;
-          window.setTimeout(() => {
-            if (settled) return;
-            const separator = initialSrc.includes("?") ? "&" : "?";
-            frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
-          }, retryDelayMs);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          block();
-          return;
-        }
-        window.setTimeout(verifyFrame, pollMs);
+      const retryTransientConnection = () => {
+        if (settled || transientRetryCount >= maxTransientRetries) return false;
+        transientRetryCount += 1;
+        window.setTimeout(() => {
+          if (settled) return;
+          const separator = initialSrc.includes("?") ? "&" : "?";
+          frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
+        }, retryDelayMs);
+        return true;
       };
 
       frame.addEventListener("error", () => {
         if (settled) return;
-        if (!loadedAtLeastOnce) {
+        const state = inspectIframeState(frame);
+        if (state && state.status === "transient_connection" && retryTransientConnection()) {
+          return;
+        }
+        if (!loadedAtLeastOnce && state && state.status === "blocked") {
           block();
           return;
         }
-        verifyFrame();
+        // pywebview/Chromium bazı yerel dashboard iframe'lerinde geçici error
+        // olayı gönderebiliyor. İçerik zaten bir kez yüklendiyse veya hata nedeni
+        // net olarak X-Frame/CSP değilse iframe'i gizlemeyip ekranda tutuyoruz.
+        success();
       });
       frame.addEventListener("load", () => {
         loadedAtLeastOnce = true;
-        verifyFrame();
+        // Load olayı geldiyse iframe'i başarılı kabul et. Bazı dashboard'lar
+        // gövde metninde "X-Frame-Options/CSP" gibi ifadeler taşıdığı için
+        // metin taraması 30 saniye sonra yanlış fallback gösterebiliyordu.
+        success();
       });
 
       window.setTimeout(() => {
