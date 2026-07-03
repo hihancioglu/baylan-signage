@@ -3295,16 +3295,27 @@ class PlaybackController:
                                 clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
                         else:
+                            prewarmed_runtime_visible = False
                             if widget_signature == self._prewarmed_widget_signature:
+                                visibility_checker = getattr(self.player, "has_visible_widget_runtime_content", None)
+                                if callable(visibility_checker):
+                                    try:
+                                        prewarmed_runtime_visible = bool(visibility_checker())
+                                    except Exception:
+                                        prewarmed_runtime_visible = False
+                            if widget_signature == self._prewarmed_widget_signature and prewarmed_runtime_visible:
                                 ok = True
                             else:
+                                # Prewarmed widget runtimes can be backgrounded when returning
+                                # to ACTIVE. Send the layout again so the unchanged iframe is
+                                # brought back to the foreground on the next idle cycle.
                                 ok = self.player.update_widget_layout(
-                                widget_url,
-                                widget_config=widget_config,
-                                widget_signature=widget_signature,
-                                target_monitor_index=primary_target_monitor_index,
-                                clone_to_all_monitors=clone_widget_to_all_monitors,
-                            )
+                                    widget_url,
+                                    widget_config=widget_config,
+                                    widget_signature=widget_signature,
+                                    target_monitor_index=primary_target_monitor_index,
+                                    clone_to_all_monitors=clone_widget_to_all_monitors,
+                                )
                             self._active_widget_signature = widget_signature if ok else None
                             log_debug(f"widget runtime layout update result | ok={ok} active_signature={self._active_widget_signature}")
                             self._prewarmed_widget_signature = None
@@ -3315,7 +3326,7 @@ class PlaybackController:
                                 clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
 
-                    if ok and not direct_url_widget:
+                    if ok:
                         self.player.clear_stop_request()
                         ok = self.player.wait_widget_duration(widget_duration_sec)
                     log_debug(f"widget playback end | ok={ok} direct_url_widget={direct_url_widget}")

@@ -2267,6 +2267,89 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.clear_stop_request.assert_called_once_with()
         player.wait_widget_duration.assert_called_once_with(5)
 
+    def test_direct_url_widget_waits_for_configured_duration(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_direct_url_widget.return_value = True
+        player.update_widget_layout.return_value = True
+        player.has_visible_widget_runtime_content.return_value = True
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+
+        def _wait_widget_duration(_duration):
+            controller._running = False
+            return True
+
+        player.wait_widget_duration.side_effect = _wait_widget_duration
+        controller.player = player
+
+        widget_item = {
+            "item_type": "widget",
+            "duration_sec": 7,
+            "widget_payload": {"type": "url", "content": "https://example.com/direct"},
+        }
+
+        with patch.object(controller, "_effective_playlist", return_value=[widget_item]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch.object(
+            controller,
+            "_prewarm_next_widget",
+            return_value=None,
+        ), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        player.clear_stop_request.assert_called_once_with()
+        player.wait_widget_duration.assert_called_once_with(7)
+
+    def test_backgrounded_prewarmed_widget_resends_layout_on_next_idle(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.image_duration_sec = 8
+        player.is_direct_url_widget.return_value = False
+        player.update_widget_layout.return_value = True
+        player.has_visible_widget_runtime_content.return_value = False
+        player.last_play_was_interrupted.return_value = False
+        player._is_video.return_value = False
+
+        def _wait_widget_duration(_duration):
+            controller._running = False
+            return True
+
+        player.wait_widget_duration.side_effect = _wait_widget_duration
+        controller.player = player
+
+        widget_item = {
+            "item_type": "widget",
+            "duration_sec": 5,
+            "widget_payload": {"type": "url", "content": "https://example.com/prewarmed"},
+        }
+        widget_spec = controller._build_widget_playback_spec(widget_item, playlist_index=0)
+        self.assertIsNotNone(widget_spec)
+        controller._prewarmed_widget_signature = widget_spec[2]
+
+        with patch.object(controller, "_effective_playlist", return_value=[widget_item]), patch.object(
+            controller,
+            "_restore_or_init_runtime_state",
+            return_value={"index": 0, "resume_sec": 0},
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch.object(
+            controller,
+            "_prewarm_next_widget",
+            return_value=None,
+        ), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        player.has_visible_widget_runtime_content.assert_called()
+        player.update_widget_layout.assert_called()
+        player.wait_widget_duration.assert_called_once_with(5)
 
     def test_failed_mpv_playlist_falls_back_to_single_playback(self):
         from client.client import PlaybackController
