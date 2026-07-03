@@ -641,10 +641,31 @@
           frame.allow = "autoplay";
           frame.allowFullscreen = true;
 
-          const enforceIframeVideosMuted = () => {
+          const keepIframeActive = () => {
             try {
+              const frameWindow = frame.contentWindow;
               const frameDocument = frame.contentDocument;
-              if (!frameDocument) return;
+              if (!frameWindow || !frameDocument) return;
+
+              // Bazı dashboard uygulamaları WebView/iframe odak veya visibility durumunu
+              // "aktif değil" sanınca veri akışını durdurup yükleniyor ekranında kalıyor.
+              // Aynı ekranda birden fazla iframe gösterirken her frame'i görünür/odaklı
+              // tutmaya çalışarak iki widget'ın da eş zamanlı canlı kalmasını sağlıyoruz.
+              try {
+                Object.defineProperty(frameDocument, "hidden", { value: false, configurable: true });
+                Object.defineProperty(frameDocument, "visibilityState", { value: "visible", configurable: true });
+              } catch (_err) {
+                // Bazı tarayıcı backend'leri bu property'leri yeniden tanımlatmayabilir.
+              }
+
+              try {
+                frameWindow.dispatchEvent(new Event("focus"));
+                frameWindow.dispatchEvent(new Event("pageshow"));
+                frameDocument.dispatchEvent(new Event("visibilitychange"));
+              } catch (_err) {
+                // noop
+              }
+
               frameDocument.querySelectorAll("video").forEach((videoElement) => {
                 try {
                   videoElement.muted = true;
@@ -660,16 +681,19 @@
                 }
               });
             } catch (_err) {
-              // Cross-origin iframe; autoplay is delegated via Permissions Policy allow attribute.
+              // Cross-origin iframe; autoplay/activation is delegated via iframe attributes.
             }
           };
 
           frame.addEventListener("load", () => {
-            enforceIframeVideosMuted();
+            keepIframeActive();
             [400, 1200, 2500].forEach((delayMs) => {
-              window.setTimeout(enforceIframeVideosMuted, delayMs);
+              window.setTimeout(keepIframeActive, delayMs);
             });
           });
+
+          const keepAliveTimer = window.setInterval(keepIframeActive, 5000);
+          wrapper.__cleanup = () => window.clearInterval(keepAliveTimer);
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
