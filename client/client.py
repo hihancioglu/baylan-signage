@@ -755,19 +755,52 @@ def _get_cpu_temperature_payload() -> dict[str, object]:
         return dict(_last_health_payload)
 
 
+def _iter_configured_loggers():
+    """Yield loggers that may own handlers configured by the client process."""
+    yield logging.getLogger()
+    for logger in logging.Logger.manager.loggerDict.values():
+        if isinstance(logger, logging.Logger):
+            yield logger
+
+
 def flush_and_shutdown_logging():
-    """Best-effort flush so last shutdown messages are not lost on forced exits."""
+    """Best-effort flush/close that avoids noisy late interpreter shutdown logging errors."""
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
         except Exception:
             pass
 
-    for handler in logging.getLogger().handlers:
+    handlers: list[logging.Handler] = []
+    for logger in _iter_configured_loggers():
+        for handler in list(logger.handlers):
+            if handler not in handlers:
+                handlers.append(handler)
+            try:
+                logger.removeHandler(handler)
+            except Exception:
+                pass
+
+    for handler in handlers:
         try:
             handler.flush()
         except Exception:
             pass
+        try:
+            handler.close()
+        except Exception:
+            pass
+
+    # logging keeps weakrefs to handlers for its own atexit shutdown. On Windows
+    # builds that leave daemon threads alive, those weakref callbacks can run very
+    # late while the threading module is already partially torn down, causing:
+    # "Exception ignored in: logging._removeHandlerRef ... TypeError: 'NoneType'
+    # object is not callable". Clearing the already-closed handler weakrefs while
+    # the interpreter is still healthy prevents that harmless-but-scary stderr.
+    try:
+        logging._handlerList.clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
     try:
         logging.shutdown()
