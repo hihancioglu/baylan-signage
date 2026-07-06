@@ -9,6 +9,7 @@
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; isolation: isolate; transform: translateZ(0); }
+    .iframe-widget.loading iframe.widget { background: #111; }
     iframe.widget { width: 100%; height: 100%; display: block; transform: translateZ(0); will-change: transform, opacity; backface-visibility: hidden; color-scheme: normal; }
     .iframe-fallback {
       display: none;
@@ -229,7 +230,7 @@
       return false;
     }
 
-    function normalizeIframeUrl(rawValue) {
+    function normalizeIframeUrl(rawValue, widgetIndex = -1) {
       const value = String(rawValue || "").trim();
       if (!value) return "";
       const decoded = value
@@ -242,10 +243,29 @@
       const rawSrcMatch = decoded.match(/\bsrc\s*=\s*(['"])(.*?)\1/i);
       const candidate = String(iframeSrcMatch && iframeSrcMatch[2] ? iframeSrcMatch[2] : (rawSrcMatch && rawSrcMatch[2] ? rawSrcMatch[2] : value)).trim();
       if (!candidate) return "";
-      if (/^(https?:|file:|blob:|data:)/i.test(candidate)) return candidate;
-      if (candidate.startsWith("//")) return `${window.location.protocol}${candidate}`;
-      if (candidate.startsWith("/")) return `${window.location.origin}${candidate}`;
-      return `https://${candidate}`;
+      if (/^(https?:|file:|blob:|data:)/i.test(candidate)) return addWidgetInstanceParam(candidate, widgetIndex);
+      if (candidate.startsWith("//")) return addWidgetInstanceParam(`${window.location.protocol}${candidate}`, widgetIndex);
+      if (candidate.startsWith("/")) return addWidgetInstanceParam(`${window.location.origin}${candidate}`, widgetIndex);
+      return addWidgetInstanceParam(`https://${candidate}`, widgetIndex);
+    }
+
+    function addWidgetInstanceParam(url, widgetIndex = -1) {
+      const text = String(url || "").trim();
+      if (!text || widgetIndex < 0 || /^(data:|blob:)/i.test(text)) return text;
+      try {
+        const parsed = new URL(text, window.location.href);
+        // WebView2 can paint identical same-origin dashboard iframes as a shared
+        // stale black surface. Give every cell a stable unique URL so Chromium
+        // allocates an independent renderer/cache entry without changing the
+        // server-side widget selection.
+        if (!parsed.searchParams.has("_baylan_widget_instance")) {
+          parsed.searchParams.set("_baylan_widget_instance", String(widgetIndex));
+        }
+        return parsed.toString();
+      } catch (_err) {
+        const separator = text.includes("?") ? "&" : "?";
+        return `${text}${separator}_baylan_widget_instance=${encodeURIComponent(String(widgetIndex))}`;
+      }
     }
 
     function buildIframeFallback(url) {
@@ -449,6 +469,9 @@
       });
       frame.addEventListener("load", () => {
         lastLoadAt = Date.now();
+        if (wrapper) {
+          wrapper.classList.remove("loading");
+        }
         window.setTimeout(activateIframeSurface, 100);
         window.setTimeout(forceCompositeRefresh, 250);
       });
@@ -829,7 +852,7 @@
 
           const frame = document.createElement("iframe");
           frame.className = "widget";
-          frame.src = normalizeIframeUrl(w.url);
+          const normalizedFrameUrl = normalizeIframeUrl(w.url, index);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer-when-downgrade";
           frame.allow = "autoplay; fullscreen; display-capture; encrypted-media; picture-in-picture; storage-access";
@@ -894,15 +917,26 @@
             stopIframeRepaintWatchdog();
           };
 
+          wrapper.classList.add("loading");
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
+          container.appendChild(wrapper);
+
+          const assignFrameSource = () => {
+            if (!frame.isConnected || frame.src === normalizedFrameUrl) return;
+            frame.src = normalizedFrameUrl;
+            debugLog("iframe source assigned after attach", { index, url: normalizedFrameUrl });
+          };
+          window.requestAnimationFrame(() => {
+            window.setTimeout(assignFrameSource, 0);
+          });
+
           attachIframeBlockDetection(wrapper, frame, () => {
             debugLog("iframe blocked fallback triggered", { index, url: w.url || "" });
             if (!runtimeControlActive && singleIframeMode && w.url && window.location.href !== w.url) {
               window.location.replace(w.url);
             }
           });
-          container.appendChild(wrapper);
           return;
         }
         if (widgetType === "card") {
