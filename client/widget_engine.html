@@ -181,6 +181,35 @@
       return `https://${candidate}`;
     }
 
+
+    function withWidgetInstanceParam(url, widgetIndex = -1) {
+      const normalized = normalizeIframeUrl(url);
+      if (!normalized || /^(data:|blob:)/i.test(normalized)) return normalized;
+      const instanceToken = `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.max(0, widgetIndex)}`;
+      try {
+        const parsed = new URL(normalized, window.location.href);
+        parsed.searchParams.set("_baylan_widget_instance", instanceToken);
+        return parsed.toString();
+      } catch (_err) {
+        const hashIndex = normalized.indexOf("#");
+        const base = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
+        const hash = hashIndex >= 0 ? normalized.slice(hashIndex) : "";
+        const separator = base.includes("?") ? "&" : "?";
+        return `${base}${separator}_baylan_widget_instance=${encodeURIComponent(instanceToken)}${hash}`;
+      }
+    }
+
+    function scheduleIframeLoad(frame, url, widgetIndex = -1) {
+      const source = withWidgetInstanceParam(url, widgetIndex);
+      frame.name = `baylan-widget-frame-${Math.max(0, widgetIndex)}-${Math.random().toString(36).slice(2)}`;
+      frame.dataset.originalSrc = normalizeIframeUrl(url);
+      frame.dataset.instanceSrc = source;
+      window.requestAnimationFrame(() => {
+        frame.src = source;
+      });
+      return source;
+    }
+
     function buildIframeFallback(url) {
       const fallback = document.createElement("div");
       fallback.className = "iframe-fallback";
@@ -245,11 +274,13 @@
       const retryDelayMs = 1000;
       let transientRetryCount = 0;
       let pendingRetryCount = 0;
-      const initialSrc = frame.src;
+      const baseSrc = () => String(frame.dataset.instanceSrc || frame.currentSrc || frame.src || "");
 
       const reloadWithCacheBust = () => {
-        const separator = initialSrc.includes("?") ? "&" : "?";
-        frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
+        const currentBaseSrc = baseSrc();
+        if (!currentBaseSrc) return;
+        const separator = currentBaseSrc.includes("?") ? "&" : "?";
+        frame.src = `${currentBaseSrc}${separator}_retry=${Date.now()}`;
       };
 
       const nudgeFramePaint = () => {
@@ -558,12 +589,12 @@
         if (itemType === "iframe") {
           const frame = document.createElement("iframe");
           frame.className = "widget";
-          frame.src = normalizeIframeUrl(item.url);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay";
           frame.allowFullscreen = true;
           wrapper.appendChild(frame);
+          scheduleIframeLoad(frame, item.url, widgetIndex);
         } else if (itemType === "card" || itemType === "html" || itemType === "embed") {
           const embed = document.createElement("div");
           embed.className = "widget card";
@@ -652,7 +683,6 @@
 
           const frame = document.createElement("iframe");
           frame.className = "widget";
-          frame.src = normalizeIframeUrl(w.url);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay";
@@ -690,6 +720,7 @@
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
+          scheduleIframeLoad(frame, w.url, index);
           window.setTimeout(() => {
             try {
               frame.style.transform = "translateZ(0)";
