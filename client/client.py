@@ -4517,24 +4517,17 @@ def run_state_cycle():
     erp_is_foreground = None
     foreground_title = ""
     if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
-        # Widget runtime/WebView startup can momentarily reset the Windows idle timer
-        # while the Baylan Widget window is foreground. Treating that reset as user
-        # activity immediately tears down the widget, leaving the screen black before
-        # remote data has time to render. When this guard is enabled, widget playback
-        # only returns to ERP if the ERP window is already foreground; idle drops seen
-        # while the widget itself is foreground are considered runtime noise.
+        # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
+        # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
+        # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
         erp_is_foreground = window_manager.is_window_foreground(ERP_WINDOW_TITLE)
         foreground_title = window_manager.foreground_window_title()
         if not erp_is_foreground:
             log_debug(
-                "state_cycle PLAYING widget activity suppressed | "
-                f"reason=erp_not_foreground title={ERP_WINDOW_TITLE!r} "
-                f"foreground_title={foreground_title!r} activity_reason={activity_reason}"
+                "state_cycle PLAYING widget activity | "
+                f"erp_not_foreground_detected title={ERP_WINDOW_TITLE!r} "
+                f"foreground_title={foreground_title!r} action=force_return activity_reason={activity_reason}"
             )
-            user_activity_detected = False
-            activity_reason = "none"
-            _activity_drop_streak = 0
-            _low_idle_streak = 0
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return

@@ -1367,7 +1367,13 @@ class BorderlessFullscreenPlayer:
         engine_path = _resolve_runtime_resource("widget_engine.html")
         engine_uri = engine_path.resolve().as_uri()
         encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
-        return f"{engine_uri}?config_b64={encoded}"
+        debug_param = "&debug=1" if DEBUG_MODE_ENABLED else ""
+        _debug_log(
+            "build_widget_source engine payload | "
+            f"widgets={len(payload.get('widgets') or [])} columns={payload.get('columns')} "
+            f"rows={payload.get('rows')} debug={DEBUG_MODE_ENABLED}"
+        )
+        return f"{engine_uri}?config_b64={encoded}{debug_param}"
 
     def _build_native_iframe_cell_source(self, source: str) -> str:
         return self._normalize_widget_source(source)
@@ -2635,7 +2641,11 @@ iframe {{
                 continue
             normalized_items.append({"signature": signature, "payload": payload})
 
-        _debug_log(f"sync_widget_runtime_playlist | items={len(normalized_items)} active_signature={active_signature}")
+        _debug_log(
+            "sync_widget_runtime_playlist | "
+            f"items={len(normalized_items)} active_signature={active_signature} "
+            f"source_items={len(widget_items or [])}"
+        )
         message = {
             "type": "playlist_sync",
             "payload": {
@@ -2681,7 +2691,11 @@ iframe {{
             _safe_print("⚠️ widget layout payload geçersiz")
             return False
 
-        _debug_log(f"update_widget_layout | signature={widget_signature} source={widget_source[:120]}")
+        _debug_log(
+            "update_widget_layout | "
+            f"signature={widget_signature} source={widget_source[:120]} "
+            f"widgets={len(payload.get('widgets') or [])} columns={payload.get('columns')} rows={payload.get('rows')}"
+        )
         # Yeni bir layout oynatımı başlarken önceki stop isteği (ör. state geçişinden
         # kalan bayrak) temizlenmeli; aksi halde wait_widget_duration hemen kesiliyor
         # ve playback döngüsü çok hızlı tekrar ederek flicker üretiyor.

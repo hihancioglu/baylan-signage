@@ -99,15 +99,24 @@
       const configB64 = params.get("config_b64");
       if (configB64) {
         try {
-          return JSON.parse(atob(decodeURIComponent(configB64).replace(/-/g, "+").replace(/_/g, "/")));
-        } catch (_err) {
+          const parsed = JSON.parse(atob(decodeURIComponent(configB64).replace(/-/g, "+").replace(/_/g, "/")));
+          debugLog("parseConfig config_b64 decoded", {
+            widgetCount: Array.isArray(parsed && parsed.widgets) ? parsed.widgets.length : 0,
+            columns: parsed && parsed.columns,
+            rows: parsed && parsed.rows,
+          });
+          return parsed;
+        } catch (err) {
+          debugLog("parseConfig config_b64 failed", { error: String(err && err.message || err) });
           return { widgets: [] };
         }
       }
       const url = params.get("url");
       if (url) {
+        debugLog("parseConfig url fallback", { url });
         return { widgets: [{ type: "iframe", url }] };
       }
+      debugLog("parseConfig empty");
       return { widgets: [] };
     }
 
@@ -779,8 +788,18 @@
         widgetCount === 1 &&
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
 
+      debugLog("loadWidgets start", {
+        widgetCount,
+        columns: config.columns,
+        rows: config.rows,
+        normalizedColumns: cols,
+        singleIframeMode,
+        widgetTypes: (config.widgets || []).map((w) => String((w && w.type) || "").toLowerCase()),
+      });
+
       (config.widgets || []).forEach((w, index) => {
         if (isCellCoveredByPreviousSpan(config.widgets, index, cols)) {
+          debugLog("loadWidgets skip covered cell", { index, type: String((w && w.type) || "").toLowerCase() });
           return;
         }
         const rowIndex = Math.floor(index / cols);
@@ -790,6 +809,14 @@
         const colSpan = Math.max(1, Math.min(maxColSpan, parseSpanValue(w, ["col_span", "colspan", "column_span", "merge_cols"], 1)));
         const rowSpan = Math.max(1, Math.min(maxRowSpan, parseSpanValue(w, ["row_span", "rowspan", "merge_rows"], 1)));
         const widgetType = String((w && w.type) || "").toLowerCase();
+        debugLog("loadWidgets render widget", {
+          index,
+          widgetType,
+          url: w && w.url ? String(w.url).slice(0, 240) : "",
+          hasHtml: Boolean(w && (w.html || w.content)),
+          colSpan,
+          rowSpan,
+        });
         if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
           wrapper.className = "widget iframe-widget";
@@ -870,6 +897,7 @@
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
           attachIframeBlockDetection(wrapper, frame, () => {
+            debugLog("iframe blocked fallback triggered", { index, url: w.url || "" });
             if (!runtimeControlActive && singleIframeMode && w.url && window.location.href !== w.url) {
               window.location.replace(w.url);
             }
@@ -948,11 +976,16 @@
           return;
         }
       });
+      debugLog("loadWidgets complete", { renderedChildren: container.children.length, widgetCount });
     }
 
     function syncPlaylistCache(syncPayload) {
       const payload = syncPayload && typeof syncPayload === "object" ? syncPayload : {};
       const items = Array.isArray(payload.items) ? payload.items : [];
+      debugLog("syncPlaylistCache start", {
+        items: items.length,
+        activeSignature: payload.active_signature || null,
+      });
       const nextMap = new Map();
       items.forEach((item) => {
         if (!item || typeof item !== "object") return;
@@ -976,19 +1009,35 @@
 
       if (activeWidgetSignature && widgetPlaylistCache.has(activeWidgetSignature)) {
         const config = widgetPlaylistCache.get(activeWidgetSignature);
+        debugLog("syncPlaylistCache render active", {
+          activeWidgetSignature,
+          widgetCount: Array.isArray(config && config.widgets) ? config.widgets.length : 0,
+        });
         applyLayout(config);
         loadWidgets(config);
+      } else {
+        debugLog("syncPlaylistCache no active render", {
+          activeWidgetSignature,
+          cacheSize: widgetPlaylistCache.size,
+        });
       }
     }
 
     function renderConfig(input, signature) {
       if (input && typeof input === "object" && Object.prototype.hasOwnProperty.call(input, "__playlist_sync")) {
+        debugLog("renderConfig playlist sync envelope");
         syncPlaylistCache(input.__playlist_sync);
         return;
       }
 
       const config = normalizeConfig(input);
       const normalizedSignature = typeof signature === "string" ? signature.trim() : "";
+      debugLog("renderConfig normalized", {
+        signature: normalizedSignature || null,
+        widgetCount: Array.isArray(config.widgets) ? config.widgets.length : 0,
+        columns: config.columns,
+        rows: config.rows,
+      });
       if (normalizedSignature && normalizedSignature === lastRenderedSignature) {
         // Aynı signature tekrar geldiğinde (örn. pencere background->foreground geçişi)
         // render adımını atlamak siyah ekran/stale içerik bırakabiliyor.
@@ -1024,6 +1073,7 @@
         const payload = normalizeConfig(event.data);
         renderConfig(payload, null);
       } catch (_err) {
+        debugLog("message render failed", { error: String(_err && _err.message || _err) });
         renderConfig({ widgets: [] }, null);
       }
     });

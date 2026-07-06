@@ -190,7 +190,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_idle_background.hide.assert_called_once()
 
-    def test_playing_widget_ignores_idle_drop_when_widget_foreground(self):
+    def test_playing_widget_returns_when_erp_not_foreground_and_activity_detected(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
@@ -208,11 +208,10 @@ class TestRunStateCycle(unittest.TestCase):
         ), patch.object(main, "return_to_erp_window") as return_mock:
             main.run_state_cycle()
 
-        return_mock.assert_not_called()
-        fake_playback.stop.assert_not_called()
-        self.assertEqual(main.current_state, main.ClientState.PLAYING)
-        self.assertEqual(main._activity_drop_streak, 0)
-        self.assertEqual(main._low_idle_streak, 0)
+        return_mock.assert_called_once()
+        self.assertGreaterEqual(fake_playback.stop.call_count, 1)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
         self._configure_common()
@@ -304,7 +303,7 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback.stop.assert_not_called()
         self.assertEqual(main.current_state, main.ClientState.PLAYING)
 
-    def test_playing_widget_confirms_activity_when_erp_foreground_idle_drop_reaches_low_idle_plateau(self):
+    def test_playing_widget_confirms_activity_when_idle_drop_reaches_low_idle_plateau(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
@@ -318,7 +317,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
             main.time, "monotonic", return_value=100.0
-        ), patch.object(main.window_manager, "is_window_foreground", return_value=True), patch.object(
+        ), patch.object(main.window_manager, "is_window_foreground", return_value=False), patch.object(
             main, "return_to_erp_window"
         ) as return_mock:
             with patch.object(main, "get_idle_seconds", side_effect=[0.0, 0.0, 0.0, 0.0]):
@@ -330,7 +329,7 @@ class TestRunStateCycle(unittest.TestCase):
         self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
-    def test_playing_widget_returns_when_erp_foreground_after_shorter_widget_drop_confirmation(self):
+    def test_playing_widget_returns_after_shorter_widget_drop_confirmation(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
@@ -344,7 +343,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
             main.time, "monotonic", return_value=100.0
-        ), patch.object(main.window_manager, "is_window_foreground", return_value=True), patch.object(
+        ), patch.object(main.window_manager, "is_window_foreground", return_value=False), patch.object(
             main, "return_to_erp_window"
         ) as return_mock:
             with patch.object(main, "get_idle_seconds", side_effect=[0.0, 0.0]):
@@ -354,7 +353,7 @@ class TestRunStateCycle(unittest.TestCase):
         return_mock.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
-    def test_playing_widget_confirms_activity_when_erp_foreground_on_fast_idle_rebound_after_drop(self):
+    def test_playing_widget_confirms_activity_on_fast_idle_rebound_after_drop(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
         main.playing_started_at = 0.0
@@ -368,7 +367,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
             main.time, "monotonic", return_value=100.0
-        ), patch.object(main.window_manager, "is_window_foreground", return_value=True), patch.object(
+        ), patch.object(main.window_manager, "is_window_foreground", return_value=False), patch.object(
             main, "return_to_erp_window"
         ) as return_mock:
             with patch.object(main, "get_idle_seconds", side_effect=[0.0, 0.125, 0.625, 1.125]):
