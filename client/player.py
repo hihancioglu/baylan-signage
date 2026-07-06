@@ -20,7 +20,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, pathname2url, urlopen
 
 
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
@@ -1377,7 +1377,13 @@ class BorderlessFullscreenPlayer:
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
 
     @staticmethod
-    def _native_url_rows_enabled() -> bool:
+    def _multi_process_widget_layouts_enabled() -> bool:
+        return os.getenv("WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _native_url_rows_enabled(cls) -> bool:
+        if not cls._multi_process_widget_layouts_enabled():
+            return False
         return os.getenv("WIDGET_NATIVE_URL_ROWS", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
@@ -1406,8 +1412,10 @@ class BorderlessFullscreenPlayer:
     def _native_url_rows_hidden_preload_enabled() -> bool:
         return os.getenv("WIDGET_NATIVE_URL_ROWS_HIDDEN_PRELOAD", "0").strip().lower() in {"1", "true", "yes", "on"}
 
-    @staticmethod
-    def _native_widget_grid_enabled() -> bool:
+    @classmethod
+    def _native_widget_grid_enabled(cls) -> bool:
+        if not cls._multi_process_widget_layouts_enabled():
+            return False
         return os.getenv("WIDGET_NATIVE_GRID", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
@@ -1784,9 +1792,10 @@ iframe {{
 </html>
 """
         safe_hash = hashlib.sha1("\n".join(row_sources).encode("utf-8", errors="ignore")).hexdigest()[:12]
-        page_path = Path(tempfile.gettempdir()) / f"baylan-native-rows-{safe_hash}.html"
-        page_path.write_text(document, encoding="utf-8")
-        return page_path.resolve().as_uri()
+        page_path_text = os.path.join(tempfile.gettempdir(), f"baylan-native-rows-{safe_hash}.html")
+        with open(page_path_text, "w", encoding="utf-8") as handle:
+            handle.write(document)
+        return "file://" + pathname2url(os.path.abspath(page_path_text))
 
     @staticmethod
     def _native_launch_specs_full_bounds(
@@ -2246,7 +2255,8 @@ iframe {{
             return [(None, None)]
 
         clone_enabled = bool(clone_to_all_monitors)
-        if clone_enabled and target_monitor_index is None and len(monitor_bounds_list) > 1:
+        multi_runtime_enabled = os.getenv("WIDGET_MULTI_RUNTIME_PROCESSES", "0").strip().lower() in {"1", "true", "yes", "on"}
+        if clone_enabled and multi_runtime_enabled and target_monitor_index is None and len(monitor_bounds_list) > 1:
             return [(monitor_index, bounds) for monitor_index, bounds in enumerate(monitor_bounds_list)]
 
         if isinstance(target_monitor_index, int) and 0 <= target_monitor_index < len(monitor_bounds_list):
@@ -3256,12 +3266,11 @@ iframe {{
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
-        source = self._build_widget_source(widget_source, widget_config=widget_config)
-        _debug_log(f"play_widget_blocking start | duration_sec={duration_sec} source={source[:140] if source else ''}")
-        if not source:
-            self._last_interrupted = False
-            _safe_print("⚠️ widget kaynağı boş")
-            return False
+        # Multi-process native layouts are now opt-in. Check those routes before
+        # building the single-engine source so tests that simulate Windows on a
+        # non-Windows runner do not instantiate platform-specific Path classes.
+        source = ""
+        _debug_log(f"play_widget_blocking start | duration_sec={duration_sec} raw_source={str(widget_source or '')[:140]}")
 
         clone_enabled = False if clone_to_all_monitors is None else bool(clone_to_all_monitors)
         monitor_count = 0
@@ -3306,6 +3315,13 @@ iframe {{
                 duration_sec,
                 target_monitor_index=target_monitor_index,
             )
+
+        source = self._build_widget_source(widget_source, widget_config=widget_config)
+        _debug_log(f"play_widget_blocking resolved source={source[:140] if source else ''}")
+        if not source:
+            self._last_interrupted = False
+            _safe_print("⚠️ widget kaynağı boş")
+            return False
 
         runtime_controller_allowed = (
             os.name == "nt"
