@@ -142,6 +142,9 @@ class TestWidgetViewer(unittest.TestCase):
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
         fake_window.show.assert_called_once()
+        show_index = fake_window.method_calls.index(unittest.mock.call.show())
+        evaluate_index = fake_window.method_calls.index(unittest.mock.call.evaluate_js(unittest.mock.ANY))
+        self.assertLess(show_index, evaluate_index)
 
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
