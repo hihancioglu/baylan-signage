@@ -592,6 +592,21 @@ class TestWidgetViewer(unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
         self.assertEqual(payload["widgets"], [{"type": "iframe", "url": "https://panel.local/dashboard.html"}])
 
+    def test_widget_engine_assigns_iframe_src_after_dom_attach(self):
+        engine_html = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("const normalizedFrameUrl = normalizeIframeUrl(w.url, index);", engine_html)
+        self.assertIn("container.appendChild(wrapper);", engine_html)
+        self.assertIn("window.requestAnimationFrame(() =>", engine_html)
+        self.assertIn("frame.src = normalizedFrameUrl;", engine_html)
+
+    def test_widget_engine_adds_unique_iframe_instance_param(self):
+        engine_html = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("function addWidgetInstanceParam(url, widgetIndex = -1)", engine_html)
+        self.assertIn("_baylan_widget_instance", engine_html)
+        self.assertIn("return addWidgetInstanceParam(candidate, widgetIndex);", engine_html)
+
 
 if __name__ == "__main__":
     unittest.main()
