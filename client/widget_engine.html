@@ -767,6 +767,16 @@
 
       if (activeWidgetSignature && widgetPlaylistCache.has(activeWidgetSignature)) {
         const config = widgetPlaylistCache.get(activeWidgetSignature);
+        if (activeWidgetSignature === lastRenderedSignature) {
+          // layout_update renders the active dashboard first. A following playlist_sync
+          // can arrive milliseconds later with the same signature; re-rendering here
+          // tears down in-flight iframes and may leave one of the dashboard cells
+          // stuck on its own loading state. Keep the already-rendered widgets alive
+          // and only refresh the playlist cache.
+          debugLog("playlist sync skipped active rerender", { signature: activeWidgetSignature });
+          return;
+        }
+        lastRenderedSignature = activeWidgetSignature;
         applyLayout(config);
         loadWidgets(config);
       }
