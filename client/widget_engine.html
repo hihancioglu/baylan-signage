@@ -226,7 +226,7 @@
         }
 
         if (locationHref === "about:blank") {
-          return { status: "blocked" };
+          return { status: "pending" };
         }
 
         return { status: "ready" };
@@ -241,11 +241,30 @@
       let loadedAtLeastOnce = false;
       const maxWaitMs = 30000;
       const pollMs = 1500;
-      const deadline = Date.now() + maxWaitMs;
       const maxTransientRetries = 4;
       const retryDelayMs = 1000;
       let transientRetryCount = 0;
+      let pendingRetryCount = 0;
       const initialSrc = frame.src;
+
+      const reloadWithCacheBust = () => {
+        const separator = initialSrc.includes("?") ? "&" : "?";
+        frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
+      };
+
+      const nudgeFramePaint = () => {
+        try {
+          frame.style.transform = "translateZ(0) scale(1.0001)";
+          window.setTimeout(() => {
+            frame.style.transform = "translateZ(0)";
+          }, 80);
+          if (typeof frame.focus === "function") {
+            frame.focus({ preventScroll: true });
+          }
+        } catch (_err) {
+          // noop
+        }
+      };
 
       const block = () => {
         if (settled) return;
@@ -267,18 +286,28 @@
           success();
           return;
         }
+        if (state.status === "blocked") {
+          block();
+          return;
+        }
         if (state.status === "transient_connection" && transientRetryCount < maxTransientRetries) {
           transientRetryCount += 1;
           window.setTimeout(() => {
             if (settled) return;
-            const separator = initialSrc.includes("?") ? "&" : "?";
-            frame.src = `${initialSrc}${separator}_retry=${Date.now()}`;
+            reloadWithCacheBust();
           }, retryDelayMs);
           return;
         }
-        if (Date.now() >= deadline) {
-          block();
-          return;
+        if (state.status === "pending") {
+          nudgeFramePaint();
+          if (pendingRetryCount < maxTransientRetries) {
+            pendingRetryCount += 1;
+            window.setTimeout(() => {
+              if (settled) return;
+              reloadWithCacheBust();
+            }, retryDelayMs);
+            return;
+          }
         }
         window.setTimeout(verifyFrame, pollMs);
       };
@@ -291,7 +320,8 @@
 
       window.setTimeout(() => {
         if (!settled && !loadedAtLeastOnce) {
-          block();
+          nudgeFramePaint();
+          reloadWithCacheBust();
         }
       }, maxWaitMs);
     }
@@ -660,6 +690,13 @@
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
+          window.setTimeout(() => {
+            try {
+              frame.style.transform = "translateZ(0)";
+            } catch (_err) {
+              // noop
+            }
+          }, 0);
           attachIframeBlockDetection(wrapper, frame, () => {
             if (!runtimeControlActive && singleIframeMode && w.url && window.location.href !== w.url) {
               window.location.replace(w.url);
