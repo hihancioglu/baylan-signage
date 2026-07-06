@@ -850,6 +850,40 @@ def _evaluate_js_with_retries(window, script: str, *, attempts: int = 12, delay_
         raise last_error
 
 
+def _evaluate_runtime_update_with_retries(window, script: str, *, attempts: int = 80, delay_sec: float = 0.25) -> None:
+    """Apply an IPC update only after the widget engine document is ready.
+
+    pywebview can accept evaluate_js calls while the WebView is still on its
+    initial blank document. In that case the call succeeds, but any
+    __baylanPendingConfig value is attached to about:blank and is lost when
+    widget_engine.html finishes loading, leaving the runtime black.
+    """
+    readiness_script = (
+        "(function(){"
+        "return Boolean(document && "
+        "document.readyState !== 'loading' && "
+        "String(window.location && window.location.href || '').indexOf('widget_engine.html') !== -1);"
+        "})()"
+    )
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            ready = window.evaluate_js(readiness_script)
+            if ready:
+                window.evaluate_js(script)
+                if attempt > 0:
+                    _debug_log(f"pywebview runtime evaluate_js ready retry succeeded | attempt={attempt + 1}")
+                return
+            _debug_log(f"pywebview runtime evaluate_js waiting for engine | attempt={attempt + 1} ready={ready}")
+        except Exception as exc:
+            last_error = exc
+            _debug_log(f"pywebview runtime evaluate_js retry pending | attempt={attempt + 1} error={exc}")
+        time.sleep(max(0.01, delay_sec))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("widget engine document did not become ready for runtime IPC")
+
+
 
 
 def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | None:
@@ -1134,7 +1168,7 @@ def _start_with_pywebview(
                     _debug_log(f"pywebview foreground transition failed | error={exc}")
             try:
                 _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
-                _evaluate_js_with_retries(window, js)
+                _evaluate_runtime_update_with_retries(window, js)
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
