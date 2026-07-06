@@ -21,6 +21,11 @@ class TestRunStateCycle(unittest.TestCase):
         self.orig_low_idle_streak = main._low_idle_streak
         self.orig_low_idle_activity_enabled = main.LOW_IDLE_ACTIVITY_ENABLED
         self.orig_connection_outage_active = main.connection_outage_active
+        self.orig_last_idle_switch_ts = main.last_idle_switch_ts
+        self.orig_widget_activity_drop_confirm_count = main.WIDGET_ACTIVITY_DROP_CONFIRM_COUNT
+        self.orig_active_idle_confirm_sample_delay_sec = main.ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC
+        self.orig_active_idle_confirm_sample_count = main.ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT
+        self.orig_offline_idle_timeout_cap_sec = main.OFFLINE_IDLE_TIMEOUT_CAP_SEC
 
     def tearDown(self):
         main.current_state = self.orig_state
@@ -34,6 +39,11 @@ class TestRunStateCycle(unittest.TestCase):
         main._low_idle_streak = self.orig_low_idle_streak
         main.LOW_IDLE_ACTIVITY_ENABLED = self.orig_low_idle_activity_enabled
         main.connection_outage_active = self.orig_connection_outage_active
+        main.last_idle_switch_ts = self.orig_last_idle_switch_ts
+        main.WIDGET_ACTIVITY_DROP_CONFIRM_COUNT = self.orig_widget_activity_drop_confirm_count
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC = self.orig_active_idle_confirm_sample_delay_sec
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT = self.orig_active_idle_confirm_sample_count
+        main.OFFLINE_IDLE_TIMEOUT_CAP_SEC = self.orig_offline_idle_timeout_cap_sec
 
     def _configure_common(self):
         main.idle_mode_enabled = True
@@ -43,8 +53,13 @@ class TestRunStateCycle(unittest.TestCase):
         main._last_observed_idle_sec = None
         main._activity_drop_streak = 0
         main._low_idle_streak = 0
+        main.last_idle_switch_ts = 0.0
         main.LOW_IDLE_ACTIVITY_ENABLED = True
         main.connection_outage_active = False
+        main.WIDGET_ACTIVITY_DROP_CONFIRM_COUNT = 2
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC = 0.0
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT = 1
+        main.OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(main.DEFAULT_IDLE_TIMEOUT_SEC)
 
     def test_idle_pending_waits_for_selected_content_before_playing_state(self):
         self._configure_common()
@@ -129,8 +144,8 @@ class TestRunStateCycle(unittest.TestCase):
         ):
             main.run_state_cycle()
 
-        fake_playback.start.assert_called_once()
-        fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+        fake_playback.start.assert_not_called()
+        fake_playback.stop.assert_called_once_with(stop_widget_runtime=True)
         fake_playback.background_all_widget_viewers.assert_called_once()
         fake_idle_background.hide.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
@@ -154,7 +169,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
         fake_playback.background_all_widget_viewers.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
@@ -195,7 +210,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_returns_when_erp_foreground_and_activity_detected(self):
@@ -218,7 +233,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_does_not_return_during_activity_grace_window(self):
@@ -311,7 +326,31 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
+    def test_playing_widget_returns_after_shorter_widget_drop_confirmation(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 30.0
+        main._activity_drop_streak = 0
+        main.WIDGET_ACTIVITY_DROP_CONFIRM_COUNT = 2
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "widget"
+        fake_playback._active_item = {"item_type": "widget", "widget_url": "https://example.com"}
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main.time, "monotonic", return_value=100.0
+        ), patch.object(main.window_manager, "is_window_foreground", return_value=False), patch.object(
+            main, "return_to_erp_window"
+        ) as return_mock:
+            with patch.object(main, "get_idle_seconds", side_effect=[0.0, 0.0]):
+                for _ in range(2):
+                    main.run_state_cycle()
+
+        return_mock.assert_called_once()
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_widget_confirms_activity_on_fast_idle_rebound_after_drop(self):
@@ -337,7 +376,7 @@ class TestRunStateCycle(unittest.TestCase):
 
         return_mock.assert_called_once()
         self.assertGreaterEqual(fake_playback.stop.call_count, 1)
-        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), False)
+        self.assertEqual(fake_playback.stop.call_args_list[-1].kwargs.get("stop_widget_runtime"), True)
         self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_playing_media_ignores_low_idle_only_signal_without_drop_confirmation(self):
@@ -416,6 +455,7 @@ class TestRunStateCycle(unittest.TestCase):
         fake_playback._widget_process = Mock()
         fake_playback._widget_process.poll.return_value = None
         fake_playback._extra_processes = []
+        fake_playback.has_visible_widget_runtime_content.return_value = False
 
         with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
             main, "get_idle_seconds", return_value=10.0
@@ -424,11 +464,43 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_playback.stop.assert_not_called()
 
+    def test_active_state_force_stops_visible_widget_runtime(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+
+        class _VisibleWidgetPlayback:
+            _active_item = None
+            _process = None
+            _extra_processes = []
+
+            def __init__(self):
+                self._widget_process = Mock()
+                self._widget_process.poll.return_value = None
+                self.stop = Mock()
+                self.background_all_widget_viewers = Mock()
+
+            def current_content_name(self):
+                return ""
+
+            def has_visible_widget_runtime_content(self):
+                return True
+
+        fake_playback = _VisibleWidgetPlayback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=10.0
+        ):
+            main.run_state_cycle()
+
+        fake_playback.stop.assert_called_once_with(stop_widget_runtime=True)
+        fake_playback.background_all_widget_viewers.assert_called_once()
+
     def test_outage_caps_idle_threshold_and_transitions_to_idle_pending(self):
         self._configure_common()
         main.current_state = main.ClientState.ACTIVE
         main.idle_timeout_sec = 120
         main.connection_outage_active = True
+        main.OFFLINE_IDLE_TIMEOUT_CAP_SEC = 10
 
         fake_playback = Mock()
         fake_playback.current_content_name.return_value = ""
@@ -442,6 +514,79 @@ class TestRunStateCycle(unittest.TestCase):
 
         self.assertEqual(main.current_state, main.ClientState.IDLE_PENDING)
         fake_idle_background.show.assert_called_once()
+
+    def test_active_idle_transition_cancelled_when_confirm_sample_sees_recent_input(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+        main.idle_timeout_sec = 5
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC = 0.0
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT = 1
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(
+            main, "idle_background", fake_idle_background
+        ), patch.object(main, "get_idle_seconds", side_effect=[6.0, 0.1]):
+            result = main.run_state_cycle()
+
+        self.assertEqual(result, 0.1)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+        fake_idle_background.show.assert_not_called()
+
+    def test_active_idle_transition_requires_all_confirm_samples_above_threshold(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+        main.idle_timeout_sec = 5
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC = 0.0
+        main.ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT = 3
+
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(
+            main, "idle_background", fake_idle_background
+        ), patch.object(main, "get_idle_seconds", side_effect=[6.0, 6.2, 0.2]):
+            result = main.run_state_cycle()
+
+        self.assertEqual(result, 0.2)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+        fake_idle_background.show.assert_not_called()
+
+    def test_widget_idle_transition_does_not_show_black_idle_overlay(self):
+        self._configure_common()
+        main.current_state = main.ClientState.ACTIVE
+        main.idle_timeout_sec = 5
+
+        class _WidgetNextPlayback:
+            _active_item = None
+            _process = None
+            _widget_process = None
+            _extra_processes = []
+
+            def current_content_name(self):
+                return ""
+
+            def next_idle_item_is_widget(self):
+                return True
+
+            def start(self):
+                return None
+
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", _WidgetNextPlayback()), patch.object(
+            main, "idle_background", fake_idle_background
+        ), patch.object(main, "get_idle_seconds", return_value=6.0):
+            main.run_state_cycle()
+
+        self.assertEqual(main.current_state, main.ClientState.IDLE_PENDING)
+        fake_idle_background.show.assert_not_called()
+        fake_idle_background.hide.assert_called_once()
 
     def test_without_outage_uses_full_idle_threshold(self):
         self._configure_common()

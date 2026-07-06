@@ -18,6 +18,11 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def _build_player(self):
         return BorderlessFullscreenPlayer()
 
+    def _decode_widget_engine_source(self, source):
+        parsed = urlparse(source)
+        encoded = parse_qs(parsed.query)["config_b64"][0]
+        return json.loads(base64.urlsafe_b64decode(unquote(encoded)).decode("utf-8"))
+
     def test_play_blocking_ignores_stdout_oserror(self):
         player = self._build_player()
         with patch("builtins.print", side_effect=OSError(6, "invalid handle")):
@@ -179,6 +184,476 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             command = player._build_widget_command("")
 
         self.assertEqual(command, [])
+
+    def test_native_url_row_sources_extracts_two_row_iframe_layout(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1"}, clear=False):
+            sources = player._native_url_row_sources(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "172.35.10.5/top"},
+                        {"type": "url", "content": "172.35.10.5/bottom"},
+                    ],
+                },
+            )
+
+        self.assertEqual(
+            sources,
+            ["http://172.35.10.5/top", "http://172.35.10.5/bottom"],
+        )
+
+    def test_native_url_rows_are_disabled_by_default(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(player.is_native_url_row_widget(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/top"},
+                        {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+                    ],
+                },
+            ))
+
+    def test_native_url_rows_can_be_disabled_by_env(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "0"}, clear=True):
+            self.assertFalse(player.is_native_url_row_widget(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/top"},
+                        {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+                    ],
+                },
+            ))
+
+    def test_native_widget_grid_specs_supports_multi_column_iframe_and_image_layout(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_GRID": "1"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 200, 100)],
+        ), patch.object(
+            player,
+            "_build_native_image_page",
+            side_effect=lambda source: f"image-page:{source}",
+        ):
+            specs = player._native_widget_grid_specs(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "iframe", "url": "172.35.10.5/cycle"},
+                        {"type": "iframe", "url": "172.35.10.5/total"},
+                        {"type": "image", "url": "http://baylan-portainer:5080/media/logo.png"},
+                        {"type": "empty"},
+                    ],
+                },
+                target_monitor_index=0,
+            )
+
+        self.assertEqual(len(specs), 3)
+        self.assertEqual(specs[0], (0, "http://172.35.10.5/cycle", (0, 0, 104, 54)))
+        self.assertEqual(specs[1], (1, "http://172.35.10.5/total", (96, 0, 104, 54)))
+        self.assertEqual(specs[2], (2, "image-page:http://baylan-portainer:5080/media/logo.png", (0, 46, 104, 54)))
+
+    def test_native_widget_grid_specs_disabled_by_default(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {}, clear=True), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 200, 100)],
+        ):
+            specs = player._native_widget_grid_specs(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "iframe", "url": "172.35.10.5/cycle"},
+                        {"type": "iframe", "url": "172.35.10.5/total"},
+                    ],
+                },
+                target_monitor_index=0,
+            )
+
+        self.assertEqual(specs, [])
+
+    def test_native_widget_grid_specs_accepts_source_aliases_when_enabled(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_GRID": "1"}, clear=True), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 200, 100)],
+        ), patch.object(
+            player,
+            "_build_native_image_page",
+            side_effect=lambda source: f"image-page:{source}",
+        ):
+            specs = player._native_widget_grid_specs(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "Iframe/URL", "content": "172.35.10.5/cycle"},
+                        {"type": "iframe", "source": "172.35.10.5/total"},
+                        {"type": "IMAGE", "source_url": "http://baylan-portainer:5080/media/logo.png"},
+                        {"type": "empty"},
+                    ],
+                },
+                target_monitor_index=0,
+            )
+
+        self.assertEqual(len(specs), 3)
+        self.assertEqual(specs[0], (0, "http://172.35.10.5/cycle", (0, 0, 104, 54)))
+        self.assertEqual(specs[1], (1, "http://172.35.10.5/total", (96, 0, 104, 54)))
+        self.assertEqual(specs[2], (2, "image-page:http://baylan-portainer:5080/media/logo.png", (0, 46, 104, 54)))
+
+    def test_native_widget_grid_specs_can_be_disabled_by_env(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_GRID": "0"}, clear=True), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 200, 100)],
+        ):
+            specs = player._native_widget_grid_specs(
+                "",
+                widget_config={
+                    "rows": 2,
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "iframe", "url": "172.35.10.5/cycle"},
+                        {"type": "iframe", "url": "172.35.10.5/total"},
+                    ],
+                },
+                target_monitor_index=0,
+            )
+
+        self.assertEqual(specs, [])
+
+    def test_play_widget_blocking_routes_multi_column_grid_to_native_grid_windows(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+        specs = [
+            (0, "http://172.35.10.5/cycle", (0, 0, 100, 50)),
+            (1, "http://172.35.10.5/total", (100, 0, 100, 50)),
+        ]
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 200, 100)],
+        ), patch.object(
+            player,
+            "_native_widget_grid_specs",
+            return_value=specs,
+        ), patch.object(
+            player,
+            "_play_native_widget_specs_blocking",
+            return_value=True,
+        ) as play_native_grid:
+            ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config={
+                    "rows": 2,
+                    "columns": 2,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/cycle"},
+                        {"type": "iframe", "url": "http://172.35.10.5/total"},
+                    ],
+                },
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        play_native_grid.assert_called_once_with(
+            specs,
+            20,
+            signature_kind="grid",
+            target_monitor_index=0,
+        )
+
+    def test_play_widget_blocking_uses_native_row_windows_for_two_iframes_on_windows(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            side_effect=lambda source: ["python", "widget_viewer.py", source],
+        ), patch.object(
+            player,
+            "_widget_popen_kwargs",
+            return_value={},
+        ), patch.object(
+            player,
+            "_wait_native_row_processes_for_slot",
+            return_value=True,
+        ) as wait_mock, patch.object(player, "_terminate_process") as terminate_mock, patch("client.player.subprocess.Popen") as popen:
+            first_process = unittest.mock.Mock()
+            second_process = unittest.mock.Mock()
+            first_process.poll.return_value = None
+            second_process.poll.return_value = None
+            popen.side_effect = [first_process, second_process]
+
+            ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/top"},
+                        {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+                    ],
+                },
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(popen.call_count, 2)
+        first_command = popen.call_args_list[0].args[0]
+        second_command = popen.call_args_list[1].args[0]
+        self.assertIn("--monitor-bounds=0,0,1920,544", first_command)
+        self.assertIn("--monitor-bounds=0,536,1920,544", second_command)
+        self.assertIn("--runtime-ipc", first_command)
+        self.assertIn("--runtime-ipc", second_command)
+        self.assertNotIn("--start-hidden", first_command)
+        self.assertNotIn("--start-hidden", second_command)
+        self.assertEqual(popen.call_args_list[0].kwargs["stdin"], subprocess.PIPE)
+        first_process.stdin.write.assert_not_called()
+        second_process.stdin.write.assert_not_called()
+        wait_mock.assert_called_once()
+
+    def test_play_widget_blocking_can_use_single_native_row_window_when_enabled(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+
+        with patch.dict(
+            "os.environ",
+            {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_SINGLE_WINDOW": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"},
+            clear=False,
+        ), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            side_effect=lambda source: ["python", "widget_viewer.py", source],
+        ), patch.object(
+            player,
+            "_widget_popen_kwargs",
+            return_value={},
+        ), patch.object(
+            player,
+            "_wait_native_row_processes_for_slot",
+            return_value=True,
+        ), patch("client.player.subprocess.Popen") as popen:
+            first_process = unittest.mock.Mock()
+            first_process.poll.return_value = None
+            popen.side_effect = [first_process]
+
+            ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/top"},
+                        {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+                    ],
+                },
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(popen.call_count, 1)
+        first_command = popen.call_args_list[0].args[0]
+        self.assertTrue(str(first_command[2]).startswith("file:///"))
+        self.assertIn("--monitor-bounds=0,0,1920,1080", first_command)
+        self.assertIn("--runtime-ipc", first_command)
+        self.assertNotIn("--start-hidden", first_command)
+
+    def test_play_widget_blocking_can_opt_into_hidden_native_row_preload(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+
+        with patch.dict(
+            "os.environ",
+            {
+                "WIDGET_NATIVE_URL_ROWS": "1",
+                "WIDGET_NATIVE_URL_ROWS_HIDDEN_PRELOAD": "1",
+                "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0",
+            },
+            clear=False,
+        ), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            side_effect=lambda source: ["python", "widget_viewer.py", source],
+        ), patch.object(
+            player,
+            "_widget_popen_kwargs",
+            return_value={},
+        ), patch.object(
+            player,
+            "_wait_native_row_processes_for_slot",
+            return_value=True,
+        ), patch("client.player.subprocess.Popen") as popen:
+            first_process = unittest.mock.Mock()
+            second_process = unittest.mock.Mock()
+            first_process.poll.return_value = None
+            second_process.poll.return_value = None
+            popen.side_effect = [first_process, second_process]
+
+            ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config={
+                    "rows": 2,
+                    "columns": 1,
+                    "widgets": [
+                        {"type": "iframe", "url": "http://172.35.10.5/top"},
+                        {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+                    ],
+                },
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertIn("--start-hidden", popen.call_args_list[0].args[0])
+        first_process.stdin.write.assert_called_once_with('{"type": "foreground"}\n')
+        second_process.stdin.write.assert_called_once_with('{"type": "foreground"}\n')
+
+    def test_play_widget_blocking_reuses_native_row_windows_for_same_layout(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+        widget_config = {
+            "rows": 2,
+            "columns": 1,
+            "widgets": [
+                {"type": "iframe", "url": "http://172.35.10.5/top"},
+                {"type": "iframe", "url": "http://172.35.10.5/bottom"},
+            ],
+        }
+
+        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080)],
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            side_effect=lambda source: ["python", "widget_viewer.py", source],
+        ), patch.object(
+            player,
+            "_widget_popen_kwargs",
+            return_value={},
+        ), patch.object(
+            player,
+            "_wait_native_row_processes_for_slot",
+            return_value=True,
+        ) as wait_mock, patch.object(player, "_terminate_process") as terminate_mock, patch("client.player.subprocess.Popen") as popen:
+            first_process = unittest.mock.Mock()
+            second_process = unittest.mock.Mock()
+            first_process.poll.return_value = None
+            second_process.poll.return_value = None
+            popen.side_effect = [first_process, second_process]
+
+            first_ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config=widget_config,
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+            second_ok = player.play_widget_blocking(
+                "",
+                20,
+                widget_config=widget_config,
+                target_monitor_index=0,
+                clone_to_all_monitors=False,
+            )
+
+        self.assertTrue(first_ok)
+        self.assertTrue(second_ok)
+        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(wait_mock.call_count, 2)
+        terminate_mock.assert_not_called()
+        self.assertEqual(player._native_row_runtime_processes, [first_process, second_process])
+
+    def test_stop_widget_engine_can_preserve_native_row_windows(self):
+        player = self._build_player()
+        first_process = unittest.mock.Mock()
+        second_process = unittest.mock.Mock()
+        first_process.poll.return_value = None
+        second_process.poll.return_value = None
+        player._native_row_runtime_processes = [first_process, second_process]
+        player._native_row_runtime_signature = (("a", "b"), ((0, 0, 100, 50), (0, 50, 100, 50)))
+        player._widget_runtime_processes = [first_process, second_process]
+        player._widget_process = first_process
+
+        with patch.object(player, "_terminate_process") as terminate_mock:
+            player.stop_widget_engine(include_native_rows=False)
+
+        terminate_mock.assert_not_called()
+        self.assertEqual(player._native_row_runtime_processes, [first_process, second_process])
+        self.assertEqual(player._widget_runtime_processes, [first_process, second_process])
+        self.assertIs(player._widget_process, first_process)
+
+    def test_stop_terminates_native_row_windows_when_runtime_is_kept_warm(self):
+        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+        first_process = unittest.mock.Mock()
+        second_process = unittest.mock.Mock()
+        first_process.poll.return_value = None
+        second_process.poll.return_value = None
+        player._native_row_runtime_processes = [first_process, second_process]
+        player._native_row_runtime_signature = (("a", "b"), ((0, 0, 100, 50), (0, 50, 100, 50)))
+        player._widget_runtime_processes = [first_process, second_process]
+        player._widget_process = first_process
+        first_process.stdin = unittest.mock.Mock()
+        second_process.stdin = unittest.mock.Mock()
+
+        with patch.object(player, "_terminate_process") as terminate_mock:
+            player.stop(stop_widget_runtime=False)
+
+        terminate_mock.assert_not_called()
+        first_process.stdin.write.assert_called_once_with('{"type":"background"}\n')
+        second_process.stdin.write.assert_called_once_with('{"type":"background"}\n')
+        self.assertEqual(player._native_row_runtime_processes, [first_process, second_process])
+        self.assertEqual(player._widget_runtime_processes, [first_process, second_process])
+        self.assertIs(player._widget_process, first_process)
 
     def test_terminate_process_closes_stdin_before_terminate(self):
         player = self._build_player()
@@ -1022,6 +1497,57 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         self.assertEqual(payload, {"widgets": [{"type": "embed", "html": embed_html}]})
 
+    def test_build_widget_layout_payload_inlines_internal_iframe_html(self):
+        player = self._build_player()
+
+        class FakeHeaders:
+            def get(self, name, default=None):
+                if name.lower() == "content-type":
+                    return "text/html; charset=utf-8"
+                return default
+
+            def get_content_charset(self, _default=None):
+                return "utf-8"
+
+        class FakeResponse:
+            headers = FakeHeaders()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size=-1):
+                return b"<!doctype html><html><head></head><body>ok</body></html>"
+
+        with patch.dict(os.environ, {"WIDGET_INLINE_HTTP_IFRAMES": "1"}), patch(
+            "client.player.urlopen", return_value=FakeResponse()
+        ):
+            payload = player._build_widget_layout_payload(
+                "",
+                widget_config={"widgets": [{"type": "iframe", "url": "http://172.35.10.5:3002/widget"}]},
+            )
+
+        widget = payload["widgets"][0]
+        self.assertEqual(widget["type"], "embed")
+        self.assertEqual(widget["source_url"], "http://172.35.10.5:3002/widget")
+        self.assertIn('<base href="http://172.35.10.5:3002/">', widget["html"])
+
+    def test_build_widget_layout_payload_does_not_inline_internal_iframe_html_by_default(self):
+        player = self._build_player()
+
+        with patch.dict(os.environ, {}, clear=True), patch("client.player.urlopen") as urlopen_mock:
+            payload = player._build_widget_layout_payload(
+                "",
+                widget_config={"widgets": [{"type": "iframe", "url": "http://172.35.10.5:3002/widget"}]},
+            )
+
+        widget = payload["widgets"][0]
+        self.assertEqual(widget["type"], "iframe")
+        self.assertEqual(widget["url"], "http://172.35.10.5:3002/widget")
+        urlopen_mock.assert_not_called()
+
 
     def test_build_widget_source_encodes_config_b64(self):
         player = self._build_player()
@@ -1209,10 +1735,15 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             captured_sources.append(source)
             return ["msedge", source]
 
-        with patch.object(player, "_build_widget_command", side_effect=_fake_build_widget_command), patch(
-            "subprocess.Popen",
-            return_value=process,
-        ), patch("time.sleep", return_value=None):
+        with patch.object(player, "_native_widget_grid_specs", return_value=[]), patch.object(
+            player,
+            "_native_url_row_sources",
+            return_value=[],
+        ), patch.object(
+            player,
+            "_build_widget_command",
+            side_effect=_fake_build_widget_command,
+        ), patch("subprocess.Popen", return_value=process), patch("time.sleep", return_value=None):
             result = player.play_widget_blocking(
                 "https://ignored.example.com",
                 duration_sec=1,
@@ -1413,7 +1944,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(run_mock.call_args.kwargs["stderr"], subprocess.DEVNULL)
         self.assertFalse(run_mock.call_args.kwargs["check"])
 
-    def test_stop_keeps_widget_runtime_alive_by_default(self):
+    def test_stop_terminates_widget_runtime_by_default(self):
         player = self._build_player()
         widget_process = unittest.mock.Mock()
         widget_process.poll.return_value = None
@@ -1423,10 +1954,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch.object(player, "stop_widget_engine") as stop_widget_engine:
             player.stop()
 
-        stop_widget_engine.assert_not_called()
-        widget_process.stdin.write.assert_called_once_with('{"type":"background"}\n')
-        widget_process.stdin.flush.assert_called_once_with()
-        self.assertIs(player._widget_process, widget_process)
+        stop_widget_engine.assert_called_once()
 
     def test_stop_does_not_stop_widget_engine_when_background_fails(self):
         player = self._build_player()
@@ -1541,14 +2069,37 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         ) as build_command, patch.object(player, "_widget_popen_kwargs", return_value={}), patch(
             "subprocess.Popen",
             return_value=process,
-        ):
+        ) as popen:
             ok = player.start_widget_engine_if_needed()
 
         self.assertTrue(ok)
         build_command.assert_called_once_with(WIDGET_ENGINE_SENTINEL)
+        self.assertNotIn("--start-hidden", popen.call_args.args[0])
+
+    def test_start_widget_engine_can_opt_into_hidden_start(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        process.stdin = unittest.mock.Mock()
+
+        with patch.dict("os.environ", {"WIDGET_RUNTIME_START_HIDDEN": "1"}, clear=False), patch.object(
+            player, "_widget_runtime_controller_enabled", return_value=True
+        ), patch.object(
+            player,
+            "_build_python_widget_command",
+            return_value=["widget_viewer"],
+        ), patch.object(player, "_widget_popen_kwargs", return_value={}), patch(
+            "subprocess.Popen",
+            return_value=process,
+        ) as popen:
+            ok = player.start_widget_engine_if_needed()
+
+        self.assertTrue(ok)
+        self.assertIn("--start-hidden", popen.call_args.args[0])
 
     def test_start_widget_engine_keeps_existing_runtime_when_target_not_specified(self):
         player = self._build_player()
+        player._keep_widget_runtime_warm = True
         process_a = unittest.mock.Mock()
         process_a.poll.return_value = None
         process_a.stdin = unittest.mock.Mock()
@@ -1820,7 +2371,40 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         fake_player.start_widget_engine_if_needed.assert_not_called()
 
-    def test_update_from_config_prewarms_primary_widget_runtime_when_widget_exists(self):
+    def test_next_idle_item_is_widget_detects_current_sequential_widget(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller._playlist_entries = [
+            {
+                "item_type": "widget",
+                "widget_payload": {"widgets": [{"type": "iframe", "url": "http://172.35.10.5/widget"}]},
+                "duration_sec": 15,
+            }
+        ]
+        controller._loop_mode = "sequential"
+        controller._playback_state = {}
+
+        self.assertTrue(controller.next_idle_item_is_widget())
+
+    def test_next_idle_item_is_widget_returns_false_for_media(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller._playlist_entries = [
+            {
+                "item_type": "media",
+                "media_type": "image",
+                "local_path": "C:/media/a.png",
+                "duration_sec": 10,
+            }
+        ]
+        controller._loop_mode = "sequential"
+        controller._playback_state = {}
+
+        self.assertFalse(controller.next_idle_item_is_widget())
+
+    def test_update_from_config_defers_primary_widget_runtime_until_idle(self):
         from client.client import PlaybackController
 
         controller = PlaybackController(_FakeGuiRuntime())
@@ -1830,6 +2414,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback = unittest.mock.Mock()
         controller.multi_monitor_playback.has_active_playlist.return_value = False
         controller.player = unittest.mock.Mock()
+        controller.player.is_native_url_row_widget.return_value = False
 
         controller.update_from_config(
             {
@@ -1846,10 +2431,10 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.start_widget_engine_if_needed.assert_not_called()
         controller.player.stop_widget_engine.assert_not_called()
 
-    def test_update_from_config_does_not_background_primary_widget_when_already_visible(self):
+    def test_update_from_config_does_not_prewarm_primary_widget_when_already_visible(self):
         from client.client import PlaybackController
 
         controller = PlaybackController(_FakeGuiRuntime())
@@ -1859,6 +2444,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback = unittest.mock.Mock()
         controller.multi_monitor_playback.has_active_playlist.return_value = False
         controller.player = unittest.mock.Mock()
+        controller.player.is_native_url_row_widget.return_value = False
         controller.player._active_item = {
             "item_type": "widget",
             "widget_url": "https://example.com/w",
@@ -1880,7 +2466,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.start_widget_engine_if_needed.assert_not_called()
         controller.player.background_widget_engine.assert_not_called()
 
     def test_update_from_config_does_not_background_primary_widget_when_secondary_widget_is_visible(self):
@@ -1894,7 +2480,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback.has_active_playlist.return_value = False
         controller.multi_monitor_playback.has_visible_widget_runtime_content.return_value = True
         controller.player = unittest.mock.Mock()
-        controller.player.start_widget_engine_if_needed.return_value = True
+        controller.player.is_native_url_row_widget.return_value = False
         controller.player._active_item = {
             "item_type": "media",
             "path": "https://example.com/video.mp4",
@@ -1915,7 +2501,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.start_widget_engine_if_needed.assert_not_called()
         controller.player.background_widget_engine.assert_not_called()
 
     def test_update_from_config_stops_primary_widget_runtime_when_only_video_exists(self):
@@ -3256,8 +3842,8 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
             self.assertEqual(set(multi_monitor._widget_players.keys()), {2, 3})
             self.assertEqual(player_cls.call_count, 2)
-            monitor2_player.start_widget_engine_if_needed.assert_called_once()
-            monitor3_player.start_widget_engine_if_needed.assert_called_once()
+            monitor2_player.start_widget_engine_if_needed.assert_not_called()
+            monitor3_player.start_widget_engine_if_needed.assert_not_called()
 
             multi_monitor.update_from_config(
                 {
@@ -3277,9 +3863,9 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             )
 
         self.assertEqual(set(multi_monitor._widget_players.keys()), {3})
-        monitor2_player.stop.assert_called_with(stop_widget_runtime=False)
+        monitor2_player.stop.assert_called_with(stop_widget_runtime=True)
 
-    def test_multi_monitor_reconcile_does_not_background_visible_widget_runtime(self):
+    def test_multi_monitor_reconcile_defers_visible_widget_runtime_until_idle(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
@@ -3305,7 +3891,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
                 }
             )
 
-        monitor2_player.start_widget_engine_if_needed.assert_called_once()
+        monitor2_player.start_widget_engine_if_needed.assert_not_called()
         monitor2_player.background_widget_engine.assert_not_called()
 
     def test_multi_monitor_playback_defaults_enabled_to_true_when_flag_missing(self):
@@ -3332,7 +3918,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertTrue(multi_monitor.has_active_playlist())
         media_manager.sync_playlist_entries.assert_called_once()
 
-    def test_multi_monitor_worker_creates_secondary_player_with_warm_runtime(self):
+    def test_multi_monitor_worker_creates_secondary_player_without_warm_runtime(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
@@ -3361,7 +3947,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         with patch("client.client.BorderlessFullscreenPlayer", return_value=mock_player) as player_cls, patch("time.sleep", return_value=None):
             multi_monitor._run(2)
 
-        player_cls.assert_called_once_with(keep_widget_runtime_warm=True)
+        player_cls.assert_called_once_with(keep_widget_runtime_warm=False)
         mock_player.play_widget_blocking.assert_called_once()
 
     def test_multi_monitor_worker_uses_injected_widget_player_without_spawning_new_one(self):
@@ -3501,7 +4087,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             clone_to_all_monitors=False,
         )
 
-    def test_multi_monitor_pause_keeps_widget_runtime_warm_in_background(self):
+    def test_multi_monitor_pause_terminates_widget_runtime(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
@@ -3515,9 +4101,9 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         multi_monitor.pause()
 
         media_player.stop.assert_called_once_with()
-        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=True)
 
-    def test_multi_monitor_stop_keeps_widget_runtime_warm_in_background(self):
+    def test_multi_monitor_stop_terminates_widget_runtime(self):
         from client.client import MultiMonitorPlayback
 
         media_manager = unittest.mock.Mock()
@@ -3532,7 +4118,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         multi_monitor.stop()
 
         media_player.stop.assert_called_once_with()
-        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=True)
 
     def test_multi_monitor_stop_visits_widget_only_monitors(self):
         from client.client import MultiMonitorPlayback
@@ -3545,7 +4131,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         multi_monitor.stop()
 
-        widget_player.stop.assert_called_once_with(stop_widget_runtime=False)
+        widget_player.stop.assert_called_once_with(stop_widget_runtime=True)
 
     def test_reconcile_widget_players_stops_stale_widget_runtimes_for_non_widget_monitor(self):
         from client.client import MultiMonitorPlayback

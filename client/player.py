@@ -1,7 +1,9 @@
 import base64
 import hashlib
+import html
 import ipaddress
 import json
+import math
 import os
 import shlex
 import shutil
@@ -18,6 +20,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import quote
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
@@ -28,10 +31,17 @@ def _safe_print(message: str) -> None:
         print(message)
     except UnicodeEncodeError:
         try:
-            stream = getattr(sys, "stdout", None)
-            encoding = getattr(stream, "encoding", None) or "utf-8"
-            sanitized_message = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
-            print(sanitized_message)
+            stream = sys.stdout
+            encoding = stream.encoding or "utf-8"
+            sanitized_message = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
+            try:
+                stream.write(sanitized_message + "\n")
+                stream.flush()
+            except UnicodeEncodeError:
+                buffer = stream.buffer if hasattr(stream, "buffer") else None
+                if buffer:
+                    buffer.write((sanitized_message + "\n").encode(encoding, errors="replace"))
+                    buffer.flush()
         except OSError:
             pass
     except OSError:
@@ -40,6 +50,7 @@ def _safe_print(message: str) -> None:
 
 LOGGER = logging.getLogger("baylan.client.player")
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
+_WINDOWS_DPI_AWARENESS_ENABLED = False
 
 
 def _debug_log(message: str) -> None:
@@ -47,6 +58,28 @@ def _debug_log(message: str) -> None:
         return
     LOGGER.debug(message)
     _safe_print(f"[DEBUG][player] {message}")
+
+
+def _enable_windows_dpi_awareness() -> None:
+    global _WINDOWS_DPI_AWARENESS_ENABLED
+    if _WINDOWS_DPI_AWARENESS_ENABLED or os.name != "nt" or not hasattr(ctypes, "windll"):
+        return
+    _WINDOWS_DPI_AWARENESS_ENABLED = True
+    try:
+        awareness_context = ctypes.c_void_p(-4 & ((1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1))
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(awareness_context):
+            return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 
 def _runtime_resource_path(*relative_parts: str) -> Path:
@@ -138,6 +171,7 @@ class BorderlessFullscreenPlayer:
     def _windows_active_monitor_bounds() -> tuple[int, int, int, int] | None:
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return None
+        _enable_windows_dpi_awareness()
 
         user32 = ctypes.windll.user32
         monitor_from_window = getattr(user32, "MonitorFromWindow", None)
@@ -257,13 +291,15 @@ class BorderlessFullscreenPlayer:
         self._stop_requested = False
         self._widget_process = None
         self._widget_runtime_processes: list[subprocess.Popen] = []
+        self._native_row_runtime_processes: list[subprocess.Popen] = []
+        self._native_row_runtime_signature: object | None = None
         self._widget_process_stdin_lock = threading.Lock()
         self._widget_runtime_is_backgrounded = True
         self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
         env_keep_widget_runtime_warm = (
-            os.getenv("WIDGET_KEEP_RUNTIME_WARM", "1").strip().lower() in {"1", "true", "yes"}
+            os.getenv("WIDGET_KEEP_RUNTIME_WARM", "0").strip().lower() in {"1", "true", "yes"}
         )
         if keep_widget_runtime_warm is None:
             self._keep_widget_runtime_warm = env_keep_widget_runtime_warm
@@ -334,6 +370,7 @@ class BorderlessFullscreenPlayer:
     def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
         if os.name != "nt" or not hasattr(ctypes, "windll"):
             return []
+        _enable_windows_dpi_awareness()
 
         enum_display_monitors = getattr(ctypes.windll.user32, "EnumDisplayMonitors", None)
         get_monitor_info = getattr(ctypes.windll.user32, "GetMonitorInfoW", None)
@@ -1109,9 +1146,72 @@ class BorderlessFullscreenPlayer:
         except ValueError:
             return "https"
 
-        if ip.is_loopback or ip.is_private or ip.is_link_local:
-            return "http"
-        return "https"
+        # Signage widgets are commonly served from literal LAN/plant IPs that
+        # may not be RFC1918 private ranges (for example 172.35.x.x). Default
+        # literal IPs to HTTP unless the panel explicitly provides https://.
+        return "http"
+
+    @staticmethod
+    def _inline_iframe_html_enabled() -> bool:
+        # Keep this opt-in only: fetching protected Hub/widget pages outside
+        # the WebView browser context can return the login page instead of the
+        # widget because cookies/session state are not shared with urlopen.
+        return os.getenv("WIDGET_INLINE_HTTP_IFRAMES", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _inject_base_href(html_text: str, base_href: str) -> str:
+        if "<base" in html_text.lower():
+            return html_text
+        base_tag = f'<base href="{html.escape(base_href, quote=True)}">'
+        head_match = re.search(r"<head[^>]*>", html_text, re.IGNORECASE)
+        if head_match:
+            insert_at = head_match.end()
+            return f"{html_text[:insert_at]}{base_tag}{html_text[insert_at:]}"
+        doctype_match = re.search(r"<!doctype[^>]*>", html_text, re.IGNORECASE)
+        if doctype_match:
+            insert_at = doctype_match.end()
+            return f"{html_text[:insert_at]}<head>{base_tag}</head>{html_text[insert_at:]}"
+        return f"<head>{base_tag}</head>{html_text}"
+
+    def _try_inline_iframe_html(self, source: str) -> str | None:
+        if not self._inline_iframe_html_enabled():
+            return None
+        parsed = urlsplit(str(source or "").strip())
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return None
+        hostname = str(parsed.hostname or "").strip().lower()
+        inline_candidate = hostname in {"localhost", "127.0.0.1"} or hostname.endswith(".local")
+        if not inline_candidate and hostname:
+            try:
+                ipaddress.ip_address(hostname)
+                inline_candidate = True
+            except ValueError:
+                inline_candidate = "." not in hostname
+        if not inline_candidate:
+            return None
+        path_text = str(parsed.path or "").lower()
+        if parsed.port is None and "automation/production-widget" not in path_text:
+            return None
+        try:
+            request = Request(source, headers={"User-Agent": "BaylanSignageAgent/1.0"})
+            with urlopen(request, timeout=4) as response:
+                content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+                if content_type and content_type not in {"text/html", "application/xhtml+xml"}:
+                    return None
+                charset = getattr(response.headers, "get_content_charset", lambda _d=None: None)(None) or "utf-8"
+                body = response.read(1024 * 1024)
+        except Exception as exc:
+            _debug_log(f"inline iframe fetch skipped | source={source} error={exc}")
+            return None
+
+        html_text = body.decode(charset, errors="replace")
+        if "<html" not in html_text.lower() and "<!doctype" not in html_text.lower():
+            return None
+        base_path = parsed.path or "/"
+        if not base_path.endswith("/"):
+            base_path = base_path.rsplit("/", 1)[0] + "/"
+        base_href = urlunsplit((parsed.scheme, parsed.netloc, base_path, "", ""))
+        return self._inject_base_href(html_text, base_href)
 
     def _normalize_widget_payload(self, widget_config: dict | None, fallback_source: str = "") -> dict | None:
         payload: dict[str, object] = {}
@@ -1129,11 +1229,18 @@ class BorderlessFullscreenPlayer:
                         continue
                     normalized_widget = dict(widget)
                     widget_type = str(normalized_widget.get("type") or "").strip().lower()
+                    if widget_type in {"iframe/url", "iframe_url", "iframe-url"}:
+                        widget_type = "iframe"
+                    elif widget_type in {"img", "picture"}:
+                        widget_type = "image"
+                    if widget_type:
+                        normalized_widget["type"] = widget_type
                     if widget_type in {"iframe", "url"}:
                         raw_url = (
                             normalized_widget.get("url")
                             or normalized_widget.get("content")
                             or normalized_widget.get("source")
+                            or normalized_widget.get("source_url")
                             or normalized_widget.get("path")
                             or ""
                         )
@@ -1143,7 +1250,15 @@ class BorderlessFullscreenPlayer:
                             normalized_widget.pop("url", None)
                         elif str(raw_url).strip():
                             normalized_widget["type"] = "iframe"
-                            normalized_widget["url"] = self._normalize_widget_source(str(raw_url))
+                            normalized_url = self._normalize_widget_source(str(raw_url))
+                            inline_html = self._try_inline_iframe_html(normalized_url)
+                            if inline_html:
+                                normalized_widget["type"] = "embed"
+                                normalized_widget["html"] = inline_html
+                                normalized_widget["source_url"] = normalized_url
+                                normalized_widget.pop("url", None)
+                            else:
+                                normalized_widget["url"] = normalized_url
                         else:
                             normalized_widget["type"] = "empty"
                             normalized_widget.pop("url", None)
@@ -1159,6 +1274,7 @@ class BorderlessFullscreenPlayer:
                             normalized_widget.get("url")
                             or normalized_widget.get("content")
                             or normalized_widget.get("source")
+                            or normalized_widget.get("source_url")
                             or normalized_widget.get("path")
                             or ""
                         )
@@ -1253,9 +1369,764 @@ class BorderlessFullscreenPlayer:
         encoded = quote(base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"))
         return f"{engine_uri}?config_b64={encoded}"
 
+    def _build_native_iframe_cell_source(self, source: str) -> str:
+        return self._normalize_widget_source(source)
+
     def _build_widget_layout_payload(self, widget_source: str, widget_config: dict | None = None) -> dict | None:
         source = self._normalize_widget_source(widget_source)
         return self._normalize_widget_payload(widget_config=widget_config, fallback_source=source)
+
+    @staticmethod
+    def _native_url_rows_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_URL_ROWS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_url_rows_single_window_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_URL_ROWS_SINGLE_WINDOW", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_url_row_overlap_px() -> int:
+        try:
+            return max(0, min(24, int(os.getenv("WIDGET_NATIVE_URL_ROW_OVERLAP_PX", "4"))))
+        except ValueError:
+            return 4
+
+    @staticmethod
+    def _native_grid_overlap_px() -> int:
+        try:
+            return max(0, min(24, int(os.getenv("WIDGET_NATIVE_GRID_OVERLAP_PX", "4"))))
+        except ValueError:
+            return 4
+
+    @staticmethod
+    def _native_url_rows_keep_warm_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_URL_ROWS_KEEP_WARM", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_url_rows_hidden_preload_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_URL_ROWS_HIDDEN_PRELOAD", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_widget_grid_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_GRID", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_underlay_enabled() -> bool:
+        return os.getenv("WIDGET_NATIVE_UNDERLAY", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _widget_runtime_start_hidden_enabled() -> bool:
+        return os.getenv("WIDGET_RUNTIME_START_HIDDEN", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _native_url_rows_preload_sec() -> float:
+        try:
+            return max(0.0, min(5.0, float(os.getenv("WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC", "1.2"))))
+        except ValueError:
+            return 1.2
+
+    def _native_url_row_sources(self, widget_source: str, widget_config: dict | None = None) -> list[str]:
+        if not self._native_url_rows_enabled() or not isinstance(widget_config, dict):
+            return []
+
+        payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
+        if not isinstance(payload, dict):
+            return []
+
+        widgets = payload.get("widgets")
+        if not isinstance(widgets, list) or len(widgets) < 2:
+            return []
+
+        columns = payload.get("columns")
+        if isinstance(columns, list):
+            column_count = len(columns)
+        else:
+            try:
+                column_count = int(columns or 1)
+            except (TypeError, ValueError):
+                column_count = 1
+        if max(1, column_count) != 1:
+            return []
+
+        row_sources: list[str] = []
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                return []
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type in {"iframe/url", "iframe_url", "iframe-url"}:
+                widget_type = "iframe"
+            if widget_type in {"empty", ""}:
+                continue
+            if widget_type not in {"iframe", "url"}:
+                return []
+            raw_url = (
+                widget.get("url")
+                or widget.get("content")
+                or widget.get("source")
+                or widget.get("source_url")
+                or widget.get("path")
+                or ""
+            )
+            normalized_url = self._normalize_widget_source(str(raw_url))
+            if not normalized_url or not self._is_widget_url(normalized_url):
+                return []
+            row_sources.append(normalized_url)
+
+        if len(row_sources) < 2:
+            return []
+        return row_sources
+
+    def is_native_url_row_widget(self, widget_source: str = "", widget_config: dict | None = None) -> bool:
+        return bool(self._native_url_row_sources(widget_source, widget_config=widget_config))
+
+    def is_native_widget_grid(self, widget_source: str = "", widget_config: dict | None = None) -> bool:
+        return bool(self._native_widget_grid_specs(widget_source, widget_config=widget_config))
+
+    def is_native_widget_layout(self, widget_source: str = "", widget_config: dict | None = None) -> bool:
+        return self.is_native_url_row_widget(widget_source, widget_config=widget_config) or self.is_native_widget_grid(
+            widget_source,
+            widget_config=widget_config,
+        )
+
+    @staticmethod
+    def _widget_grid_span(widget: dict, keys: tuple[str, ...]) -> int:
+        for key in keys:
+            try:
+                value = int(widget.get(key) or 1)
+            except (TypeError, ValueError):
+                value = 1
+            if value > 1:
+                return value
+        return 1
+
+    def _build_native_image_page(self, source: str) -> str:
+        safe_source = html.escape(source, quote=True)
+        document = f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body {{
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+}}
+img {{
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}}
+</style>
+</head>
+<body><img src="{safe_source}" alt=""></body>
+</html>
+"""
+        safe_hash = hashlib.sha1(source.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        page_path = Path(tempfile.gettempdir()) / f"baylan-native-image-{safe_hash}.html"
+        page_path.write_text(document, encoding="utf-8")
+        return page_path.resolve().as_uri()
+
+    def _build_native_black_page(self) -> str:
+        document = """<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+}
+</style>
+</head>
+<body></body>
+</html>
+"""
+        page_path = Path(tempfile.gettempdir()) / "baylan-native-black-underlay.html"
+        page_path.write_text(document, encoding="utf-8")
+        return page_path.resolve().as_uri()
+
+    def _native_widget_grid_specs(
+        self,
+        widget_source: str,
+        widget_config: dict | None = None,
+        target_monitor_index: int | None = None,
+    ) -> list[tuple[int, str, tuple[int, int, int, int]]]:
+        if not self._native_widget_grid_enabled() or os.name != "nt" or not isinstance(widget_config, dict):
+            return []
+
+        payload = self._normalize_widget_payload(widget_config=widget_config, fallback_source="")
+        if not isinstance(payload, dict):
+            return []
+        widgets = payload.get("widgets")
+        if not isinstance(widgets, list) or len(widgets) < 2:
+            return []
+
+        columns = payload.get("columns")
+        if isinstance(columns, list):
+            cols = len(columns)
+        else:
+            try:
+                cols = int(columns or 1)
+            except (TypeError, ValueError):
+                cols = 1
+        cols = max(1, cols)
+        if cols <= 1:
+            return []
+        try:
+            rows = int(payload.get("rows") or 0)
+        except (TypeError, ValueError):
+            rows = 0
+        rows = max(rows, math.ceil(len(widgets) / cols), 1)
+
+        monitor_bounds_list = self._windows_connected_monitor_bounds()
+        monitor_bounds: tuple[int, int, int, int] | None = None
+        if isinstance(target_monitor_index, int) and target_monitor_index >= 0 and monitor_bounds_list:
+            monitor_bounds = monitor_bounds_list[min(target_monitor_index, len(monitor_bounds_list) - 1)]
+        if monitor_bounds is None:
+            monitor_bounds = self._windows_active_monitor_bounds()
+        if monitor_bounds is None and monitor_bounds_list:
+            monitor_bounds = monitor_bounds_list[0]
+        if monitor_bounds is None:
+            return []
+
+        x, y, width, height = monitor_bounds
+        occupied: set[tuple[int, int]] = set()
+        cursor_row = 0
+        cursor_col = 0
+        specs: list[tuple[int, str, tuple[int, int, int, int]]] = []
+
+        for widget_index, widget in enumerate(widgets):
+            if not isinstance(widget, dict):
+                return []
+            while (cursor_row, cursor_col) in occupied:
+                cursor_col += 1
+                if cursor_col >= cols:
+                    cursor_col = 0
+                    cursor_row += 1
+            if cursor_row >= rows:
+                rows = cursor_row + 1
+
+            col_span = min(cols - cursor_col, self._widget_grid_span(widget, ("col_span", "colspan", "column_span", "merge_cols")))
+            row_span = self._widget_grid_span(widget, ("row_span", "rowspan", "merge_rows"))
+            row_span = max(1, row_span)
+            if cursor_row + row_span > rows:
+                rows = cursor_row + row_span
+            for mark_row in range(cursor_row, cursor_row + row_span):
+                for mark_col in range(cursor_col, cursor_col + col_span):
+                    occupied.add((mark_row, mark_col))
+
+            widget_type = str(widget.get("type") or "").strip().lower()
+            if widget_type in {"iframe/url", "iframe_url", "iframe-url"}:
+                widget_type = "iframe"
+            elif widget_type in {"img", "picture"}:
+                widget_type = "image"
+            if widget_type in {"", "empty"}:
+                cursor_col += 1
+                if cursor_col >= cols:
+                    cursor_col = 0
+                    cursor_row += 1
+                continue
+
+            raw_source = str(
+                widget.get("url")
+                or widget.get("content")
+                or widget.get("source")
+                or widget.get("source_url")
+                or widget.get("path")
+                or ""
+            ).strip()
+            if not raw_source:
+                return []
+            if widget_type in {"iframe", "url"}:
+                source = self._build_native_iframe_cell_source(raw_source)
+            elif widget_type == "image":
+                image_source = self._normalize_widget_source(raw_source)
+                source = self._build_native_image_page(image_source)
+            else:
+                return []
+            if not source:
+                return []
+
+            left = x + math.floor((width * cursor_col) / cols)
+            top = y + math.floor((height * cursor_row) / rows)
+            right = x + math.floor((width * min(cols, cursor_col + col_span)) / cols)
+            bottom = y + math.floor((height * min(rows, cursor_row + row_span)) / rows)
+            overlap_px = self._native_grid_overlap_px()
+            if overlap_px > 0:
+                if cursor_col > 0:
+                    left = max(x, left - overlap_px)
+                if cursor_row > 0:
+                    top = max(y, top - overlap_px)
+                if cursor_col + col_span < cols:
+                    right = min(x + width, right + overlap_px)
+                if cursor_row + row_span < rows:
+                    bottom = min(y + height, bottom + overlap_px)
+            specs.append((widget_index, source, (left, top, max(1, right - left), max(1, bottom - top))))
+
+            cursor_col += 1
+            if cursor_col >= cols:
+                cursor_col = 0
+                cursor_row += 1
+
+        return specs if len(specs) >= 2 else []
+
+    def _resolve_native_url_row_bounds(
+        self,
+        row_count: int,
+        target_monitor_index: int | None = None,
+    ) -> list[tuple[int, int, int, int]]:
+        if row_count < 2 or os.name != "nt":
+            return []
+
+        monitor_bounds_list = self._windows_connected_monitor_bounds()
+        monitor_bounds: tuple[int, int, int, int] | None = None
+        if isinstance(target_monitor_index, int) and target_monitor_index >= 0 and monitor_bounds_list:
+            monitor_bounds = monitor_bounds_list[min(target_monitor_index, len(monitor_bounds_list) - 1)]
+        if monitor_bounds is None:
+            monitor_bounds = self._windows_active_monitor_bounds()
+        if monitor_bounds is None and monitor_bounds_list:
+            monitor_bounds = monitor_bounds_list[0]
+        if monitor_bounds is None:
+            return []
+
+        x, y, width, height = monitor_bounds
+        row_bounds: list[tuple[int, int, int, int]] = []
+        cursor_y = y
+        remaining_height = height
+        for row_index in range(row_count):
+            remaining_rows = row_count - row_index
+            row_height = max(1, remaining_height // remaining_rows)
+            if row_index == row_count - 1:
+                row_height = max(1, (y + height) - cursor_y)
+            row_bounds.append((x, cursor_y, width, row_height))
+            cursor_y += row_height
+            remaining_height = max(0, (y + height) - cursor_y)
+        overlap_px = self._native_url_row_overlap_px()
+        if overlap_px > 0 and row_count > 1:
+            overlapped_bounds: list[tuple[int, int, int, int]] = []
+            monitor_bottom = y + height
+            for row_index, (row_x, row_y, row_width, row_height) in enumerate(row_bounds):
+                adjusted_y = row_y
+                adjusted_height = row_height
+                if row_index > 0:
+                    overlap_up = min(overlap_px, max(0, row_y - y))
+                    adjusted_y -= overlap_up
+                    adjusted_height += overlap_up
+                if row_index < row_count - 1:
+                    overlap_down = min(overlap_px, max(0, monitor_bottom - (row_y + row_height)))
+                    adjusted_height += overlap_down
+                adjusted_height = max(1, min(adjusted_height, monitor_bottom - adjusted_y))
+                overlapped_bounds.append((row_x, adjusted_y, row_width, adjusted_height))
+            row_bounds = overlapped_bounds
+        return row_bounds
+
+    @staticmethod
+    def _native_url_row_full_bounds(row_bounds: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
+        if not row_bounds:
+            return None
+        x = min(bounds[0] for bounds in row_bounds)
+        y = min(bounds[1] for bounds in row_bounds)
+        right = max(bounds[0] + bounds[2] for bounds in row_bounds)
+        bottom = max(bounds[1] + bounds[3] for bounds in row_bounds)
+        width = max(1, right - x)
+        height = max(1, bottom - y)
+        return x, y, width, height
+
+    def _build_native_url_rows_page(self, row_sources: list[str]) -> str:
+        iframe_markup = "\n".join(
+            (
+                '<iframe '
+                f'src="{html.escape(source, quote=True)}" '
+                'referrerpolicy="no-referrer-when-downgrade" '
+                'allow="autoplay; fullscreen; display-capture; encrypted-media; picture-in-picture; storage-access" '
+                'loading="eager"></iframe>'
+            )
+            for source in row_sources
+        )
+        document = f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src * data: blob: file: 'unsafe-inline' 'unsafe-eval'; frame-src * data: blob: file:; img-src * data: blob: file:;">
+<style>
+html, body {{
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+}}
+body {{
+  display: grid;
+  grid-template-rows: repeat({len(row_sources)}, minmax(0, 1fr));
+}}
+iframe {{
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: #000;
+}}
+</style>
+</head>
+<body>
+{iframe_markup}
+</body>
+</html>
+"""
+        safe_hash = hashlib.sha1("\n".join(row_sources).encode("utf-8", errors="ignore")).hexdigest()[:12]
+        page_path = Path(tempfile.gettempdir()) / f"baylan-native-rows-{safe_hash}.html"
+        page_path.write_text(document, encoding="utf-8")
+        return page_path.resolve().as_uri()
+
+    @staticmethod
+    def _native_launch_specs_full_bounds(
+        launch_specs: list[tuple[int, str, tuple[int, int, int, int]]],
+    ) -> tuple[int, int, int, int] | None:
+        if not launch_specs:
+            return None
+        x = min(bounds[0] for _index, _source, bounds in launch_specs)
+        y = min(bounds[1] for _index, _source, bounds in launch_specs)
+        right = max(bounds[0] + bounds[2] for _index, _source, bounds in launch_specs)
+        bottom = max(bounds[1] + bounds[3] for _index, _source, bounds in launch_specs)
+        return x, y, max(1, right - x), max(1, bottom - y)
+
+    def _with_native_black_underlay(
+        self,
+        launch_specs: list[tuple[int, str, tuple[int, int, int, int]]],
+        full_bounds: tuple[int, int, int, int] | None = None,
+    ) -> list[tuple[int, str, tuple[int, int, int, int]]]:
+        if not launch_specs or not self._native_underlay_enabled():
+            return launch_specs
+        if launch_specs and launch_specs[0][0] == -1:
+            return launch_specs
+        bounds = full_bounds or self._native_launch_specs_full_bounds(launch_specs)
+        if bounds is None:
+            return launch_specs
+        return [(-1, self._build_native_black_page(), bounds), *launch_specs]
+
+    def _play_native_widget_specs_blocking(
+        self,
+        launch_specs: list[tuple[int, str, tuple[int, int, int, int]]],
+        duration_sec: int,
+        *,
+        signature_kind: str,
+        target_monitor_index: int | None = None,
+    ) -> bool:
+        if not launch_specs:
+            return False
+        if signature_kind == "grid":
+            full_bounds = self._native_launch_specs_full_bounds(launch_specs)
+            if full_bounds is not None:
+                launch_specs = [(-1, self._build_native_black_page(), full_bounds), *launch_specs]
+        launch_specs = self._with_native_black_underlay(launch_specs)
+        signature = (
+            signature_kind,
+            tuple((source, bounds) for _index, source, bounds in launch_specs),
+        )
+        process_count = len(launch_specs)
+        processes: list[subprocess.Popen] = []
+        reused_processes: list[subprocess.Popen] | None = None
+        try:
+            self._stop_requested = False
+            with self._widget_process_lock:
+                running_native_processes = [
+                    process
+                    for process in self._native_row_runtime_processes
+                    if process and process.poll() is None
+                ]
+                if self._native_row_runtime_signature == signature and len(running_native_processes) == process_count:
+                    self._widget_process = running_native_processes[0] if running_native_processes else None
+                    self._widget_runtime_processes = list(running_native_processes)
+                    self._widget_runtime_is_backgrounded = False
+                    _debug_log(
+                        "native widget grid reused | "
+                        f"kind={signature_kind} windows={len(running_native_processes)} duration_sec={duration_sec}"
+                    )
+                    reused_processes = list(running_native_processes)
+                else:
+                    self._terminate_native_row_runtime_locked(timeout_sec=2)
+
+            if reused_processes is not None:
+                self._send_widget_runtime_message({"type": "foreground"}, ensure_started=False)
+                return self._wait_native_row_processes_for_slot(reused_processes, duration_sec)
+
+            with self._widget_process_lock:
+                hidden_preload = self._native_url_rows_keep_warm_enabled() and self._native_url_rows_hidden_preload_enabled()
+                for widget_index, source, bounds in launch_specs:
+                    command = self._build_python_widget_command(source)
+                    if not command:
+                        return False
+                    x, y, width, height = bounds
+                    command.extend(["--monitor", str(target_monitor_index if isinstance(target_monitor_index, int) else 0)])
+                    command.append(f"--monitor-bounds={x},{y},{width},{height}")
+                    if self._native_url_rows_keep_warm_enabled():
+                        command.append("--runtime-ipc")
+                    if hidden_preload:
+                        command.append("--start-hidden")
+                    popen_kwargs = self._widget_popen_kwargs(command)
+                    if self._native_url_rows_keep_warm_enabled():
+                        popen_kwargs.update({"stdin": subprocess.PIPE, "text": True, "encoding": "utf-8"})
+                    process = subprocess.Popen(command, **popen_kwargs)
+                    processes.append(process)
+                    _debug_log(
+                        "native widget grid started | "
+                        f"kind={signature_kind} widget={widget_index} pid={getattr(process, 'pid', None)} "
+                        f"bounds={bounds} source={source[:160]}"
+                    )
+                self._widget_process = processes[0] if processes else None
+                self._widget_runtime_processes = list(processes)
+                self._native_row_runtime_processes = list(processes)
+                self._native_row_runtime_signature = signature
+                self._widget_runtime_is_backgrounded = bool(hidden_preload)
+
+            if processes and hidden_preload:
+                preload_sec = self._native_url_rows_preload_sec()
+                if preload_sec > 0:
+                    deadline = time.monotonic() + preload_sec
+                    while time.monotonic() < deadline:
+                        if self._stop_requested or any(process.poll() is not None for process in processes):
+                            break
+                        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                if not self._stop_requested and all(process.poll() is None for process in processes):
+                    self._send_widget_runtime_message({"type": "foreground"}, ensure_started=False)
+                    with self._widget_process_lock:
+                        self._widget_runtime_is_backgrounded = False
+
+            return self._wait_native_row_processes_for_slot(processes, duration_sec)
+        except Exception as exc:
+            _safe_print(f"⚠️ native widget grid başlatılamadı: {exc}")
+            self._last_interrupted = False
+            return False
+        finally:
+            with self._widget_process_lock:
+                active_native_processes = [
+                    process
+                    for process in processes
+                    if process in self._native_row_runtime_processes and process and process.poll() is None
+                ]
+                if not active_native_processes:
+                    for process in processes:
+                        if process and process.poll() is None:
+                            self._terminate_process(process, timeout_sec=2, force_tree=True)
+                if self._widget_process in processes and not active_native_processes:
+                    self._widget_process = None
+                self._widget_runtime_processes = [
+                    process for process in self._widget_runtime_processes
+                    if process not in processes and process and process.poll() is None
+                ]
+                self._widget_runtime_processes.extend(
+                    process
+                    for process in active_native_processes
+                    if process not in self._widget_runtime_processes
+                )
+                if not self._widget_runtime_processes:
+                    self._widget_runtime_is_backgrounded = True
+
+    def _play_native_url_rows_blocking(
+        self,
+        row_sources: list[str],
+        duration_sec: int,
+        target_monitor_index: int | None = None,
+    ) -> bool:
+        row_bounds = self._resolve_native_url_row_bounds(len(row_sources), target_monitor_index=target_monitor_index)
+        if len(row_bounds) != len(row_sources):
+            return False
+
+        full_bounds = self._native_url_row_full_bounds(row_bounds)
+        if full_bounds is None:
+            return False
+        single_window = self._native_url_rows_single_window_enabled()
+        if single_window:
+            launch_specs = [(0, self._build_native_url_rows_page(row_sources), full_bounds)]
+        else:
+            launch_specs = [
+                (row_index, source, bounds)
+                for row_index, (source, bounds) in enumerate(zip(row_sources, row_bounds))
+            ]
+            launch_specs = self._with_native_black_underlay(launch_specs, full_bounds=full_bounds)
+        process_count = len(launch_specs)
+        signature = ("rows", tuple((source, bounds) for _index, source, bounds in launch_specs))
+        processes: list[subprocess.Popen] = []
+        reused_processes: list[subprocess.Popen] | None = None
+        try:
+            self._stop_requested = False
+            with self._widget_process_lock:
+                running_native_processes = [
+                    process
+                    for process in self._native_row_runtime_processes
+                    if process and process.poll() is None
+                ]
+                if (
+                    self._native_row_runtime_signature == signature
+                    and len(running_native_processes) == process_count
+                ):
+                    self._widget_process = running_native_processes[0] if running_native_processes else None
+                    self._widget_runtime_processes = list(running_native_processes)
+                    self._widget_runtime_is_backgrounded = False
+                    _debug_log(
+                        "native url row widget reused | "
+                        f"rows={len(running_native_processes)} duration_sec={duration_sec}"
+                    )
+                    reused_processes = list(running_native_processes)
+                else:
+                    self._terminate_native_row_runtime_locked(timeout_sec=2)
+
+            if reused_processes is not None:
+                self._send_widget_runtime_message({"type": "foreground"}, ensure_started=False)
+                return self._wait_native_row_processes_for_slot(reused_processes, duration_sec)
+
+            with self._widget_process_lock:
+                hidden_preload = self._native_url_rows_keep_warm_enabled() and self._native_url_rows_hidden_preload_enabled()
+                for row_index, source, bounds in launch_specs:
+                    command = self._build_python_widget_command(source)
+                    if not command:
+                        return False
+                    x, y, width, height = bounds
+                    command.extend(["--monitor", str(target_monitor_index if isinstance(target_monitor_index, int) else 0)])
+                    command.append(f"--monitor-bounds={x},{y},{width},{height}")
+                    if self._native_url_rows_keep_warm_enabled():
+                        command.append("--runtime-ipc")
+                    if hidden_preload:
+                        command.append("--start-hidden")
+                    popen_kwargs = self._widget_popen_kwargs(command)
+                    if self._native_url_rows_keep_warm_enabled():
+                        popen_kwargs.update({"stdin": subprocess.PIPE, "text": True, "encoding": "utf-8"})
+                    process = subprocess.Popen(command, **popen_kwargs)
+                    processes.append(process)
+                    _debug_log(
+                        "native url row widget started | "
+                        f"row={row_index} pid={getattr(process, 'pid', None)} bounds={bounds} url={source[:160]}"
+                    )
+                self._widget_process = processes[0] if processes else None
+                self._widget_runtime_processes = list(processes)
+                self._native_row_runtime_processes = list(processes)
+                self._native_row_runtime_signature = signature
+                self._widget_runtime_is_backgrounded = bool(hidden_preload)
+
+            if processes and hidden_preload:
+                preload_sec = self._native_url_rows_preload_sec()
+                if preload_sec > 0:
+                    _debug_log(
+                        "native url row widget preload wait | "
+                        f"processes={len(processes)} preload_sec={preload_sec}"
+                    )
+                    deadline = time.monotonic() + preload_sec
+                    while time.monotonic() < deadline:
+                        if self._stop_requested:
+                            break
+                        if any(process.poll() is not None for process in processes):
+                            break
+                        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                if not self._stop_requested and all(process.poll() is None for process in processes):
+                    self._send_widget_runtime_message({"type": "foreground"}, ensure_started=False)
+                    with self._widget_process_lock:
+                        self._widget_runtime_is_backgrounded = False
+
+            return self._wait_native_row_processes_for_slot(processes, duration_sec)
+        except Exception as exc:
+            _safe_print(f"⚠️ native widget satırları başlatılamadı: {exc}")
+            self._last_interrupted = False
+            return False
+        finally:
+            with self._widget_process_lock:
+                active_native_processes = [
+                    process
+                    for process in processes
+                    if process in self._native_row_runtime_processes and process and process.poll() is None
+                ]
+                if not active_native_processes:
+                    for process in processes:
+                        if process and process.poll() is None:
+                            self._terminate_process(process, timeout_sec=2, force_tree=True)
+
+                if self._widget_process in processes and not active_native_processes:
+                    self._widget_process = None
+                self._widget_runtime_processes = [
+                    process for process in self._widget_runtime_processes
+                    if process not in processes and process and process.poll() is None
+                ]
+                self._widget_runtime_processes.extend(
+                    process
+                    for process in active_native_processes
+                    if process not in self._widget_runtime_processes
+                )
+                if not self._widget_runtime_processes:
+                    self._widget_runtime_is_backgrounded = True
+
+    def _terminate_native_row_runtime_locked(self, timeout_sec: float = 2) -> None:
+        native_processes = list(dict.fromkeys(self._native_row_runtime_processes))
+        for process in native_processes:
+            if process and process.poll() is None:
+                self._terminate_process(process, timeout_sec=timeout_sec, force_tree=True)
+        self._native_row_runtime_processes = []
+        self._native_row_runtime_signature = None
+        self._widget_runtime_processes = [
+            process
+            for process in self._widget_runtime_processes
+            if process not in native_processes and process and process.poll() is None
+        ]
+        if self._widget_process in native_processes:
+            self._widget_process = None
+        if not self._widget_runtime_processes:
+            self._widget_runtime_is_backgrounded = True
+
+    def _wait_native_row_processes_for_slot(self, processes: list[subprocess.Popen], duration_sec: int) -> bool:
+        if not processes:
+            self._last_interrupted = False
+            return False
+
+        unique_processes = list(dict.fromkeys(processes))
+        pid_list = [getattr(process, "pid", None) for process in unique_processes]
+        deadline = time.monotonic() + max(1, int(duration_sec))
+        wait_exit_reason = "unknown"
+
+        while True:
+            if self._stop_requested:
+                wait_exit_reason = "stop_requested"
+                break
+            if any(process.poll() is not None for process in unique_processes):
+                wait_exit_reason = "process_exited"
+                break
+            if time.monotonic() >= deadline:
+                wait_exit_reason = "duration_deadline_reached"
+                break
+            time.sleep(0.2)
+
+        interrupted = self._stop_requested
+        if interrupted or wait_exit_reason == "process_exited":
+            with self._widget_process_lock:
+                for process in unique_processes:
+                    if process and process.poll() is None:
+                        self._terminate_process(process, timeout_sec=2, force_tree=True)
+                self._native_row_runtime_processes = [
+                    process
+                    for process in self._native_row_runtime_processes
+                    if process not in unique_processes and process and process.poll() is None
+                ]
+                if not self._native_row_runtime_processes:
+                    self._native_row_runtime_signature = None
+
+        self._last_interrupted = interrupted
+        return_codes = [process.returncode for process in unique_processes]
+        ok = wait_exit_reason == "duration_deadline_reached" or interrupted
+        if wait_exit_reason == "process_exited":
+            ok = all(process.returncode in (0, None) for process in unique_processes)
+        _debug_log(
+            "_wait_native_row_processes_for_slot finished | "
+            f"reason={wait_exit_reason} interrupted={interrupted} "
+            f"duration_sec={duration_sec} pids={pid_list} returncodes={return_codes} ok={ok}"
+        )
+        return ok
 
     def build_media_widget_payload(
         self,
@@ -1449,7 +2320,8 @@ class BorderlessFullscreenPlayer:
         if not command:
             return None
         command.append("--runtime-ipc")
-        command.append("--start-hidden")
+        if self._widget_runtime_start_hidden_enabled():
+            command.append("--start-hidden")
         if isinstance(monitor_index, int) and monitor_index >= 0:
             command.extend(["--monitor", str(monitor_index)])
         if monitor_bounds is not None:
@@ -1673,6 +2545,7 @@ class BorderlessFullscreenPlayer:
         *,
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
+        ensure_started: bool = True,
     ) -> bool:
         message_type = str(message.get("type") or "").strip().lower()
         _debug_log(
@@ -1680,7 +2553,7 @@ class BorderlessFullscreenPlayer:
             f"type={message_type or '<unknown>'} target_monitor_index={target_monitor_index} "
             f"clone_to_all_monitors={clone_to_all_monitors}"
         )
-        if not self.start_widget_engine_if_needed(
+        if ensure_started and not self.start_widget_engine_if_needed(
             target_monitor_index=target_monitor_index,
             clone_to_all_monitors=clone_to_all_monitors,
         ):
@@ -1774,6 +2647,10 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
+        if self.is_native_widget_layout(widget_source, widget_config=widget_config):
+            _debug_log("update_widget_layout skipped | reason=native_layout")
+            self.stop_widget_engine(include_native_rows=False)
+            return False
         runtime_backgrounded = bool(getattr(self, "_widget_runtime_is_backgrounded", False))
         if (
             widget_signature
@@ -1817,16 +2694,33 @@ class BorderlessFullscreenPlayer:
             self._widget_runtime_is_backgrounded = False
         return sent
 
-    def stop_widget_engine(self) -> None:
+    def stop_widget_engine(self, include_native_rows: bool = True) -> None:
         with self._widget_process_lock:
             self._widget_runtime_is_backgrounded = True
-            processes = [
-                process for process in self._runtime_processes_snapshot()
+            native_processes = [
+                process
+                for process in self._native_row_runtime_processes
                 if process and process.poll() is None
             ]
+            processes = [
+                process for process in self._runtime_processes_snapshot()
+                if (
+                    process
+                    and process.poll() is None
+                    and (include_native_rows or process not in native_processes)
+                )
+            ]
             if not processes:
-                self._widget_process = None
-                self._widget_runtime_processes = []
+                if include_native_rows:
+                    self._widget_process = None
+                    self._widget_runtime_processes = []
+                    self._native_row_runtime_processes = []
+                    self._native_row_runtime_signature = None
+                else:
+                    self._widget_runtime_processes = list(native_processes)
+                    self._widget_process = native_processes[0] if native_processes else None
+                    if native_processes:
+                        self._widget_runtime_is_backgrounded = False
                 return
 
             try:
@@ -1840,8 +2734,21 @@ class BorderlessFullscreenPlayer:
 
             for process in processes:
                 self._terminate_process(process, timeout_sec=2, force_tree=True)
-            self._widget_process = None
-            self._widget_runtime_processes = []
+            if include_native_rows:
+                self._widget_process = None
+                self._widget_runtime_processes = []
+                self._native_row_runtime_processes = []
+                self._native_row_runtime_signature = None
+            else:
+                kept_native_processes = [
+                    process
+                    for process in native_processes
+                    if process and process.poll() is None
+                ]
+                self._widget_runtime_processes = list(kept_native_processes)
+                self._widget_process = kept_native_processes[0] if kept_native_processes else None
+                if kept_native_processes:
+                    self._widget_runtime_is_backgrounded = False
 
     def _stop_detached_widget_browser_processes(self) -> None:
         if os.name != "nt":
@@ -1926,7 +2833,7 @@ class BorderlessFullscreenPlayer:
                 return False
 
             success_count = 0
-            failed_processes: list[str] = []
+            failed_processes: list[tuple[subprocess.Popen, str]] = []
             with self._widget_process_stdin_lock:
                 for process in processes:
                     process_pid = getattr(process, "pid", None)
@@ -1940,7 +2847,7 @@ class BorderlessFullscreenPlayer:
                             f"pid={process_pid} monitor={monitor_hint}"
                         )
                     except Exception as exc:
-                        failed_processes.append(f"pid={process_pid} monitor={monitor_hint} error={exc}")
+                        failed_processes.append((process, f"pid={process_pid} monitor={monitor_hint} error={exc}"))
                         _debug_log(
                             "widget runtime background send failed | "
                             f"pid={process_pid} monitor={monitor_hint} error={exc}"
@@ -1948,13 +2855,24 @@ class BorderlessFullscreenPlayer:
 
             if success_count == 0:
                 _safe_print("⚠️ widget runtime background moduna alınamadı: canlı süreçlere mesaj gönderilemedi")
+                for process in processes:
+                    if process and process.poll() is None:
+                        self._terminate_process(process, timeout_sec=1, force_tree=True)
+                self._widget_process = None
+                self._widget_runtime_processes = []
+                self._native_row_runtime_processes = []
+                self._native_row_runtime_signature = None
+                self._widget_runtime_is_backgrounded = True
                 return False
 
             if failed_processes:
                 _safe_print(
                     "⚠️ bazı widget runtime süreçleri background moduna alınamadı: "
-                    + " | ".join(failed_processes[:5])
+                    + " | ".join(detail for _process, detail in failed_processes[:5])
                 )
+                for process, _detail in failed_processes:
+                    if process and process.poll() is None:
+                        self._terminate_process(process, timeout_sec=1, force_tree=True)
             _debug_log(
                 "widget runtime background completed | "
                 f"success_count={success_count} failed_count={len(failed_processes)}"
@@ -2349,6 +3267,45 @@ class BorderlessFullscreenPlayer:
         monitor_count = 0
         if os.name == "nt":
             monitor_count = len(self._windows_connected_monitor_bounds())
+
+        native_grid_specs = self._native_widget_grid_specs(
+            widget_source,
+            widget_config=widget_config,
+            target_monitor_index=target_monitor_index,
+        )
+        if native_grid_specs and os.name == "nt" and self._python_widget_viewer_supported:
+            _debug_log(
+                "play_widget_blocking native-grid path active | "
+                f"windows={len(native_grid_specs)} target_monitor_index={target_monitor_index}"
+            )
+            if self._process and self._process.poll() is None:
+                self._terminate_process(self._process, timeout_sec=5)
+                self._process = None
+            if any(process and process.poll() is None for process in self._runtime_processes_snapshot()):
+                self.stop_widget_engine(include_native_rows=False)
+            return self._play_native_widget_specs_blocking(
+                native_grid_specs,
+                duration_sec,
+                signature_kind="grid",
+                target_monitor_index=target_monitor_index,
+            )
+
+        native_row_sources = self._native_url_row_sources(widget_source, widget_config=widget_config)
+        if native_row_sources and os.name == "nt" and self._python_widget_viewer_supported:
+            _debug_log(
+                "play_widget_blocking native-url-rows path active | "
+                f"rows={len(native_row_sources)} target_monitor_index={target_monitor_index}"
+            )
+            if self._process and self._process.poll() is None:
+                self._terminate_process(self._process, timeout_sec=5)
+                self._process = None
+            if any(process and process.poll() is None for process in self._runtime_processes_snapshot()):
+                self.stop_widget_engine(include_native_rows=False)
+            return self._play_native_url_rows_blocking(
+                native_row_sources,
+                duration_sec,
+                target_monitor_index=target_monitor_index,
+            )
 
         runtime_controller_allowed = (
             os.name == "nt"
@@ -2814,6 +3771,8 @@ class BorderlessFullscreenPlayer:
                 self._terminate_process(process, timeout_sec=5)
 
         with self._widget_process_lock:
+            if stop_widget_runtime:
+                self._terminate_native_row_runtime_locked(timeout_sec=2)
             running_widget_runtime_processes = [
                 process
                 for process in self._runtime_processes_snapshot()

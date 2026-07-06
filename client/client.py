@@ -239,8 +239,11 @@ PLAYBACK_FAILURE_RETRY_SEC = float(os.getenv("PLAYBACK_FAILURE_RETRY_SEC", "0.5"
 ACTIVITY_RESUME_SEC = float(os.getenv("ACTIVITY_RESUME_SEC", "1.0"))
 ACTIVITY_IDLE_DROP_SEC = float(os.getenv("ACTIVITY_IDLE_DROP_SEC", "2.0"))
 ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("ACTIVITY_DROP_CONFIRM_COUNT", "4"))
+WIDGET_ACTIVITY_DROP_CONFIRM_COUNT = int(os.getenv("WIDGET_ACTIVITY_DROP_CONFIRM_COUNT", "2"))
+ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC = float(os.getenv("ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC", "0.5"))
+ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT = max(1, int(os.getenv("ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT", "5")))
 LOW_IDLE_ACTIVITY_ENABLED = _env_bool("LOW_IDLE_ACTIVITY_ENABLED", True)
-OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", "10"))
+OFFLINE_IDLE_TIMEOUT_CAP_SEC = float(os.getenv("OFFLINE_IDLE_TIMEOUT_CAP_SEC", str(DEFAULT_IDLE_TIMEOUT_SEC)))
 MIN_PLAYING_SECONDS = float(os.getenv("MIN_PLAYING_SECONDS", "5.0"))
 WIDGET_OVERLAY_HOLD_SEC = float(os.getenv("WIDGET_OVERLAY_HOLD_SEC", "0.8"))
 WIDGET_ACTIVITY_GRACE_SEC = float(os.getenv("WIDGET_ACTIVITY_GRACE_SEC", "1.5"))
@@ -2012,7 +2015,7 @@ class MultiMonitorPlayback:
                 if player is None:
                     continue
                 try:
-                    player.stop(stop_widget_runtime=not keep_runtime_warm)
+                    player.stop(stop_widget_runtime=True)
                 except Exception:
                     pass
 
@@ -2020,29 +2023,12 @@ class MultiMonitorPlayback:
             with self._lock:
                 player = self._widget_players.get(monitor_no)
                 if player is None:
-                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=False)
                     self._widget_players[monitor_no] = player
-            should_background = False
-            backgrounded = False
-            visible_content = self._player_has_visible_widget_content(player)
-            try:
-                prewarm_ok = bool(
-                    player.start_widget_engine_if_needed(
-                        target_monitor_index=target_monitor_index,
-                        clone_to_all_monitors=False,
-                    )
-                )
-                visible_content = self._player_has_visible_widget_content(player)
-                should_background = prewarm_ok and not visible_content
-                if should_background:
-                    backgrounded = self._background_widget_player_runtime(player)
-            except Exception:
-                prewarm_ok = False
             log_debug(
                 "monitor_widget_runtime_reconcile | "
                 f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
-                f"ok={prewarm_ok} visible={visible_content} "
-                f"backgrounded={backgrounded if prewarm_ok else False}"
+                "action=defer_until_idle"
             )
 
 
@@ -2210,7 +2196,7 @@ class MultiMonitorPlayback:
                     player.stop()
                 widget_player = self._widget_players.get(monitor_no)
                 if widget_player:
-                    widget_player.stop(stop_widget_runtime=False)
+                    widget_player.stop(stop_widget_runtime=True)
                 worker = self._workers.get(monitor_no)
                 if worker and worker.is_alive():
                     workers.append(worker)
@@ -2223,7 +2209,7 @@ class MultiMonitorPlayback:
             widget_players = list(self._widget_players.values())
         for player in players:
             if player in widget_players:
-                player.stop(stop_widget_runtime=False)
+                player.stop(stop_widget_runtime=True)
             else:
                 player.stop()
 
@@ -2257,8 +2243,6 @@ class MultiMonitorPlayback:
                 )
 
     def _ensure_worker(self, monitor_no: int):
-        widget_player_to_prewarm: BorderlessFullscreenPlayer | None = None
-        widget_target_monitor_index: int | None = None
         with self._lock:
             existing = self._workers.get(monitor_no)
             if existing and existing.is_alive():
@@ -2273,30 +2257,11 @@ class MultiMonitorPlayback:
             if has_widget_entry:
                 player = self._widget_players.get(monitor_no)
                 if player is None:
-                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=False)
                     self._widget_players[monitor_no] = player
-                widget_player_to_prewarm = player
-                target_monitor_index = monitor_state.get("target_monitor_index")
-                if isinstance(target_monitor_index, int) and target_monitor_index >= 0:
-                    widget_target_monitor_index = int(target_monitor_index)
             self._running_monitors[monitor_no] = True
             worker = threading.Thread(target=self._run, args=(monitor_no,), daemon=True)
             self._workers[monitor_no] = worker
-        if widget_player_to_prewarm is not None:
-            try:
-                prewarm_ok = bool(
-                    widget_player_to_prewarm.start_widget_engine_if_needed(
-                        target_monitor_index=widget_target_monitor_index,
-                        clone_to_all_monitors=False,
-                    )
-                )
-            except Exception:
-                prewarm_ok = False
-            log_debug(
-                "monitor_widget_prewarm | "
-                f"monitor_no={monitor_no} target_monitor_index={widget_target_monitor_index} "
-                f"ok={prewarm_ok}"
-            )
         worker.start()
 
     @staticmethod
@@ -2365,7 +2330,7 @@ class MultiMonitorPlayback:
                     if player is None:
                         player = self._widget_player_fallback
                         if player is None:
-                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=False)
                         self._widget_players[monitor_no] = player
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
@@ -2423,7 +2388,7 @@ class MultiMonitorPlayback:
                 with self._lock:
                     player = self._players.get(monitor_no)
                     if player is None:
-                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=False)
                         self._players[monitor_no] = player
                 if not media_path:
                     time.sleep(0.2)
@@ -2487,7 +2452,7 @@ class PlaybackController:
         # Prewarm kararı playlist içeriğine göre update_from_config içinde verilir.
         # Böylece sadece widget/dashboard kullanılan monitörlerde runtime açılır.
         if (
-            os.getenv("WIDGET_PREWARM_ON_STARTUP", "1").strip().lower() in {"1", "true", "yes"}
+            os.getenv("WIDGET_PREWARM_ON_STARTUP", "0").strip().lower() in {"1", "true", "yes"}
             and not _is_widget_viewer_process()
         ):
             self.multi_monitor_playback.prewarm_widget_runtimes_on_startup()
@@ -2851,6 +2816,8 @@ class PlaybackController:
         runtime_state: dict,
         just_played_index: int | None = None,
     ) -> None:
+        if os.getenv("WIDGET_PREWARM_NEXT", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
         if loop_mode != "sequential" or not playlist_entries:
             return
 
@@ -2866,6 +2833,8 @@ class PlaybackController:
 
         widget_url, widget_config, widget_signature = next_spec
         if widget_signature == self._active_widget_signature:
+            return
+        if self._player_uses_native_widget_layout(self.player, widget_url, widget_config):
             return
 
         if self.player.update_widget_layout(widget_url, widget_config=widget_config, widget_signature=widget_signature):
@@ -2885,6 +2854,8 @@ class PlaybackController:
                 continue
             widget_url, widget_config, widget_signature = widget_spec
             if self.player.is_direct_url_widget(widget_config):
+                continue
+            if self._player_uses_native_widget_layout(self.player, widget_url, widget_config):
                 continue
             runtime_items.append(
                 {
@@ -2920,6 +2891,26 @@ class PlaybackController:
                 pass
         return False
 
+    @staticmethod
+    def _player_uses_native_widget_layout(
+        player: BorderlessFullscreenPlayer | None,
+        widget_url: str,
+        widget_config: dict | None,
+    ) -> bool:
+        native_layout_checker = getattr(player, "is_native_widget_layout", None)
+        if callable(native_layout_checker) and hasattr(player.__class__, "is_native_widget_layout"):
+            try:
+                return bool(native_layout_checker(widget_url, widget_config=widget_config))
+            except Exception:
+                return False
+        native_row_checker = getattr(player, "is_native_url_row_widget", None)
+        if callable(native_row_checker) and hasattr(player.__class__, "is_native_url_row_widget"):
+            try:
+                return bool(native_row_checker(widget_url, widget_config=widget_config))
+            except Exception:
+                return False
+        return False
+
     def _primary_has_visible_widget_content(self) -> bool:
         if self._player_has_visible_widget_content(self.player):
             return True
@@ -2930,41 +2921,25 @@ class PlaybackController:
 
     def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
         has_primary_widget = bool(enabled and self._entries_have_widget(normalized_items))
+        has_native_layout_widget = False
         if has_primary_widget:
-            prewarm_ok = False
-            should_background = False
-            backgrounded = False
-            secondary_visible = False
-            visible_content = self._primary_has_visible_widget_content()
-            try:
-                prewarm_ok = bool(
-                    self.player.start_widget_engine_if_needed(
-                        target_monitor_index=self._primary_target_monitor_index(),
-                        clone_to_all_monitors=False,
-                    )
-                )
-                visible_content = self._primary_has_visible_widget_content()
-                secondary_widget_visibility_checker = getattr(
-                    self.multi_monitor_playback,
-                    "has_visible_widget_runtime_content",
-                    None,
-                )
-                if callable(secondary_widget_visibility_checker):
-                    try:
-                        secondary_visible = bool(secondary_widget_visibility_checker())
-                    except Exception:
-                        secondary_visible = False
-                should_background = prewarm_ok and not visible_content and not secondary_visible
-                if should_background:
-                    backgrounded = self.multi_monitor_playback._background_widget_player_runtime(self.player)
-            except Exception:
-                prewarm_ok = False
-            log_debug(
-                "primary_widget_runtime_reconcile | "
-                f"action=ensure ok={prewarm_ok} visible={visible_content} "
-                f"secondary_visible={secondary_visible} "
-                f"backgrounded={backgrounded if prewarm_ok else False}"
-            )
+            for playlist_index, item in enumerate(normalized_items):
+                widget_spec = self._build_widget_playback_spec(item, playlist_index=playlist_index)
+                if not widget_spec:
+                    continue
+                widget_url, widget_config, _widget_signature = widget_spec
+                if self._player_uses_native_widget_layout(self.player, widget_url, widget_config):
+                    has_native_layout_widget = True
+                    break
+        if has_primary_widget:
+            if has_native_layout_widget:
+                try:
+                    self.player.stop_widget_engine(include_native_rows=False)
+                except Exception:
+                    pass
+                log_debug("primary_widget_runtime_reconcile | action=skip_native_layout")
+                return
+            log_debug("primary_widget_runtime_reconcile | action=defer_until_idle")
             return
 
         try:
@@ -3100,7 +3075,10 @@ class PlaybackController:
     def start(self):
         if self._worker and self._worker.is_alive():
             return
-        self._background_overlay.show()
+        if self.next_idle_item_is_widget():
+            self._background_overlay.hide()
+        else:
+            self._background_overlay.show()
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
@@ -3141,6 +3119,17 @@ class PlaybackController:
             self.player.background_widget_engine()
         except Exception:
             pass
+
+    def has_visible_widget_runtime_content(self) -> bool:
+        try:
+            if self.multi_monitor_playback.has_visible_widget_runtime_content():
+                return True
+        except Exception:
+            pass
+        try:
+            return bool(self.player.has_visible_widget_runtime_content())
+        except Exception:
+            return False
 
     def _run(self):
         try:
@@ -3246,6 +3235,7 @@ class PlaybackController:
                 if item_type == "widget":
                     log_debug(f"widget playback start | item={self._item_label(item)} playlist_index={playlist_index}")
                     widget_duration_sec = self._resolve_widget_duration_sec(item)
+                    widget_playback_already_waited = False
                     if not (isinstance(duration_sec, int) and duration_sec > 0):
                         print(
                             f"⚠️ widget duration_sec belirtilmemiş, varsayılan uygulanıyor: {widget_duration_sec}s | widget={self._item_label(item)}"
@@ -3280,6 +3270,8 @@ class PlaybackController:
                             f"primary_target_monitor_index={primary_target_monitor_index}"
                         )
                         force_process_widget_playback = False
+                        if self._player_uses_native_widget_layout(self.player, widget_url, widget_config):
+                            force_process_widget_playback = True
                         if force_process_widget_playback:
                             # Çoklu monitör klonlamada widget runtime controller tek pencere
                             # yönettiği için ikincil monitörler boş kalabiliyor. Ayrıca
@@ -3294,6 +3286,7 @@ class PlaybackController:
                                 target_monitor_index=primary_target_monitor_index,
                                 clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
+                            widget_playback_already_waited = True
                         else:
                             prewarmed_runtime_visible = False
                             if widget_signature == self._prewarmed_widget_signature:
@@ -3326,7 +3319,7 @@ class PlaybackController:
                                 clone_to_all_monitors=clone_widget_to_all_monitors,
                             )
 
-                    if ok:
+                    if ok and not widget_playback_already_waited:
                         self.player.clear_stop_request()
                         ok = self.player.wait_widget_duration(widget_duration_sec)
                     log_debug(f"widget playback end | ok={ok} direct_url_widget={direct_url_widget}")
@@ -3462,6 +3455,31 @@ class PlaybackController:
             return label
         media_path = str(item.get("local_path") or "").strip()
         return Path(media_path).name if media_path else ""
+
+    def next_idle_item_is_widget(self) -> bool:
+        with self._lock:
+            playlist_cache_entries = list(self._playlist_entries)
+            loop_mode = self._loop_mode
+        playlist_entries = [self._normalize_item(entry) for entry in self._effective_playlist(playlist_cache_entries)]
+        if not playlist_entries:
+            return False
+
+        runtime_state = self._restore_or_init_runtime_state(playlist_entries, loop_mode)
+        if loop_mode == "random":
+            order = runtime_state.get("random_order") or []
+            pos = int(runtime_state.get("random_pos") or 0)
+            if not order:
+                return False
+            if pos >= len(order):
+                pos = 0
+            target_path = order[pos]
+            item = next((entry for entry in playlist_entries if entry.get("local_path") == target_path), playlist_entries[0])
+        else:
+            index = int(runtime_state.get("index") or 0) % len(playlist_entries)
+            item = playlist_entries[index]
+
+        item_type = str(item.get("item_type") or item.get("media_type") or "media").strip().lower()
+        return item_type == "widget"
 
 
 window_manager = _WindowManager()
@@ -4277,6 +4295,37 @@ def run_state_cycle():
             except Exception:
                 pass
 
+    def _visible_widget_runtime_content() -> bool:
+        visible_checker = getattr(playback, "has_visible_widget_runtime_content", None)
+        if callable(visible_checker) and hasattr(playback.__class__, "has_visible_widget_runtime_content"):
+            try:
+                return bool(visible_checker())
+            except Exception:
+                pass
+        player = getattr(playback, "player", None)
+        visible_checker = getattr(player, "has_visible_widget_runtime_content", None)
+        if callable(visible_checker) and hasattr(player.__class__, "has_visible_widget_runtime_content"):
+            try:
+                return bool(visible_checker())
+            except Exception:
+                pass
+        return False
+
+    def _confirm_active_idle_threshold(first_idle_sec: float, threshold_sec: float) -> float:
+        confirmed_idle_sec = first_idle_sec
+        sample_count = max(1, ACTIVE_IDLE_CONFIRM_SAMPLE_COUNT)
+        for _sample_index in range(sample_count):
+            if ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC > 0:
+                time.sleep(min(1.0, max(0.0, ACTIVE_IDLE_CONFIRM_SAMPLE_DELAY_SEC)))
+            try:
+                confirmed_idle_sec = get_idle_seconds()
+            except Exception as exc:
+                log_debug(f"active idle confirm sample failed | error={exc}")
+                return confirmed_idle_sec
+            if confirmed_idle_sec < threshold_sec:
+                return confirmed_idle_sec
+        return confirmed_idle_sec
+
     if emergency_active:
         idle_background.hide()
         if current_state != ClientState.EMERGENCY:
@@ -4294,12 +4343,19 @@ def run_state_cycle():
     active_item = playback._active_item if isinstance(getattr(playback, "_active_item", None), dict) else {}
     active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
     widget_active = current_state == ClientState.PLAYING and active_item_type == "widget"
+    next_idle_item_is_widget = False
+    next_idle_item_checker = getattr(playback, "next_idle_item_is_widget", None)
+    if callable(next_idle_item_checker) and hasattr(playback.__class__, "next_idle_item_is_widget"):
+        try:
+            next_idle_item_is_widget = bool(next_idle_item_checker())
+        except Exception as exc:
+            log_debug(f"next idle item check failed | error={exc}")
     # Widget oynarken de kullanıcı aktivitesini okuyalım; aksi halde mouse/klavye
     # hareketi PLAYING -> RETURNING -> ACTIVE akışını tetikleyemiyor.
     # Erken/yanlış dönüşleri minimum_playing_before_return koruyor.
     ignore_idle = False
 
-    if current_state == ClientState.IDLE_PENDING and not widget_active:
+    if current_state == ClientState.IDLE_PENDING and not widget_active and not next_idle_item_is_widget:
         idle_background.show()
 
     idle_sec = get_idle_seconds()
@@ -4347,7 +4403,12 @@ def run_state_cycle():
     else:
         _low_idle_streak = 0
 
-    activity_drop_confirmed = _activity_drop_streak >= max(ACTIVITY_DROP_CONFIRM_COUNT, 1)
+    required_activity_drop_count = (
+        WIDGET_ACTIVITY_DROP_CONFIRM_COUNT
+        if active_item_type == "widget"
+        else ACTIVITY_DROP_CONFIRM_COUNT
+    )
+    activity_drop_confirmed = _activity_drop_streak >= max(required_activity_drop_count, 1)
     low_idle_confirmed = _low_idle_streak >= 3
     # Oynatım aktifken bazı sistemlerde idle sayaçları kullanıcı girdisi olmadan
     # anlık olarak 0'a düşebiliyor. Bu durumda yalnız low-idle sinyali false-positive
@@ -4391,10 +4452,18 @@ def run_state_cycle():
         )
 
     if current_state == ClientState.ACTIVE and idle_sec >= effective_idle_timeout_sec:
+        confirmed_idle_sec = _confirm_active_idle_threshold(float(idle_sec), float(effective_idle_timeout_sec))
+        if confirmed_idle_sec < effective_idle_timeout_sec:
+            log_debug(
+                "state_cycle ACTIVE idle transition cancelled | "
+                f"first_idle={idle_sec:.3f} confirmed_idle={confirmed_idle_sec:.3f} "
+                f"threshold={effective_idle_timeout_sec:.3f}"
+            )
+            return confirmed_idle_sec
         if time.time() - last_idle_switch_ts < 2:
             return idle_sec
         last_idle_switch_ts = time.time()
-        if not widget_active:
+        if not widget_active and not next_idle_item_is_widget:
             idle_background.show()
         else:
             idle_background.hide()
@@ -4405,16 +4474,23 @@ def run_state_cycle():
             "state_cycle IDLE_PENDING | ensuring playback.start "
             f"{_playback_runtime_snapshot()}"
         )
-        playback.start()
         if user_activity_detected:
             idle_background.hide()
-            # Idle bekleme aşamasından kullanıcı etkileşimi ile çıkarken
-            # widget runtime'ı kapatmayalım; bir sonraki idle geçişinde
-            # viewer yeniden açılıp gri pencere flash'i oluşturmasın.
-            playback.stop(stop_widget_runtime=False)
+            playback.stop(stop_widget_runtime=True)
             _background_widget_viewers()
             set_state(ClientState.ACTIVE, f"activity_detected_before_playing idle={idle_sec:.1f}s", force=True)
             return idle_sec
+        if idle_sec < effective_idle_timeout_sec:
+            idle_background.hide()
+            playback.stop(stop_widget_runtime=True)
+            _background_widget_viewers()
+            set_state(
+                ClientState.ACTIVE,
+                f"idle_pending_cancelled idle={idle_sec:.1f}s threshold={effective_idle_timeout_sec:.1f}s",
+                force=True,
+            )
+            return idle_sec
+        playback.start()
         # Worker thread bir içerik seçmeden PLAYING durumuna geçersek
         # state machine PLAYING'de kilitli kalabilir ve tekrar start denemesi
         # yapılmadığı için ekran siyah kalabilir.
@@ -4482,18 +4558,24 @@ def run_state_cycle():
         # ERP penceresini öne aldıktan sonra player'ı durdurmak,
         # mpv/widget kapanışında masaüstü parlamasını azaltır.
         return_to_erp_window()
-        # Kullanıcı aktivitesi ile ACTIVE'e dönerken widget runtime'ı sıcak tut.
-        # Böylece bir sonraki idle girişinde runtime yeniden açılıp siyah/masaüstü
-        # flash'i oluşturmaz; stop() içinde gerekirse gizleme başarısızlığında
-        # runtime otomatik kapatılır.
-        playback.stop(stop_widget_runtime=False)
+        # Kullanıcı aktivitesi ile ACTIVE'e dönerken widget runtime'ı tamamen kapat.
+        # Warm/background stratejisi bazı WebView2 durumlarında boş gridin ekranda
+        # kalmasına yol açtığı için ACTIVE durumda görünür widget bırakmıyoruz.
+        playback.stop(stop_widget_runtime=True)
         _background_widget_viewers()
         set_state(ClientState.ACTIVE, "returned_to_erp", force=True)
 
     if current_state == ClientState.ACTIVE:
-        if _playback_has_selected_content() or _playback_has_running_process():
+        if _visible_widget_runtime_content():
             log_debug(
-                "state_cycle ACTIVE | playback/runtime already warm+hidden, skip redundant stop "
+                "state_cycle ACTIVE | visible widget runtime leaked into active state, forcing stop "
+                f"{_playback_runtime_snapshot()}"
+            )
+            playback.stop(stop_widget_runtime=True)
+            _background_widget_viewers()
+        elif _playback_has_selected_content() or _playback_has_running_process():
+            log_debug(
+                "state_cycle ACTIVE | playback/runtime already warm+hidden, no visible cleanup needed "
                 f"{_playback_runtime_snapshot()}"
             )
 

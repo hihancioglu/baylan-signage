@@ -31,6 +31,14 @@ MEDIA_EXTENSION_PATTERN = re.compile(
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
 WIDGET_VIEWER_LOG_NAME = "widget_viewer.log"
+_WINDOWS_DPI_AWARENESS_ENABLED = False
+WEBVIEW2_STABILITY_ARGUMENTS = (
+    "--autoplay-policy=no-user-gesture-required",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-features=ThirdPartyStoragePartitioning,StoragePartitioning,PartitionedCookies,BlockThirdPartyCookies,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes",
+)
 
 
 def _resolve_widget_viewer_log_path() -> Path:
@@ -88,6 +96,37 @@ def _debug_log(message: str) -> None:
     if not DEBUG_MODE_ENABLED:
         return
     _safe_print(f"[DEBUG][widget_viewer] {message}")
+
+
+def _enable_windows_dpi_awareness() -> None:
+    global _WINDOWS_DPI_AWARENESS_ENABLED
+    if _WINDOWS_DPI_AWARENESS_ENABLED or os.name != "nt" or not hasattr(ctypes, "windll"):
+        return
+    _WINDOWS_DPI_AWARENESS_ENABLED = True
+    try:
+        awareness_context = ctypes.c_void_p(-4 & ((1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1))
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(awareness_context):
+            return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def _prepare_webview2_browser_arguments() -> None:
+    existing = str(os.getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") or "").strip()
+    tokens = existing.split() if existing else []
+    for argument in WEBVIEW2_STABILITY_ARGUMENTS:
+        if argument not in tokens:
+            tokens.append(argument)
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = " ".join(tokens)
 
 
 class _WidgetEngineDebugBridge:
@@ -216,9 +255,10 @@ def _default_widget_scheme(raw_source: str) -> str:
     except ValueError:
         return "https"
 
-    if ip.is_loopback or ip.is_private or ip.is_link_local:
-        return "http"
-    return "https"
+    # Signage widgets are often hosted on literal internal IPs outside RFC1918
+    # ranges. Keep bare IP sources on HTTP unless the source explicitly says
+    # https://.
+    return "http"
 
 
 def _runtime_resource_path(*relative_parts: str) -> Path:
@@ -399,11 +439,18 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                 continue
             normalized_widget = dict(widget)
             widget_type = str(normalized_widget.get("type") or "").strip().lower()
+            if widget_type in {"iframe/url", "iframe_url", "iframe-url"}:
+                widget_type = "iframe"
+            elif widget_type in {"img", "picture"}:
+                widget_type = "image"
+            if widget_type:
+                normalized_widget["type"] = widget_type
             if widget_type in {"iframe", "url"}:
                 raw_url = (
                     normalized_widget.get("url")
                     or normalized_widget.get("content")
                     or normalized_widget.get("source")
+                    or normalized_widget.get("source_url")
                     or normalized_widget.get("path")
                     or ""
                 )
@@ -450,6 +497,7 @@ def _normalize_widget_payload(widget_config: dict, fallback_url: str | None = No
                     normalized_widget.get("url")
                     or normalized_widget.get("content")
                     or normalized_widget.get("source")
+                    or normalized_widget.get("source_url")
                     or normalized_widget.get("path")
                     or ""
                 )
@@ -524,19 +572,43 @@ def _gui_candidates() -> list[str | None]:
     return candidates or [None]
 
 
-def _start_with_fallback(webview_module) -> None:
+def _webview_private_mode_enabled() -> bool:
+    return os.getenv("WIDGET_VIEWER_PRIVATE_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _start_with_fallback(
+    webview_module,
+    monitor_bounds: tuple[int, int, int, int] | None = None,
+    position_window=None,
+) -> None:
     errors: list[str] = []
     launch_started_at = time.perf_counter()
     for gui in _gui_candidates():
         try:
-            kwargs = {"private_mode": True}
+            kwargs = {"private_mode": _webview_private_mode_enabled()}
             if gui:
                 kwargs["gui"] = gui
                 _safe_print(f"Widget viewer GUI deneniyor: {gui}")
             else:
                 _safe_print("Widget viewer GUI deneniyor: auto")
             _debug_log(f"pywebview.start begin | gui={gui or 'auto'} kwargs={kwargs}")
-            webview_module.start(**kwargs)
+            if monitor_bounds is not None and os.name == "nt":
+                def _on_started():
+                    def _position_window():
+                        for _attempt in range(60):
+                            if callable(position_window):
+                                try:
+                                    position_window()
+                                except Exception as exc:
+                                    _debug_log(f"pywebview position callback failed | error={exc}")
+                            _force_windows_kiosk_bounds("Baylan Widget", monitor_bounds, attempts=1, delay_sec=0.01)
+                            time.sleep(0.10)
+
+                    threading.Thread(target=_position_window, daemon=True).start()
+
+                webview_module.start(_on_started, **kwargs)
+            else:
+                webview_module.start(**kwargs)
             elapsed_ms = int((time.perf_counter() - launch_started_at) * 1000)
             _debug_log(f"pywebview.start success | gui={gui or 'auto'} elapsed_ms={elapsed_ms}")
             return
@@ -546,6 +618,145 @@ def _start_with_fallback(webview_module) -> None:
             errors.append(f"{gui_name}: {exc}")
 
     raise RuntimeError("; ".join(errors))
+
+
+def _find_current_process_window(title: str, include_hidden: bool = False) -> int | None:
+    if os.name != "nt":
+        return None
+    _enable_windows_dpi_awareness()
+
+    user32 = ctypes.windll.user32
+    current_pid = os.getpid()
+    candidates: list[tuple[bool, bool, int, int]] = []
+
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    def _callback(hwnd, _lparam):
+        if not include_hidden and not user32.IsWindowVisible(hwnd):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if int(pid.value) != current_pid:
+            return True
+        is_visible = bool(user32.IsWindowVisible(hwnd))
+        length = user32.GetWindowTextLengthW(hwnd)
+        window_title = ""
+        if length > 0:
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            window_title = str(buffer.value or "")
+        area = 0
+        try:
+            rect = wintypes.RECT()
+            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                area = max(0, int(rect.right - rect.left)) * max(0, int(rect.bottom - rect.top))
+        except Exception:
+            area = 0
+        candidates.append((window_title == title, is_visible, area, int(hwnd)))
+        return True
+
+    try:
+        user32.EnumWindows(enum_proc(_callback), 0)
+    except Exception:
+        return None
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return candidates[0][3]
+
+
+def _force_windows_kiosk_bounds(
+    title: str,
+    bounds: tuple[int, int, int, int] | None,
+    attempts: int = 16,
+    delay_sec: float = 0.12,
+    show_window: bool = True,
+) -> None:
+    if os.name != "nt" or bounds is None:
+        return
+    _enable_windows_dpi_awareness()
+
+    x, y, width, height = bounds
+    if width <= 0 or height <= 0:
+        return
+
+    user32 = ctypes.windll.user32
+    hwnd = None
+    for _attempt in range(max(1, attempts)):
+        hwnd = _find_current_process_window(title, include_hidden=True)
+        if hwnd:
+            break
+        time.sleep(max(0.01, delay_sec))
+    if not hwnd:
+        _debug_log("force kiosk bounds skipped | hwnd_not_found")
+        return
+
+    try:
+        gwl_style = -16
+        gwl_exstyle = -20
+        ws_visible = 0x10000000
+        ws_popup = 0x80000000
+        ws_ex_topmost = 0x00000008
+        ws_ex_toolwindow = 0x00000080
+        ws_ex_appwindow = 0x00040000
+        hwnd_topmost = -1
+        swp_showwindow = 0x0040
+        swp_framechanged = 0x0020
+        swp_noactivate = 0x0010
+        swp_noownerzorder = 0x0200
+        sw_show = 5
+        swp_flags = swp_framechanged | swp_noownerzorder
+        if show_window:
+            swp_flags |= swp_showwindow
+        else:
+            swp_flags |= swp_noactivate
+        set_window_long_ptr = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
+        get_window_long_ptr = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        window_style = ws_popup | (ws_visible if show_window else 0)
+        set_window_long_ptr(hwnd, gwl_style, window_style)
+        ex_style = int(get_window_long_ptr(hwnd, gwl_exstyle))
+        set_window_long_ptr(hwnd, gwl_exstyle, (ex_style | ws_ex_topmost | ws_ex_toolwindow) & ~ws_ex_appwindow)
+        if show_window:
+            try:
+                user32.ShowWindow(hwnd, sw_show)
+            except Exception:
+                pass
+            try:
+                user32.BringWindowToTop(hwnd)
+            except Exception:
+                pass
+        user32.SetWindowPos(
+            hwnd,
+            hwnd_topmost,
+            int(x),
+            int(y),
+            int(width),
+            int(height),
+            swp_flags,
+        )
+        try:
+            user32.MoveWindow(hwnd, int(x), int(y), int(width), int(height), True)
+        except Exception:
+            pass
+        user32.SetWindowPos(
+            hwnd,
+            hwnd_topmost,
+            int(x),
+            int(y),
+            int(width),
+            int(height),
+            swp_flags,
+        )
+    except Exception as exc:
+        _debug_log(f"force kiosk bounds style failed | error={exc}")
+
+    try:
+        # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1.
+        dwmapi = ctypes.windll.dwmapi
+        corner_preference = ctypes.c_int(1)
+        dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_preference), ctypes.sizeof(corner_preference))
+    except Exception:
+        pass
 
 
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
@@ -592,6 +803,8 @@ def _runtime_message_reader(dispatch):
             dispatch({"type": "playlist_sync", "payload": message.get("payload")})
         if message_type == "background":
             dispatch({"type": "background"})
+        if message_type == "foreground":
+            dispatch({"type": "foreground"})
 
 
 def _build_runtime_update_script(payload: object, signature: str | None = None) -> str:
@@ -621,6 +834,22 @@ def _build_runtime_update_script(payload: object, signature: str | None = None) 
     )
 
 
+def _evaluate_js_with_retries(window, script: str, *, attempts: int = 12, delay_sec: float = 0.2) -> None:
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            window.evaluate_js(script)
+            if attempt > 0:
+                _debug_log(f"pywebview evaluate_js retry succeeded | attempt={attempt + 1}")
+            return
+        except Exception as exc:
+            last_error = exc
+            _debug_log(f"pywebview evaluate_js retry pending | attempt={attempt + 1} error={exc}")
+            time.sleep(max(0.01, delay_sec))
+    if last_error is not None:
+        raise last_error
+
+
 
 
 def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | None:
@@ -642,6 +871,7 @@ def _parse_monitor_bounds(raw_value: str | None) -> tuple[int, int, int, int] | 
 def _windows_connected_monitor_bounds() -> list[tuple[int, int, int, int]]:
     if os.name != "nt":
         return []
+    _enable_windows_dpi_awareness()
 
     class RECT(ctypes.Structure):
         _fields_ = [
@@ -755,6 +985,8 @@ def _start_with_pywebview(
     start_hidden: bool = False,
     monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
+    _enable_windows_dpi_awareness()
+    _prepare_webview2_browser_arguments()
     import webview
     debug_bridge = _WidgetEngineDebugBridge()
     _debug_log(
@@ -796,6 +1028,19 @@ def _start_with_pywebview(
         f"start_hidden={start_hidden} fullscreen={window_kwargs.get('fullscreen')}"
     )
 
+    def _position_pywebview_window() -> None:
+        if monitor_bounds is None:
+            return
+        x, y, width, height = monitor_bounds
+        try:
+            window.move(x, y)
+        except Exception:
+            pass
+        try:
+            window.resize(width, height)
+        except Exception:
+            pass
+
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
         shown_once = not start_hidden
@@ -804,6 +1049,14 @@ def _start_with_pywebview(
         def _enter_fullscreen_once() -> None:
             nonlocal fullscreen_applied
             if fullscreen_applied:
+                return
+            if monitor_bounds is not None:
+                fullscreen_applied = True
+                try:
+                    _force_windows_kiosk_bounds("Baylan Widget", monitor_bounds, attempts=1, delay_sec=0.01)
+                except Exception:
+                    pass
+                _debug_log("pywebview fullscreen promotion skipped for exact monitor bounds")
                 return
             try:
                 window.toggle_fullscreen()
@@ -840,6 +1093,19 @@ def _start_with_pywebview(
                         pass
                 shown_once = False
                 return
+            if message.get("type") == "foreground":
+                try:
+                    if monitor_bounds is not None:
+                        _position_pywebview_window()
+                        _force_windows_kiosk_bounds("Baylan Widget", monitor_bounds, attempts=1, delay_sec=0.01)
+                    window.show()
+                    if monitor_bounds is not None:
+                        _position_pywebview_window()
+                        _force_windows_kiosk_bounds("Baylan Widget", monitor_bounds, attempts=1, delay_sec=0.01)
+                    shown_once = True
+                except Exception as exc:
+                    _debug_log(f"pywebview foreground show failed | error={exc}")
+                return
             message_type = str(message.get("type") or "").strip().lower()
             raw_payload = message.get("payload")
             signature = None
@@ -855,25 +1121,30 @@ def _start_with_pywebview(
                 return
 
             js = _build_runtime_update_script(payload, signature=signature)
-            try:
-                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
-                window.evaluate_js(js)
-            except Exception as exc:
-                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
             if not shown_once:
                 shown_once = True
                 try:
                     _enter_fullscreen_once()
                     window.show()
-                except Exception:
-                    pass
+                    # Render iframe-heavy layouts only after the WebView surface is
+                    # visible; hidden WebView2 surfaces can keep cross-origin iframes
+                    # black until a manual interaction forces a repaint.
+                    time.sleep(0.15)
+                except Exception as exc:
+                    _debug_log(f"pywebview foreground transition failed | error={exc}")
+            try:
+                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
+                _evaluate_js_with_retries(window, js)
+            except Exception as exc:
+                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
-    _start_with_fallback(webview)
+    _start_with_fallback(webview, monitor_bounds=monitor_bounds, position_window=_position_pywebview_window)
 
 
 def main() -> int:
+    _enable_windows_dpi_awareness()
     if len(sys.argv) < 2:
         _safe_print("Kullanım: widget_viewer.py <widget_url>")
         return 2

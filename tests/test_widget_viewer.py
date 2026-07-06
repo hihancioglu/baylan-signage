@@ -37,6 +37,54 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(fake_webview.start.call_count, 2)
         self.assertEqual(fake_webview.start.call_args_list[0].kwargs["gui"], "edgechromium")
         self.assertEqual(fake_webview.start.call_args_list[1].kwargs["gui"], "qt")
+        self.assertFalse(fake_webview.start.call_args_list[1].kwargs["private_mode"])
+
+    def test_start_with_fallback_positions_window_during_monitor_start(self):
+        fake_webview = unittest.mock.Mock()
+        position_window = unittest.mock.Mock()
+
+        def _fake_start(callback, **_kwargs):
+            callback()
+
+        class _ImmediateThread:
+            def __init__(self, target=None, args=(), daemon=False):
+                self._target = target
+                self._args = args
+
+            def start(self):
+                if self._target:
+                    self._target(*self._args)
+
+        fake_webview.start.side_effect = _fake_start
+        with patch("client.widget_viewer.os.name", "nt"), patch(
+            "client.widget_viewer.threading.Thread",
+            _ImmediateThread,
+        ), patch("client.widget_viewer._force_windows_kiosk_bounds"), patch("client.widget_viewer.time.sleep"):
+            widget_viewer._start_with_fallback(
+                fake_webview,
+                monitor_bounds=(0, 0, 1920, 1080),
+                position_window=position_window,
+            )
+
+        self.assertGreaterEqual(position_window.call_count, 1)
+
+    def test_webview_private_mode_can_be_enabled_by_env(self):
+        with patch.dict("os.environ", {"WIDGET_VIEWER_PRIVATE_MODE": "1"}, clear=False):
+            self.assertTrue(widget_viewer._webview_private_mode_enabled())
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(widget_viewer._webview_private_mode_enabled())
+
+    def test_prepare_webview2_browser_arguments_preserves_existing_args(self):
+        with patch.dict("os.environ", {"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--remote-debugging-port=9222"}, clear=True):
+            widget_viewer._prepare_webview2_browser_arguments()
+
+            args = widget_viewer.os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"]
+
+        self.assertIn("--remote-debugging-port=9222", args)
+        self.assertIn("--disable-background-timer-throttling", args)
+        self.assertIn("ThirdPartyStoragePartitioning", args)
+        self.assertIn("BlockThirdPartyCookies", args)
 
     def test_backend_order_prefers_configured_backend(self):
         with patch.dict("os.environ", {"WIDGET_VIEWER_BACKEND": "pywebview"}, clear=False):
@@ -102,8 +150,33 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(fake_webview.create_window.call_args.kwargs["width"], 1920)
         self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
         self.assertFalse(fake_webview.create_window.call_args.kwargs["fullscreen"])
+        self.assertFalse(fake_webview.create_window.call_args.kwargs["hidden"])
 
-    def test_start_with_pywebview_background_hides_window_and_promotes_fullscreen_on_foreground(self):
+    def test_force_windows_kiosk_bounds_can_reveal_hidden_window(self):
+        fake_user32 = unittest.mock.Mock()
+        fake_user32.GetWindowLongPtrW.return_value = 0
+        fake_ctypes = unittest.mock.Mock()
+        fake_ctypes.windll.user32 = fake_user32
+
+        with patch("client.widget_viewer.os.name", "nt"), patch(
+            "client.widget_viewer.ctypes",
+            fake_ctypes,
+        ), patch(
+            "client.widget_viewer._find_current_process_window",
+            return_value=123,
+        ) as find_mock:
+            widget_viewer._force_windows_kiosk_bounds(
+                "Baylan Widget",
+                (10, 20, 300, 400),
+                attempts=1,
+                show_window=True,
+            )
+
+        find_mock.assert_called_once_with("Baylan Widget", include_hidden=True)
+        fake_user32.ShowWindow.assert_called_once_with(123, 5)
+        self.assertGreaterEqual(fake_user32.SetWindowPos.call_count, 1)
+
+    def test_start_with_pywebview_background_hides_window_and_uses_exact_bounds_on_foreground(self):
         fake_window = unittest.mock.Mock()
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = fake_window
@@ -138,10 +211,23 @@ class TestWidgetViewer(unittest.TestCase):
 
         fake_window.hide.assert_called()
         fake_window.minimize.assert_not_called()
-        fake_window.toggle_fullscreen.assert_called_once()
+        fake_window.toggle_fullscreen.assert_not_called()
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
         fake_window.show.assert_called_once()
+        self.assertLess(
+            fake_window.method_calls.index(unittest.mock.call.show()),
+            fake_window.method_calls.index(unittest.mock.call.evaluate_js(unittest.mock.ANY)),
+        )
+
+    def test_runtime_message_reader_dispatches_foreground(self):
+        dispatched = []
+        lines = iter(['{"type":"foreground"}\n', ''])
+
+        with patch("client.widget_viewer.sys.stdin.readline", side_effect=lambda: next(lines)):
+            widget_viewer._runtime_message_reader(dispatched.append)
+
+        self.assertEqual(dispatched, [{"type": "foreground"}])
 
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
@@ -360,6 +446,9 @@ class TestWidgetViewer(unittest.TestCase):
 
     def test_normalize_url_uses_http_for_localhost(self):
         self.assertEqual(widget_viewer._normalize_url("localhost:5080/panel"), "http://localhost:5080/panel")
+
+    def test_normalize_url_uses_http_for_bare_ip_address(self):
+        self.assertEqual(widget_viewer._normalize_url("172.35.10.5/panel"), "http://172.35.10.5/panel")
 
     def test_build_engine_url_normalizes_iframe_widget_urls(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):

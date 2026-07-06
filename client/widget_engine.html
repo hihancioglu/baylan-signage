@@ -9,7 +9,7 @@
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; isolation: isolate; transform: translateZ(0); }
-    iframe.widget { width: 100%; height: 100%; display: block; transform: translateZ(0); will-change: transform, opacity; backface-visibility: hidden; }
+    iframe.widget { width: 100%; height: 100%; display: block; transform: translateZ(0); will-change: transform, opacity; backface-visibility: hidden; color-scheme: normal; }
     .iframe-fallback {
       display: none;
       position: absolute;
@@ -111,13 +111,48 @@
       return { widgets: [] };
     }
 
+    function rawWidgetSource(widget) {
+      if (!widget || typeof widget !== "object") return "";
+      return String(widget.url || widget.content || widget.source || widget.source_url || widget.path || "").trim();
+    }
+
+    function normalizeWidget(widget) {
+      const normalizedWidget = Object.assign({}, widget || {});
+      let widgetType = String(normalizedWidget.type || "").trim().toLowerCase();
+      if (widgetType === "iframe/url" || widgetType === "iframe_url" || widgetType === "iframe-url") {
+        widgetType = "iframe";
+      } else if (widgetType === "url") {
+        widgetType = "iframe";
+      } else if (widgetType === "img" || widgetType === "picture") {
+        widgetType = "image";
+      }
+      if (widgetType) {
+        normalizedWidget.type = widgetType;
+      }
+
+      const source = rawWidgetSource(normalizedWidget);
+      if ((widgetType === "iframe" || widgetType === "image" || widgetType === "video") && source) {
+        normalizedWidget.url = source;
+      }
+      if ((widgetType === "iframe" || widgetType === "image" || widgetType === "video") && !source) {
+        normalizedWidget.type = "empty";
+      }
+      if ((widgetType === "html" || widgetType === "card") && !normalizedWidget.html) {
+        normalizedWidget.html = String(normalizedWidget.content || "");
+        normalizedWidget.type = "card";
+      }
+      return normalizedWidget;
+    }
+
     function normalizeConfig(input) {
       const fallback = { widgets: [] };
       if (!input || typeof input !== "object") {
         return fallback;
       }
 
-      const widgets = Array.isArray(input.widgets) ? input.widgets.filter((w) => w && typeof w === "object") : [];
+      const widgets = Array.isArray(input.widgets)
+        ? input.widgets.filter((w) => w && typeof w === "object").map(normalizeWidget)
+        : [];
       const normalized = { widgets };
       const parsedRows = Number(input.rows);
       if (Number.isFinite(parsedRows) && parsedRows > 0) {
@@ -336,6 +371,9 @@
       let tick = 0;
       let stopped = false;
       let rafHandle = 0;
+      let lastLoadAt = 0;
+      let reloadAttempts = 0;
+      const maxReloadAttempts = 2;
       const wrapper = frame.parentElement;
 
       const forceCompositeRefresh = () => {
@@ -376,11 +414,34 @@
       // yalnızca odak alanı düzenli boyuyor; mouse ile tıklayınca diğer frame'in
       // canlanması bundan kaynaklanıyor. İçeriğe erişemesek bile iframe yüzeyini
       // odak/visibility/compositor açısından düzenli olarak aktif tutuyoruz.
-      const repaintTimer = window.setInterval(forceCompositeRefresh, 1000);
-      const activationTimer = window.setInterval(activateIframeSurface, 2000);
-      [50, 250, 750, 1500, 3000].forEach((delayMs) => window.setTimeout(activateIframeSurface, delayMs));
+      const repaintTimer = window.setInterval(forceCompositeRefresh, 2000);
+      const activationTimer = window.setInterval(activateIframeSurface, 5000);
+      [50, 150, 300, 600, 1000, 1600, 2400, 3600].forEach((delayMs) => window.setTimeout(activateIframeSurface, delayMs));
+      const reloadTimer = window.setInterval(() => {
+        if (stopped || !frame.isConnected || reloadAttempts >= maxReloadAttempts) {
+          if (reloadAttempts >= maxReloadAttempts) {
+            window.clearInterval(reloadTimer);
+          }
+          return;
+        }
+        if (lastLoadAt > 0) {
+          window.clearInterval(reloadTimer);
+          return;
+        }
+        reloadAttempts += 1;
+        const currentSrc = String(frame.src || "");
+        if (!currentSrc) return;
+        const separator = currentSrc.includes("?") ? "&" : "?";
+        frame.src = `${currentSrc}${separator}_baylan_reload=${Date.now()}`;
+        debugLog("iframe reload after missing load", { widgetIndex, attempt: reloadAttempts, url: currentSrc });
+      }, 9000);
       ["load", "focus", "mouseenter", "pointerenter"].forEach((eventName) => {
         frame.addEventListener(eventName, activateIframeSurface);
+      });
+      frame.addEventListener("load", () => {
+        lastLoadAt = Date.now();
+        window.setTimeout(activateIframeSurface, 100);
+        window.setTimeout(forceCompositeRefresh, 250);
       });
       debugLog("iframe repaint watchdog start", { widgetIndex, url: frame.src });
 
@@ -388,6 +449,7 @@
         stopped = true;
         window.clearInterval(repaintTimer);
         window.clearInterval(activationTimer);
+        window.clearInterval(reloadTimer);
         if (rafHandle) {
           window.cancelAnimationFrame(rafHandle);
         }
@@ -643,8 +705,8 @@
           frame.className = "widget";
           frame.src = normalizeIframeUrl(item.url);
           frame.loading = "eager";
-          frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+          frame.referrerPolicy = "no-referrer-when-downgrade";
+          frame.allow = "autoplay; fullscreen; display-capture; encrypted-media; picture-in-picture; storage-access";
           frame.allowFullscreen = true;
           frame.tabIndex = 0;
           activeIframeCleanup = startIframeRepaintWatchdog(frame, widgetIndex);
@@ -742,8 +804,8 @@
           frame.className = "widget";
           frame.src = normalizeIframeUrl(w.url);
           frame.loading = "eager";
-          frame.referrerPolicy = "no-referrer";
-          frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+          frame.referrerPolicy = "no-referrer-when-downgrade";
+          frame.allow = "autoplay; fullscreen; display-capture; encrypted-media; picture-in-picture; storage-access";
           frame.allowFullscreen = true;
           frame.tabIndex = 0;
 
