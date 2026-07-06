@@ -188,7 +188,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_native_url_row_sources_extracts_two_row_iframe_layout(self):
         player = self._build_player()
 
-        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1"}, clear=False):
+        with patch.dict("os.environ", {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_URL_ROWS": "1"}, clear=False):
             sources = player._native_url_row_sources(
                 "",
                 widget_config={
@@ -241,7 +241,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_native_widget_grid_specs_supports_multi_column_iframe_and_image_layout(self):
         player = self._build_player()
 
-        with patch.dict("os.environ", {"WIDGET_NATIVE_GRID": "1"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+        with patch.dict("os.environ", {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_GRID": "1"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
             player,
             "_windows_connected_monitor_bounds",
             return_value=[(0, 0, 200, 100)],
@@ -296,7 +296,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_native_widget_grid_specs_accepts_source_aliases_when_enabled(self):
         player = self._build_player()
 
-        with patch.dict("os.environ", {"WIDGET_NATIVE_GRID": "1"}, clear=True), patch("client.player.os.name", "nt"), patch.object(
+        with patch.dict("os.environ", {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_GRID": "1"}, clear=True), patch("client.player.os.name", "nt"), patch.object(
             player,
             "_windows_connected_monitor_bounds",
             return_value=[(0, 0, 200, 100)],
@@ -396,7 +396,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         player = self._build_player()
         player._python_widget_viewer_supported = True
 
-        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+        with patch.dict("os.environ", {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
             player,
             "_windows_connected_monitor_bounds",
             return_value=[(0, 0, 1920, 1080)],
@@ -455,7 +455,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_SINGLE_WINDOW": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"},
+            {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_SINGLE_WINDOW": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"},
             clear=False,
         ), patch("client.player.os.name", "nt"), patch.object(
             player,
@@ -508,7 +508,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "WIDGET_NATIVE_URL_ROWS": "1",
+                "WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_URL_ROWS": "1",
                 "WIDGET_NATIVE_URL_ROWS_HIDDEN_PRELOAD": "1",
                 "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0",
             },
@@ -568,7 +568,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             ],
         }
 
-        with patch.dict("os.environ", {"WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
+        with patch.dict("os.environ", {"WIDGET_MULTI_PROCESS_WIDGET_LAYOUTS": "1", "WIDGET_NATIVE_URL_ROWS": "1", "WIDGET_NATIVE_URL_ROWS_PRELOAD_SEC": "0"}, clear=False), patch("client.player.os.name", "nt"), patch.object(
             player,
             "_windows_connected_monitor_bounds",
             return_value=[(0, 0, 1920, 1080)],
@@ -2200,6 +2200,39 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(player._widget_runtime_processes, [spawned_process])
         self.assertEqual(player._widget_process, spawned_process)
         self.assertEqual(player._last_runtime_signature, (((1, (0, 0, 1920, 1080)),), False, 1))
+
+
+    def test_runtime_monitor_targets_use_single_process_for_clone_by_default(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {}, clear=True), patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ):
+            targets = player._resolve_widget_runtime_monitor_targets(
+                target_monitor_index=None,
+                clone_to_all_monitors=True,
+            )
+
+        self.assertEqual(targets, [(0, (0, 0, 1920, 1080))])
+
+    def test_runtime_monitor_targets_can_opt_into_multi_process_clone(self):
+        player = self._build_player()
+
+        with patch.dict("os.environ", {"WIDGET_MULTI_RUNTIME_PROCESSES": "1"}, clear=True), patch(
+            "client.player.os.name", "nt"
+        ), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ):
+            targets = player._resolve_widget_runtime_monitor_targets(
+                target_monitor_index=None,
+                clone_to_all_monitors=True,
+            )
+
+        self.assertEqual(targets, [(0, (0, 0, 1920, 1080)), (1, (1920, 0, 1920, 1080))])
 
     def test_start_widget_engine_reuses_when_default_and_explicit_target_match(self):
         player = self._build_player()
