@@ -10,7 +10,26 @@
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; isolation: isolate; transform: translateZ(0); }
     .iframe-widget.loading iframe.widget { background: #111; }
+    .iframe-widget { border: 1px solid rgba(255,255,255,0.16); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.55); }
     iframe.widget { width: 100%; height: 100%; display: block; transform: translateZ(0); will-change: transform, opacity; backface-visibility: hidden; color-scheme: normal; }
+    .iframe-status {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      z-index: 2;
+      max-width: calc(100% - 20px);
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.68);
+      color: rgba(255,255,255,0.92);
+      font-size: 12px;
+      line-height: 1.25;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .iframe-widget.loaded .iframe-status { opacity: 0; transition: opacity 600ms ease 4000ms; }
     .iframe-fallback {
       display: none;
       position: absolute;
@@ -321,6 +340,21 @@
         // Cross-origin içeriklere erişim normalde kısıtlıdır; bu durumda yükleme başarılı kabul edilir.
         return { status: "ready" };
       }
+    }
+
+    function buildIframeStatus(url, index) {
+      const status = document.createElement("div");
+      status.className = "iframe-status";
+      status.textContent = `Widget ${index + 1} yükleniyor: ${String(url || "").slice(0, 180)}`;
+      return status;
+    }
+
+    function markIframeLoaded(wrapper, status, frame, widgetIndex) {
+      if (!wrapper || !status) return;
+      wrapper.classList.remove("loading");
+      wrapper.classList.add("loaded");
+      status.textContent = `Widget ${widgetIndex + 1} veri aldı`;
+      debugLog("iframe loaded and painted", { widgetIndex, url: frame && frame.src ? frame.src : "" });
     }
 
     function attachIframeBlockDetection(wrapper, frame, onBlocked) {
@@ -853,6 +887,7 @@
           const frame = document.createElement("iframe");
           frame.className = "widget";
           const normalizedFrameUrl = normalizeIframeUrl(w.url, index);
+          const status = buildIframeStatus(normalizedFrameUrl || w.url, index);
           frame.loading = "eager";
           frame.referrerPolicy = "no-referrer-when-downgrade";
           frame.allow = "autoplay; fullscreen; display-capture; encrypted-media; picture-in-picture; storage-access";
@@ -904,6 +939,7 @@
           };
 
           frame.addEventListener("load", () => {
+            markIframeLoaded(wrapper, status, frame, index);
             keepIframeActive();
             [400, 1200, 2500].forEach((delayMs) => {
               window.setTimeout(keepIframeActive, delayMs);
@@ -919,6 +955,7 @@
 
           wrapper.classList.add("loading");
           wrapper.appendChild(frame);
+          wrapper.appendChild(status);
           wrapper.appendChild(buildIframeFallback(w.url));
           container.appendChild(wrapper);
 

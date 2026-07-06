@@ -1364,11 +1364,17 @@ class GuiRuntime:
                     debug_window = tk.Toplevel(root)
                     debug_window.overrideredirect(True)
                     debug_window.configure(bg="black")
-                    debug_window.attributes("-topmost", True)
+                    # Debug monitor labels must not hide the actual signage/widget
+                    # surface.  On Windows, make the black panel color transparent
+                    # so only the monitor-id text remains visible above content.
                     try:
-                        debug_window.attributes("-alpha", 0.35)
+                        debug_window.wm_attributes("-transparentcolor", "black")
                     except tk.TclError:
-                        pass
+                        try:
+                            debug_window.attributes("-alpha", 0.18)
+                        except tk.TclError:
+                            pass
+                    debug_window.attributes("-topmost", True)
                     debug_window.title(f"Baylan Monitor Debug {monitor_id}")
                     label = tk.Label(
                         debug_window,
