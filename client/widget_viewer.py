@@ -854,19 +854,32 @@ def _start_with_pywebview(
             if payload is None:
                 return
 
-            js = _build_runtime_update_script(payload, signature=signature)
-            try:
-                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
-                window.evaluate_js(js)
-            except Exception as exc:
-                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
-            if not shown_once:
+            def _show_runtime_window_once() -> None:
+                nonlocal shown_once
+                if shown_once:
+                    return
                 shown_once = True
                 try:
                     _enter_fullscreen_once()
                     window.show()
                 except Exception:
                     pass
+
+            # A hidden WebView2 surface can defer iframe painting/timers until a
+            # later external input event. Reveal the runtime before injecting the
+            # active layout so multi-widget dashboards start loading while the
+            # compositor is already visible.
+            if message_type == "layout_update":
+                _show_runtime_window_once()
+
+            js = _build_runtime_update_script(payload, signature=signature)
+            try:
+                _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
+                window.evaluate_js(js)
+            except Exception as exc:
+                _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
+
+            _show_runtime_window_once()
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
