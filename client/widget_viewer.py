@@ -580,6 +580,7 @@ def _start_with_fallback(
     webview_module,
     monitor_bounds: tuple[int, int, int, int] | None = None,
     position_window=None,
+    on_started=None,
 ) -> None:
     errors: list[str] = []
     launch_started_at = time.perf_counter()
@@ -592,8 +593,14 @@ def _start_with_fallback(
             else:
                 _safe_print("Widget viewer GUI deneniyor: auto")
             _debug_log(f"pywebview.start begin | gui={gui or 'auto'} kwargs={kwargs}")
-            if monitor_bounds is not None and os.name == "nt":
-                def _on_started():
+            def _on_started():
+                if callable(on_started):
+                    try:
+                        on_started()
+                    except Exception as exc:
+                        _debug_log(f"pywebview start callback failed | error={exc}")
+
+                if monitor_bounds is not None and os.name == "nt":
                     def _position_window():
                         for _attempt in range(60):
                             if callable(position_window):
@@ -606,6 +613,7 @@ def _start_with_fallback(
 
                     threading.Thread(target=_position_window, daemon=True).start()
 
+            if callable(on_started) or (monitor_bounds is not None and os.name == "nt"):
                 webview_module.start(_on_started, **kwargs)
             else:
                 webview_module.start(**kwargs)
@@ -1172,9 +1180,19 @@ def _start_with_pywebview(
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
-        threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
+        def _start_runtime_reader() -> None:
+            _debug_log("pywebview runtime reader scheduled after gui start")
+            threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
-    _start_with_fallback(webview, monitor_bounds=monitor_bounds, position_window=_position_pywebview_window)
+    else:
+        _start_runtime_reader = None
+
+    _start_with_fallback(
+        webview,
+        monitor_bounds=monitor_bounds,
+        position_window=_position_pywebview_window,
+        on_started=_start_runtime_reader,
+    )
 
 
 def main() -> int:
