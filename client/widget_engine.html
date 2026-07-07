@@ -299,8 +299,8 @@
       const pollMs = 1500;
       const maxTransientRetries = 4;
       const maxPendingRetries = 4;
-      const maxNoLoadRetries = 5;
       const retryDelayMs = 1000;
+      const longRetryDelayMs = 10000;
       let transientRetryCount = 0;
       let pendingRetryCount = 0;
       let noLoadRetryCount = 0;
@@ -320,10 +320,6 @@
         loadWatchdog = window.setTimeout(() => {
           if (settled || loadedAtLeastOnce) return;
           nudgeFramePaint();
-          if (noLoadRetryCount >= maxNoLoadRetries) {
-            block();
-            return;
-          }
           noLoadRetryCount += 1;
           debugLog("iframe initial load watchdog retry", {
             widgetIndex: Number(frame.dataset.widgetIndex || -1),
@@ -372,25 +368,21 @@
           block();
           return;
         }
-        if (state.status === "transient_connection" && transientRetryCount < maxTransientRetries) {
+        if (state.status === "transient_connection") {
           transientRetryCount += 1;
           window.setTimeout(() => {
             if (settled) return;
             reloadWithCacheBust();
-          }, retryDelayMs);
+          }, transientRetryCount <= maxTransientRetries ? retryDelayMs : longRetryDelayMs);
           return;
         }
         if (state.status === "pending") {
           nudgeFramePaint();
-          if (pendingRetryCount < maxPendingRetries) {
-            pendingRetryCount += 1;
-            window.setTimeout(() => {
-              if (settled) return;
-              reloadWithCacheBust();
-            }, retryDelayMs);
-            return;
-          }
-          block();
+          pendingRetryCount += 1;
+          window.setTimeout(() => {
+            if (settled) return;
+            reloadWithCacheBust();
+          }, pendingRetryCount <= maxPendingRetries ? retryDelayMs : longRetryDelayMs);
           return;
         }
         window.setTimeout(verifyFrame, pollMs);
