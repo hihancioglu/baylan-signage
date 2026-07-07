@@ -249,6 +249,40 @@
       }
     }
 
+    function nudgeIframePaint(frame, reason = "paint_nudge") {
+      if (!frame) return;
+      const wrapper = frame.closest ? frame.closest(".iframe-widget") : null;
+      const targets = wrapper ? [wrapper, frame] : [frame];
+      targets.forEach((target) => {
+        try {
+          target.style.transform = "translateZ(0) scale(1.0001)";
+          target.style.opacity = "0.9999";
+          // offsetHeight forces a synchronous layout read, similar to the
+          // compositor invalidation that happens when the mouse hovers a stuck
+          // WebView2 iframe surface.
+          void target.offsetHeight;
+          window.setTimeout(() => {
+            target.style.transform = "translateZ(0)";
+            target.style.opacity = "";
+          }, 90);
+        } catch (_err) {
+          // noop
+        }
+      });
+      try {
+        if (typeof frame.focus === "function") {
+          frame.focus({ preventScroll: true });
+        }
+      } catch (_err) {
+        // noop
+      }
+      debugLog("iframe paint nudged", {
+        reason,
+        widgetIndex: Number(frame.dataset && frame.dataset.widgetIndex || -1),
+        url: String(frame.dataset && frame.dataset.instanceSrc || frame.currentSrc || frame.src || ""),
+      });
+    }
+
     function attachIframeBlockDetection(wrapper, frame, onBlocked) {
       let settled = false;
       let loadedAtLeastOnce = false;
@@ -302,19 +336,7 @@
         armLoadWatchdog();
       };
 
-      const nudgeFramePaint = () => {
-        try {
-          frame.style.transform = "translateZ(0) scale(1.0001)";
-          window.setTimeout(() => {
-            frame.style.transform = "translateZ(0)";
-          }, 80);
-          if (typeof frame.focus === "function") {
-            frame.focus({ preventScroll: true });
-          }
-        } catch (_err) {
-          // noop
-        }
-      };
+      const nudgeFramePaint = () => nudgeIframePaint(frame, "load_watchdog");
 
       const block = () => {
         if (settled) return;
@@ -380,22 +402,34 @@
       }, maxWaitMs);
     }
 
-    function recoverUnsettledIframes(reason = "runtime_refresh") {
+    function recoverUnsettledIframes(reason = "runtime_refresh", options = {}) {
+      const force = options && options.force === true;
+      const minRecoverIntervalMs = Number(options && options.minRecoverIntervalMs || 60000);
       document.querySelectorAll(".iframe-widget iframe[data-instance-src]").forEach((frame) => {
         const wrapper = frame.closest(".iframe-widget");
         if (!wrapper || wrapper.classList.contains("blocked")) return;
         const state = inspectIframeState(frame);
-        if (state && state.status === "ready") return;
+        if (!force && state && state.status === "ready") return;
         const source = String(frame.dataset.instanceSrc || "");
         if (!source) return;
+        const now = Date.now();
+        const lastRecoverAt = Number(frame.dataset.lastRecoverAt || 0);
+        if (lastRecoverAt > 0 && now - lastRecoverAt < minRecoverIntervalMs) return;
+        frame.dataset.lastRecoverAt = String(now);
         debugLog("iframe recovered during runtime refresh", {
           reason,
+          force,
           widgetIndex: Number(frame.dataset.widgetIndex || -1),
           state: state ? state.status : "unknown",
           url: source,
         });
+        nudgeIframePaint(frame, reason);
+        if (force && state && state.status === "ready") return;
         const separator = source.includes("?") ? "&" : "?";
-        frame.src = `${source}${separator}_recover=${Date.now()}`;
+        frame.src = "about:blank";
+        window.setTimeout(() => {
+          frame.src = `${source}${separator}_recover=${Date.now()}`;
+        }, 80);
       });
     }
 
@@ -755,8 +789,10 @@
 
           frame.addEventListener("load", () => {
             enforceIframeVideosMuted();
+            nudgeIframePaint(frame, "iframe_load");
             [400, 1200, 2500].forEach((delayMs) => {
               window.setTimeout(enforceIframeVideosMuted, delayMs);
+              window.setTimeout(() => nudgeIframePaint(frame, `iframe_load_${delayMs}`), delayMs);
             });
           });
 
@@ -884,7 +920,11 @@
           // stuck on its own loading state. Keep the already-rendered widgets alive
           // and only refresh the playlist cache.
           debugLog("playlist sync skipped active rerender", { signature: activeWidgetSignature });
-          recoverUnsettledIframes("playlist_sync_same_signature");
+          // WebView2 sometimes keeps cross-origin dashboard iframes on their own
+          // loading spinner after a hidden warm runtime is foregrounded. Mouse
+          // hover fixing the cell points to a paint/compositor issue, so first
+          // nudge the iframe surface. Only non-ready frames continue to reload.
+          recoverUnsettledIframes("playlist_sync_same_signature", { force: true, minRecoverIntervalMs: 15000 });
           return;
         }
         lastRenderedSignature = activeWidgetSignature;
