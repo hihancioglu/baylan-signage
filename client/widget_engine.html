@@ -187,6 +187,7 @@
       frame.name = `baylan-widget-frame-${Math.max(0, widgetIndex)}-${Math.random().toString(36).slice(2)}`;
       frame.dataset.originalSrc = source;
       frame.dataset.instanceSrc = source;
+      frame.dataset.widgetIndex = String(widgetIndex);
       window.requestAnimationFrame(() => {
         frame.src = source;
       });
@@ -251,19 +252,54 @@
     function attachIframeBlockDetection(wrapper, frame, onBlocked) {
       let settled = false;
       let loadedAtLeastOnce = false;
+      const initialLoadWaitMs = 8000;
       const maxWaitMs = 30000;
       const pollMs = 1500;
       const maxTransientRetries = 4;
+      const maxPendingRetries = 4;
+      const maxNoLoadRetries = 5;
       const retryDelayMs = 1000;
       let transientRetryCount = 0;
       let pendingRetryCount = 0;
+      let noLoadRetryCount = 0;
+      let loadWatchdog = null;
       const baseSrc = () => String(frame.dataset.instanceSrc || frame.currentSrc || frame.src || "");
+
+      const clearLoadWatchdog = () => {
+        if (loadWatchdog) {
+          window.clearTimeout(loadWatchdog);
+          loadWatchdog = null;
+        }
+      };
+
+      const armLoadWatchdog = () => {
+        clearLoadWatchdog();
+        if (settled) return;
+        loadWatchdog = window.setTimeout(() => {
+          if (settled || loadedAtLeastOnce) return;
+          nudgeFramePaint();
+          if (noLoadRetryCount >= maxNoLoadRetries) {
+            block();
+            return;
+          }
+          noLoadRetryCount += 1;
+          debugLog("iframe initial load watchdog retry", {
+            widgetIndex: Number(frame.dataset.widgetIndex || -1),
+            retryCount: noLoadRetryCount,
+            url: baseSrc(),
+          });
+          reloadWithCacheBust();
+          armLoadWatchdog();
+        }, initialLoadWaitMs);
+      };
 
       const reloadWithCacheBust = () => {
         const currentBaseSrc = baseSrc();
         if (!currentBaseSrc) return;
+        loadedAtLeastOnce = false;
         const separator = currentBaseSrc.includes("?") ? "&" : "?";
         frame.src = `${currentBaseSrc}${separator}_retry=${Date.now()}`;
+        armLoadWatchdog();
       };
 
       const nudgeFramePaint = () => {
@@ -283,6 +319,7 @@
       const block = () => {
         if (settled) return;
         settled = true;
+        clearLoadWatchdog();
         wrapper.classList.add("blocked");
         if (typeof onBlocked === "function") {
           onBlocked();
@@ -291,6 +328,7 @@
       const success = () => {
         if (settled) return;
         settled = true;
+        clearLoadWatchdog();
       };
 
       const verifyFrame = () => {
@@ -314,7 +352,7 @@
         }
         if (state.status === "pending") {
           nudgeFramePaint();
-          if (pendingRetryCount < maxTransientRetries) {
+          if (pendingRetryCount < maxPendingRetries) {
             pendingRetryCount += 1;
             window.setTimeout(() => {
               if (settled) return;
@@ -329,15 +367,36 @@
       frame.addEventListener("error", block);
       frame.addEventListener("load", () => {
         loadedAtLeastOnce = true;
+        clearLoadWatchdog();
         verifyFrame();
       });
 
+      armLoadWatchdog();
       window.setTimeout(() => {
         if (!settled && !loadedAtLeastOnce) {
           nudgeFramePaint();
           reloadWithCacheBust();
         }
       }, maxWaitMs);
+    }
+
+    function recoverUnsettledIframes(reason = "runtime_refresh") {
+      document.querySelectorAll(".iframe-widget iframe[data-instance-src]").forEach((frame) => {
+        const wrapper = frame.closest(".iframe-widget");
+        if (!wrapper || wrapper.classList.contains("blocked")) return;
+        const state = inspectIframeState(frame);
+        if (state && state.status === "ready") return;
+        const source = String(frame.dataset.instanceSrc || "");
+        if (!source) return;
+        debugLog("iframe recovered during runtime refresh", {
+          reason,
+          widgetIndex: Number(frame.dataset.widgetIndex || -1),
+          state: state ? state.status : "unknown",
+          url: source,
+        });
+        const separator = source.includes("?") ? "&" : "?";
+        frame.src = `${source}${separator}_recover=${Date.now()}`;
+      });
     }
 
     const widgetPlaylistCache = new Map();
@@ -825,6 +884,7 @@
           // stuck on its own loading state. Keep the already-rendered widgets alive
           // and only refresh the playlist cache.
           debugLog("playlist sync skipped active rerender", { signature: activeWidgetSignature });
+          recoverUnsettledIframes("playlist_sync_same_signature");
           return;
         }
         lastRenderedSignature = activeWidgetSignature;
