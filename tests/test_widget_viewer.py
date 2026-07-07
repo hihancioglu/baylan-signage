@@ -156,6 +156,13 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("refreshIntervalSeconds", engine)
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
+    def test_widget_engine_hides_iframe_scrollbars_and_blocks_stuck_blank_frames(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("scrollbar-width: none;", engine)
+        self.assertIn("frame.scrolling = \"no\";", engine)
+        self.assertIn("block();\n          return;", engine)
+
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url("https://example.com")
