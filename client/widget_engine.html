@@ -182,27 +182,10 @@
     }
 
 
-    function withWidgetInstanceParam(url, widgetIndex = -1) {
-      const normalized = normalizeIframeUrl(url);
-      if (!normalized || /^(data:|blob:)/i.test(normalized)) return normalized;
-      const instanceToken = `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.max(0, widgetIndex)}`;
-      try {
-        const parsed = new URL(normalized, window.location.href);
-        parsed.searchParams.set("_baylan_widget_instance", instanceToken);
-        return parsed.toString();
-      } catch (_err) {
-        const hashIndex = normalized.indexOf("#");
-        const base = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
-        const hash = hashIndex >= 0 ? normalized.slice(hashIndex) : "";
-        const separator = base.includes("?") ? "&" : "?";
-        return `${base}${separator}_baylan_widget_instance=${encodeURIComponent(instanceToken)}${hash}`;
-      }
-    }
-
     function scheduleIframeLoad(frame, url, widgetIndex = -1) {
-      const source = withWidgetInstanceParam(url, widgetIndex);
+      const source = normalizeIframeUrl(url);
       frame.name = `baylan-widget-frame-${Math.max(0, widgetIndex)}-${Math.random().toString(36).slice(2)}`;
-      frame.dataset.originalSrc = normalizeIframeUrl(url);
+      frame.dataset.originalSrc = source;
       frame.dataset.instanceSrc = source;
       window.requestAnimationFrame(() => {
         frame.src = source;

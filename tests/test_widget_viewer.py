@@ -146,6 +146,16 @@ class TestWidgetViewer(unittest.TestCase):
         evaluate_index = fake_window.method_calls.index(unittest.mock.call.evaluate_js(unittest.mock.ANY))
         self.assertLess(show_index, evaluate_index)
 
+
+    def test_widget_engine_preserves_iframe_url_for_server_driven_live_updates(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("const source = normalizeIframeUrl(url);", engine)
+        self.assertIn("frame.src = source;", engine)
+        self.assertNotIn("_baylan_widget_instance", engine)
+        self.assertNotIn("refreshIntervalSeconds", engine)
+        self.assertNotIn("window.setInterval(loadFreshSource", engine)
+
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
             result = widget_viewer._build_engine_url("https://example.com")
