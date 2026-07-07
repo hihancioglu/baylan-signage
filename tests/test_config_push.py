@@ -81,6 +81,23 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(cfg_a["videos"][0]["path"], "https://example.com/a.mp4")
         self.assertEqual(cfg_b["videos"][0]["path"], "https://example.com/b.mp4")
 
+    def test_register_keeps_same_hostname_different_macs_as_separate_devices(self):
+        client = self.main.socketio.test_client(self.main.app)
+        try:
+            base_payload = {"secret": self.main.SHARED_SECRET, "hostname": "shared-host"}
+            client.emit("register", {**base_payload, "mac_address": "00-11-22-33-44-55"})
+            client.emit("register", {**base_payload, "mac_address": "66:77:88:99:aa:bb"})
+        finally:
+            client.disconnect()
+
+        db = self.main.db_session()
+        try:
+            devices = db.query(self.main.Device).filter_by(hostname="shared-host").order_by(self.main.Device.mac_address).all()
+            self.assertEqual(len(devices), 2)
+            self.assertEqual([d.mac_address for d in devices], ["00:11:22:33:44:55", "66:77:88:99:aa:bb"])
+        finally:
+            db.close()
+
     def test_update_group_idle_timeout_emits_config_for_group_devices(self):
         db = self.main.db_session()
         try:

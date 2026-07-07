@@ -106,10 +106,24 @@ def _request_mac_address():
 
 def _find_device(db, hostname, mac_address=None):
     mac = _normalize_mac_address(mac_address)
+    hostname = str(hostname or "").strip()
     if mac:
         device = db.query(Device).filter_by(mac_address=mac).first()
         if device:
             return device
+
+        # Aynı hostname'e sahip farklı MAC adresli ekranlar ayrı cihazlardır.
+        # MAC ile gelen isteklerde dolu MAC adresi olan hostname eşleşmesini
+        # döndürmek, yeni ekranın eski kaydı ezmesine ve panelde tek satır
+        # görünmesine neden olur. Sadece eski/manuel oluşturulmuş MAC'siz kayıt
+        # varsa onu sahiplen; aksi halde çağıran yeni Device oluştursun.
+        return (
+            db.query(Device)
+            .filter(Device.hostname == hostname)
+            .filter((Device.mac_address.is_(None)) | (Device.mac_address == ""))
+            .first()
+        )
+
     return db.query(Device).filter_by(hostname=hostname).first()
 
 COMMAND_TYPES = {
