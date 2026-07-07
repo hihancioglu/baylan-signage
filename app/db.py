@@ -18,6 +18,73 @@ def _existing_columns(connection, table_name):
     return {row[1] for row in rows}
 
 
+def _unique_hostname_indexes(connection):
+    indexes = connection.execute(text("PRAGMA index_list(devices)")).fetchall()
+    unique_indexes = []
+    for index in indexes:
+        # PRAGMA index_list columns: seq, name, unique, origin, partial
+        if not bool(index[2]):
+            continue
+        index_name = index[1]
+        columns = connection.execute(text(f"PRAGMA index_info({index_name})")).fetchall()
+        indexed_columns = [column[2] for column in columns]
+        if indexed_columns == ["hostname"]:
+            unique_indexes.append(index_name)
+    return unique_indexes
+
+
+def _rebuild_devices_without_unique_hostname(connection):
+    if not _existing_columns(connection, "devices"):
+        return
+
+    unique_hostname_indexes = _unique_hostname_indexes(connection)
+    if not unique_hostname_indexes:
+        return
+
+    current_columns = _existing_columns(connection, "devices")
+    target_columns = [
+        ("id", "INTEGER PRIMARY KEY"),
+        ("hostname", "VARCHAR(128) NOT NULL"),
+        ("mac_address", "VARCHAR(64)"),
+        ("alias", "VARCHAR(128)"),
+        ("inventory_id", "VARCHAR(128)"),
+        ("ip", "VARCHAR(64)"),
+        ("username", "VARCHAR(128)"),
+        ("department", "VARCHAR(128)"),
+        ("is_online", "BOOLEAN"),
+        ("last_seen", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+        ("agent_version", "VARCHAR(64)"),
+        ("updater_version", "VARCHAR(64)"),
+        ("os_version", "VARCHAR(128)"),
+        ("last_error", "VARCHAR(512)"),
+        ("last_state", "VARCHAR(64)"),
+        ("last_state_at", "DATETIME"),
+        ("last_content_name", "VARCHAR(255)"),
+        ("idle_mode_enabled", "BOOLEAN"),
+        ("content_enabled", "BOOLEAN"),
+        ("last_client_update_status", "VARCHAR(256)"),
+        ("last_client_updater_status", "VARCHAR(256)"),
+        ("cpu_temperature", "VARCHAR(64)"),
+    ]
+    column_defs = ", ".join(f"{name} {definition}" for name, definition in target_columns)
+    copy_columns = [name for name, _definition in target_columns if name in current_columns]
+    copy_column_csv = ", ".join(copy_columns)
+
+    connection.execute(text("PRAGMA foreign_keys=OFF"))
+    connection.execute(text("DROP TABLE IF EXISTS devices_schema_migration"))
+    connection.execute(text(f"CREATE TABLE devices_schema_migration ({column_defs})"))
+    if copy_columns:
+        connection.execute(
+            text(
+                f"INSERT INTO devices_schema_migration ({copy_column_csv}) "
+                f"SELECT {copy_column_csv} FROM devices"
+            )
+        )
+    connection.execute(text("DROP TABLE devices"))
+    connection.execute(text("ALTER TABLE devices_schema_migration RENAME TO devices"))
+    connection.execute(text("PRAGMA foreign_keys=ON"))
+
+
 def ensure_sqlite_schema():
     if not engine.dialect.name.startswith("sqlite"):
         return
@@ -80,6 +147,8 @@ def ensure_sqlite_schema():
     Base.metadata.create_all(bind=engine)
 
     with engine.begin() as connection:
+        _rebuild_devices_without_unique_hostname(connection)
+
         if not _existing_columns(connection, "command_logs"):
             connection.execute(text(
                 "CREATE TABLE command_logs ("
