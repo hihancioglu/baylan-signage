@@ -51,6 +51,36 @@ class TestConfigPush(unittest.TestCase):
             self.main.connected.clear()
             self.main.connected.update(original_connected)
 
+    def test_build_config_uses_mac_address_when_hostnames_match(self):
+        db = self.main.db_session()
+        try:
+            group_a = self.main.Group(name="Duplicate Host A")
+            group_b = self.main.Group(name="Duplicate Host B")
+            playlist_a = self.main.Playlist(name="Duplicate Playlist A", enabled=True)
+            playlist_b = self.main.Playlist(name="Duplicate Playlist B", enabled=True)
+            device_a = self.main.Device(hostname="duplicate-host", mac_address="00:11:22:33:44:55")
+            device_b = self.main.Device(hostname="duplicate-host", mac_address="66:77:88:99:aa:bb")
+            db.add_all([group_a, group_b, playlist_a, playlist_b, device_a, device_b])
+            db.commit()
+
+            db.add_all([
+                self.main.DeviceGroup(device_id=device_a.id, group_id=group_a.id, is_active=True),
+                self.main.DeviceGroup(device_id=device_b.id, group_id=group_b.id, is_active=True),
+                self.main.GroupPlaylist(group_id=group_a.id, playlist_id=playlist_a.id),
+                self.main.GroupPlaylist(group_id=group_b.id, playlist_id=playlist_b.id),
+                self.main.PlaylistItem(playlist_id=playlist_a.id, path="https://example.com/a.mp4", media_type="video"),
+                self.main.PlaylistItem(playlist_id=playlist_b.id, path="https://example.com/b.mp4", media_type="video"),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        cfg_a = self.main.build_config("duplicate-host", "00-11-22-33-44-55")
+        cfg_b = self.main.build_config("duplicate-host", "66:77:88:99:aa:bb")
+
+        self.assertEqual(cfg_a["videos"][0]["path"], "https://example.com/a.mp4")
+        self.assertEqual(cfg_b["videos"][0]["path"], "https://example.com/b.mp4")
+
     def test_update_group_idle_timeout_emits_config_for_group_devices(self):
         db = self.main.db_session()
         try:

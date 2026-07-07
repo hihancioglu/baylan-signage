@@ -74,8 +74,44 @@ SCREENSHOT_ROOT.mkdir(parents=True, exist_ok=True)
 LATEST_SCREENSHOTS = {}  # hostname -> metadata
 LATEST_HEALTH_METRICS = {}  # hostname -> latest health metrics payload
 
-connected = {}      # hostname -> sid
+connected = {}      # device identity (mac address when available, otherwise hostname) -> sid
 sid_to_host = {}    # sid -> hostname
+sid_to_mac = {}     # sid -> mac address
+
+
+def _normalize_mac_address(value):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    hex_chars = re.sub(r"[^0-9a-f]", "", raw)
+    if len(hex_chars) == 12:
+        return ":".join(hex_chars[i:i + 2] for i in range(0, 12, 2))
+    return raw
+
+
+def _device_identity(hostname, mac_address=None):
+    mac = _normalize_mac_address(mac_address)
+    return mac or str(hostname or "").strip()
+
+
+
+def _request_mac_address():
+    payload = request.get_json(silent=True) if request.is_json else None
+    return _normalize_mac_address(
+        request.args.get("mac_address")
+        or request.args.get("mac")
+        or ((payload or {}).get("mac_address"))
+        or ((payload or {}).get("mac"))
+    )
+
+def _find_device(db, hostname, mac_address=None):
+    mac = _normalize_mac_address(mac_address)
+    if mac:
+        device = db.query(Device).filter_by(mac_address=mac).first()
+        if device:
+            return device
+    return db.query(Device).filter_by(hostname=hostname).first()
+
 COMMAND_TYPES = {
     "REFRESH_CONFIG",
     "EMERGENCY_START",
@@ -865,7 +901,10 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         .first()
     )
     return {
+        "id": device.id,
         "hostname": device.hostname,
+        "mac_address": device.mac_address,
+        "device_key": _device_identity(device.hostname, device.mac_address),
         "alias": device.alias,
         "inventory_id": device.inventory_id,
         "ip": device.ip,
@@ -882,7 +921,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         "agent_version": device.agent_version,
         "updater_version": device.updater_version,
         "cpu_temperature": device.cpu_temperature,
-        "health_metrics": LATEST_HEALTH_METRICS.get(device.hostname),
+        "health_metrics": LATEST_HEALTH_METRICS.get(_device_identity(device.hostname, device.mac_address)) or LATEST_HEALTH_METRICS.get(device.hostname),
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group": active_group[0] if active_group else None,
@@ -908,10 +947,19 @@ def _target_hostnames(db, target_type, target_value):
 
 
 def _emit_config_update(hostnames):
-    for hostname in sorted(set(hostnames or [])):
-        if hostname not in connected:
-            continue
-        socketio.emit("config", build_config(hostname), room=f"device:{hostname}")
+    db = db_session()
+    try:
+        for hostname in sorted(set(hostnames or [])):
+            devices = db.query(Device).filter_by(hostname=hostname).all()
+            if not devices:
+                devices = [Device(hostname=hostname)]
+            for device in devices:
+                identity = _device_identity(device.hostname, getattr(device, "mac_address", None))
+                if identity not in connected:
+                    continue
+                socketio.emit("config", build_config(device.hostname, device.mac_address) if getattr(device, "mac_address", None) else build_config(device.hostname), room=f"device:{identity}")
+    finally:
+        db.close()
 
 
 def _announcement_matches_device(announcement, hostname: str, group_id: int | None) -> bool:
@@ -1077,8 +1125,8 @@ def build_command_contract(command_type: str, payload=None, ttl_sec=30, priority
     }
 
 
-def join_group_rooms(db, sid, hostname):
-    device = db.query(Device).filter_by(hostname=hostname).first()
+def join_group_rooms(db, sid, hostname, mac_address=None):
+    device = _find_device(db, hostname, mac_address)
     if not device:
         return
 
@@ -1251,7 +1299,7 @@ def _build_playlist_runtime_payload(db, playlist, runtime_vars, widgets_by_id, m
     }
 
 
-def build_config(hostname):
+def build_config(hostname, mac_address=None):
     db = db_session()
     try:
         fallback_media = _get_setting(db, "fallback_media_url")
@@ -1282,7 +1330,7 @@ def build_config(hostname):
             "active_call": None,
         }
 
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, mac_address)
         if not device:
             return base_config
         runtime_vars = _widget_runtime_vars(device)
@@ -1388,17 +1436,24 @@ def handle_register(data):
     hostname = data.get("hostname")
     if not hostname:
         return
+    mac_address = _normalize_mac_address(data.get("mac_address"))
+    identity = _device_identity(hostname, mac_address)
 
-    connected[hostname] = request.sid
+    connected[identity] = request.sid
     sid_to_host[request.sid] = hostname
+    sid_to_mac[request.sid] = mac_address
+    join_room(f"device:{identity}")
     join_room(f"device:{hostname}")
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, mac_address)
         if not device:
             device = Device(hostname=hostname)
 
+        device.hostname = hostname
+        if mac_address:
+            device.mac_address = mac_address
         device.ip = data.get("ip")
         device.username = data.get("username")
         device.department = data.get("department")
@@ -1415,18 +1470,18 @@ def handle_register(data):
         device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
         health_metrics = _extract_health_metrics(data)
         if health_metrics:
-            LATEST_HEALTH_METRICS[hostname] = health_metrics
+            LATEST_HEALTH_METRICS[_device_identity(hostname, mac_address)] = health_metrics
         device.is_online = True
         device.last_seen = datetime.now(timezone.utc)
 
         db.add(device)
         db.commit()
 
-        join_group_rooms(db, request.sid, hostname)
+        join_group_rooms(db, request.sid, hostname, mac_address)
     finally:
         db.close()
 
-    emit("config", build_config(hostname))
+    emit("config", build_config(hostname, mac_address))
 
 
 @socketio.on("heartbeat")
@@ -1434,10 +1489,11 @@ def handle_heartbeat(data):
     hostname = data.get("hostname")
     if not hostname:
         return
+    mac_address = _normalize_mac_address(data.get("mac_address") or sid_to_mac.get(request.sid))
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, mac_address)
         if device:
             device.last_seen = datetime.now(timezone.utc)
             incoming_state = data.get("state") or data.get("current_state")
@@ -1453,7 +1509,7 @@ def handle_heartbeat(data):
             device.cpu_temperature = _extract_device_health(data) or device.cpu_temperature
             health_metrics = _extract_health_metrics(data)
             if health_metrics:
-                LATEST_HEALTH_METRICS[hostname] = health_metrics
+                LATEST_HEALTH_METRICS[_device_identity(hostname, mac_address)] = health_metrics
             device.is_online = True
             db.commit()
     finally:
@@ -1464,14 +1520,16 @@ def handle_heartbeat(data):
 def handle_disconnect():
     sid = request.sid
     hostname = sid_to_host.pop(sid, None)
+    mac_address = sid_to_mac.pop(sid, "")
     if not hostname:
         return
 
+    connected.pop(_device_identity(hostname, mac_address), None)
     connected.pop(hostname, None)
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, mac_address)
         if device:
             device.is_online = False
             db.commit()
@@ -1484,8 +1542,9 @@ def handle_pull_config(data):
     hostname = (data or {}).get("hostname")
     if not hostname:
         return
+    mac_address = _normalize_mac_address((data or {}).get("mac_address") or sid_to_mac.get(request.sid))
 
-    emit("config", build_config(hostname), room=request.sid)
+    emit("config", build_config(hostname, mac_address), room=request.sid)
 
 
 @socketio.on("call_request_create")
@@ -1657,7 +1716,7 @@ def update_device_alias(hostname):
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, _request_mac_address())
         if not device:
             return jsonify({"error": "device not found"}), 404
 
@@ -1683,7 +1742,7 @@ def bind_device_group(hostname, group_id):
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, _request_mac_address())
         if not device:
             return jsonify({"error": "device not found"}), 404
 
@@ -1701,7 +1760,7 @@ def bind_device_group(hostname, group_id):
 
         _emit_config_update([hostname])
 
-        sid = connected.get(hostname)
+        sid = connected.get(_device_identity(device.hostname, device.mac_address)) or connected.get(hostname)
         if sid:
             for membership in active_memberships:
                 socketio.server.leave_room(sid, f"group:{membership.group_id}")
@@ -1719,7 +1778,7 @@ def unbind_device_group(hostname):
 
     db = db_session()
     try:
-        device = db.query(Device).filter_by(hostname=hostname).first()
+        device = _find_device(db, hostname, _request_mac_address())
         if not device:
             return jsonify({"error": "device not found"}), 404
 
@@ -1735,7 +1794,7 @@ def unbind_device_group(hostname):
 
         _emit_config_update([hostname])
 
-        sid = connected.get(hostname)
+        sid = connected.get(_device_identity(device.hostname, device.mac_address)) or connected.get(hostname)
         if sid:
             for membership in active_memberships:
                 socketio.server.leave_room(sid, f"group:{membership.group_id}")

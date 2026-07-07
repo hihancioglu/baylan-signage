@@ -107,6 +107,7 @@
                         <th data-device-col="alias"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('alias')">Alias</button></th>
                         <th data-device-col="inventory_id"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('inventory_id')">InventoryID</button></th>
                         <th data-device-col="hostname"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('hostname')">Hostname</button></th>
+                        <th data-device-col="mac_address"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('mac_address')">MAC</button></th>
                         <th data-device-col="agent_version"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th>
                         <th data-device-col="device_status"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('device_status')">Durum</button></th>
                         <th data-device-col="state_text"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th>
@@ -640,6 +641,7 @@ const DEVICE_COLUMNS = [
   { key: 'alias', label: 'Alias' },
   { key: 'inventory_id', label: 'InventoryID' },
   { key: 'hostname', label: 'Hostname' },
+  { key: 'mac_address', label: 'MAC' },
   { key: 'agent_version', label: 'Versiyon' },
   { key: 'device_status', label: 'Durum' },
   { key: 'state_text', label: 'State' },
@@ -923,10 +925,12 @@ function renderDevicesTable(){
   sortedDevices.forEach(d => {
     const tr = document.createElement('tr');
     const safeHostname = encodeURIComponent(d.hostname || '');
+    const safeMac = encodeURIComponent(d.mac_address || '');
+    const safeDeviceKey = encodeURIComponent(d.device_key || d.mac_address || d.hostname || '');
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeHostname}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeHostname}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeHostname}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeDeviceKey}', '${safeHostname}', '${safeMac}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
     body.appendChild(tr);
   });
   applyDeviceColumnVisibility();
@@ -1110,15 +1114,17 @@ async function loadDevices(){
   renderCallManagement();
 }
 
-async function saveDeviceAlias(encodedHostname){
-  const hostname = decodeURIComponent(encodedHostname || '');
+async function saveDeviceAlias(encodedDeviceKey, encodedHostname, encodedMac){
+  const deviceKey = decodeURIComponent(encodedDeviceKey || '');
+  const hostname = decodeURIComponent(encodedHostname || encodedDeviceKey || '');
+  const mac = decodeURIComponent(encodedMac || '');
   if(!hostname) return;
 
-  const input = document.getElementById(`device-alias-${encodeURIComponent(hostname)}`);
-  const inventoryInput = document.getElementById(`device-inventory-${encodeURIComponent(hostname)}`);
+  const input = document.getElementById(`device-alias-${encodeURIComponent(deviceKey)}`);
+  const inventoryInput = document.getElementById(`device-inventory-${encodeURIComponent(deviceKey)}`);
   if(!input || !inventoryInput) return;
 
-  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias`, {
+  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`, {
     alias: input.value || '',
     inventory_id: inventoryInput.value || '',
   });
@@ -1126,7 +1132,6 @@ async function saveDeviceAlias(encodedHostname){
     alert(resp.error || 'Alias kaydedilemedi');
     return;
   }
-
   await loadDevices();
 }
 
@@ -2100,10 +2105,10 @@ function renderGroupsTable(){
     const groupDevices = (cachedDevices || []).filter(d => d.group === g.name);
     const deviceOptions = (cachedDevices || [])
       .filter(d => !d.group || d.group === g.name)
-      .map(d => `<option value="${d.hostname}">${deviceLabel(d)}${d.group === g.name ? ' (grupta)' : ''}</option>`)
+      .map(d => `<option value="${encodeURIComponent(d.hostname || '')}|${encodeURIComponent(d.mac_address || '')}">${deviceLabel(d)}${d.mac_address ? ` (${d.mac_address})` : ''}${d.group === g.name ? ' (grupta)' : ''}</option>`)
       .join('');
     const groupDeviceBadges = groupDevices.length
-      ? groupDevices.map(d => `<span class="badge text-bg-light border d-inline-flex align-items-center gap-2 me-1 mb-1">${d.hostname}<button type="button" class="btn-close btn-close-sm" aria-label="Cihazı gruptan çıkar" onclick="removeDeviceFromGroup(decodeURIComponent('${encodeURIComponent(d.hostname)}'))"></button></span>`).join('')
+      ? groupDevices.map(d => `<span class="badge text-bg-light border d-inline-flex align-items-center gap-2 me-1 mb-1">${d.hostname}<button type="button" class="btn-close btn-close-sm" aria-label="Cihazı gruptan çıkar" onclick="removeDeviceFromGroup(decodeURIComponent('${encodeURIComponent(d.hostname)}'), decodeURIComponent('${encodeURIComponent(d.mac_address || '')}'))"></button></span>`).join('')
       : '<span class="text-secondary">Cihaz yok</span>';
 
     const tr = document.createElement('tr');
@@ -2124,12 +2129,14 @@ function renderGroupsTable(){
 
 async function addDeviceToGroup(groupId){
   const select = document.getElementById(`group-device-select-${groupId}`);
-  const hostname = select?.value;
+  const [encodedHostname, encodedMac] = String(select?.value || '').split('|');
+  const hostname = decodeURIComponent(encodedHostname || '');
+  const mac = decodeURIComponent(encodedMac || '');
   if(!hostname){
     alert('Eklenecek cihazı seçin');
     return;
   }
-  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}`, {});
+  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`, {});
   if(!resp.ok){
     alert(resp.error || 'Cihaz gruba eklenemedi');
     return;
@@ -2138,9 +2145,9 @@ async function addDeviceToGroup(groupId){
   renderGroupsTable();
 }
 
-async function removeDeviceFromGroup(hostname){
+async function removeDeviceFromGroup(hostname, mac){
   if(!hostname) return;
-  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}/group`);
+  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}/group${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`);
   if(!resp.ok){
     alert(resp.error || 'Cihaz gruptan çıkarılamadı');
     return;

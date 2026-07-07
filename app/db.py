@@ -28,6 +28,7 @@ def ensure_sqlite_schema():
             "updater_version": "VARCHAR(64)",
             "alias": "VARCHAR(128)",
             "inventory_id": "VARCHAR(128)",
+            "mac_address": "VARCHAR(64)",
             "os_version": "VARCHAR(128)",
             "last_error": "VARCHAR(512)",
             "last_state": "VARCHAR(64)",
@@ -147,6 +148,10 @@ def ensure_sqlite_schema():
                         f"ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+        if "mac_address" in _existing_columns(connection, "devices"):
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_mac_address ON devices (mac_address)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_devices_hostname ON devices (hostname)"))
 
         if _existing_columns(connection, "device_groups"):
             connection.execute(
