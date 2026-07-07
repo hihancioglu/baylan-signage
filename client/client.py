@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import ctypes
+import uuid
 import traceback
 import faulthandler
 import builtins
