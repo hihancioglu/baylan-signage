@@ -34,6 +34,27 @@ if platform.system().lower().startswith("win"):
 else:
     import fcntl
 
+
+def _normalize_mac_address(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    hex_chars = re.sub(r"[^0-9a-f]", "", raw)
+    if len(hex_chars) == 12:
+        return ":".join(hex_chars[i:i + 2] for i in range(0, 12, 2))
+    return raw
+
+
+def _get_primary_mac_address() -> str:
+    configured = _normalize_mac_address(os.getenv("CLIENT_MAC_ADDRESS"))
+    if configured:
+        return configured
+
+    node = uuid.getnode()
+    if (node >> 40) % 2:
+        return ""
+    return ":".join(f"{(node >> shift) & 0xff:02x}" for shift in range(40, -1, -8))
+
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
@@ -1082,6 +1103,7 @@ sio = socketio.Client(
     engineio_logger=SOCKETIO_LOG_ENABLED,
 )
 hostname = socket.gethostname()
+mac_address = _get_primary_mac_address()
 connection_lock = threading.Lock()
 next_connect_attempt_at = 0.0
 connection_outage_active = False
@@ -3884,7 +3906,7 @@ def _handle_command(command):
     if cmd_type == "PING":
         return "pong"
     if cmd_type == "REFRESH_CONFIG":
-        sio.emit("pull_config", {"hostname": hostname})
+        sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
         return "config_pull_requested"
     if cmd_type == "EMERGENCY_START":
         emergency_active = True
@@ -3993,6 +4015,7 @@ def connect():
         {
             "secret": SECRET,
             "hostname": hostname,
+            "mac_address": mac_address,
             "ip": socket.gethostbyname(hostname),
             "username": os.getenv("CLIENT_USERNAME", "test_user"),
             "department": os.getenv("CLIENT_DEPARTMENT", "URETIM"),
@@ -4005,7 +4028,7 @@ def connect():
             **_get_update_status_payload(),
         },
     )
-    sio.emit("pull_config", {"hostname": hostname})
+    sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
 
 
 @sio.event
@@ -4531,6 +4554,7 @@ def main():
                             "heartbeat",
                             {
                                 "hostname": hostname,
+                                "mac_address": mac_address,
                                 "current_state": current_state.value,
                                 "state": current_state.value,
                                 "idle_seconds": round(idle_sec, 1),
@@ -4556,7 +4580,7 @@ def main():
                 if CONFIG_PULL_INTERVAL_SEC > 0 and now >= next_config_pull_at:
                     if sio.connected:
                         try:
-                            sio.emit("pull_config", {"hostname": hostname})
+                            sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
                             print("🔄 periodic config pull requested")
                         except Exception as pull_err:
                             log_error(f"⚠️ Periodic config pull failed: {pull_err}")

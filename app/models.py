@@ -7,7 +7,8 @@ class Device(Base):
     __tablename__ = "devices"
 
     id = Column(Integer, primary_key=True)
-    hostname = Column(String(128), unique=True, nullable=False)
+    hostname = Column(String(128), nullable=False, index=True)
+    mac_address = Column(String(64), unique=True, index=True)
     alias = Column(String(128))
     inventory_id = Column(String(128))
     ip = Column(String(64))
