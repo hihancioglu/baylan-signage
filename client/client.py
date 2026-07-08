@@ -3891,13 +3891,126 @@ def _restart_agent():
 
 
 def _capture_screen_jpeg_base64() -> str:
-    from PIL import ImageGrab
+    image = None
 
-    image = ImageGrab.grab(all_screens=True)
+    if platform.system().lower().startswith("win"):
+        try:
+            image = _capture_screen_windows_gdi()
+        except Exception as exc:  # pragma: no cover - exercised on Windows clients
+            logging.warning("Windows GDI screenshot capture failed: %s", exc)
+
+    if image is None:
+        from PIL import ImageGrab
+
+        image = ImageGrab.grab(all_screens=True)
     image = image.convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=85)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _capture_screen_windows_gdi():
+    """Capture the full virtual desktop with Win32 GDI.
+
+    Pillow's ImageGrab all_screens path can be unreliable on Windows 7 in the
+    packaged signage agent.  The GDI BitBlt path works on Windows 7 and still
+    captures the same virtual desktop area used by ImageGrab on newer Windows
+    versions.
+    """
+
+    from PIL import Image
+
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    sm_xvirtualscreen = 76
+    sm_yvirtualscreen = 77
+    sm_cxvirtualscreen = 78
+    sm_cyvirtualscreen = 79
+    srccopy = 0x00CC0020
+    captureblt = 0x40000000
+    dib_rgb_colors = 0
+    bi_rgb = 0
+
+    left = int(user32.GetSystemMetrics(sm_xvirtualscreen))
+    top = int(user32.GetSystemMetrics(sm_yvirtualscreen))
+    width = int(user32.GetSystemMetrics(sm_cxvirtualscreen))
+    height = int(user32.GetSystemMetrics(sm_cyvirtualscreen))
+    if width <= 0 or height <= 0:
+        raise RuntimeError(f"invalid virtual screen size {width}x{height}")
+
+    screen_dc = user32.GetDC(0)
+    if not screen_dc:
+        raise RuntimeError("GetDC failed")
+
+    memory_dc = None
+    bitmap = None
+    previous_bitmap = None
+    try:
+        memory_dc = gdi32.CreateCompatibleDC(screen_dc)
+        if not memory_dc:
+            raise RuntimeError("CreateCompatibleDC failed")
+
+        bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+        if not bitmap:
+            raise RuntimeError("CreateCompatibleBitmap failed")
+
+        previous_bitmap = gdi32.SelectObject(memory_dc, bitmap)
+        if not previous_bitmap:
+            raise RuntimeError("SelectObject failed")
+
+        if not gdi32.BitBlt(memory_dc, 0, 0, width, height, screen_dc, left, top, srccopy | captureblt):
+            raise RuntimeError("BitBlt failed")
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_uint32 * 3)]
+
+        bitmap_info = BITMAPINFO()
+        bitmap_info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bitmap_info.bmiHeader.biWidth = width
+        bitmap_info.bmiHeader.biHeight = -height
+        bitmap_info.bmiHeader.biPlanes = 1
+        bitmap_info.bmiHeader.biBitCount = 32
+        bitmap_info.bmiHeader.biCompression = bi_rgb
+        bitmap_info.bmiHeader.biSizeImage = width * height * 4
+
+        pixels = ctypes.create_string_buffer(bitmap_info.bmiHeader.biSizeImage)
+        scan_lines = gdi32.GetDIBits(
+            memory_dc,
+            bitmap,
+            0,
+            height,
+            pixels,
+            ctypes.byref(bitmap_info),
+            dib_rgb_colors,
+        )
+        if scan_lines != height:
+            raise RuntimeError(f"GetDIBits captured {scan_lines}/{height} lines")
+
+        return Image.frombuffer("RGB", (width, height), pixels, "raw", "BGRX", 0, 1).copy()
+    finally:
+        if previous_bitmap and memory_dc:
+            gdi32.SelectObject(memory_dc, previous_bitmap)
+        if bitmap:
+            gdi32.DeleteObject(bitmap)
+        if memory_dc:
+            gdi32.DeleteDC(memory_dc)
+        user32.ReleaseDC(0, screen_dc)
 
 
 def _handle_command(command):
