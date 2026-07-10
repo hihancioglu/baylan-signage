@@ -930,11 +930,35 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeDeviceKey}', '${safeHostname}', '${safeMac}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button><button class="btn btn-sm btn-outline-danger" onclick="deleteDevice('${safeHostname}', '${safeMac}')">Sil</button></div></td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions">${renderDeviceActions(d, safeDeviceKey, safeHostname, safeMac)}</td>`;
     body.appendChild(tr);
   });
   applyDeviceColumnVisibility();
   initHealthTooltips();
+}
+
+
+function renderDeviceActions(device, safeDeviceKey, safeHostname, safeMac){
+  const groupAction = renderDeviceGroupAction(device, safeHostname, safeMac);
+  return `<div class="dropdown">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">İşlemler</button>
+    <ul class="dropdown-menu dropdown-menu-end">
+      <li><button class="dropdown-item" type="button" onclick="saveDeviceAlias('${safeDeviceKey}', '${safeHostname}', '${safeMac}')">Kaydet</button></li>
+      <li><button class="dropdown-item" type="button" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></li>
+      ${groupAction}
+      <li><hr class="dropdown-divider"></li>
+      <li><button class="dropdown-item text-danger" type="button" onclick="deleteDevice('${safeHostname}', '${safeMac}')">Sil</button></li>
+    </ul>
+  </div>`;
+}
+
+function renderDeviceGroupAction(device, safeHostname, safeMac){
+  if((device.group || '').trim()){
+    return `<li><button class="dropdown-item" type="button" onclick="removeDeviceFromGroup(decodeURIComponent('${safeHostname}'), decodeURIComponent('${safeMac}'))">Gruptan Çıkart</button></li>`;
+  }
+
+  const disabled = (cachedGroups || []).length ? '' : ' disabled';
+  return `<li><button class="dropdown-item" type="button" onclick="openDeviceGroupPicker('${safeHostname}', '${safeMac}')"${disabled}>Gruba Ekle</button></li>`;
 }
 
 function getHealthRank(value){
@@ -2146,6 +2170,42 @@ function renderGroupsTable(){
   });
 }
 
+
+async function openDeviceGroupPicker(encodedHostname, encodedMac){
+  const groups = cachedGroups || [];
+  if(!groups.length){
+    alert('Önce bir grup oluşturun.');
+    return;
+  }
+
+  const optionsText = groups.map((group, index) => `${index + 1}) ${group.name}`).join('\n');
+  const selected = prompt(`Cihazın ekleneceği grubu seçin:\n${optionsText}`);
+  if(selected === null) return;
+
+  const selectedIndex = Number(selected) - 1;
+  const group = groups[selectedIndex];
+  if(!group){
+    alert('Geçerli bir grup numarası girin.');
+    return;
+  }
+
+  await addDeviceToGroupFromDevices(encodedHostname, encodedMac, group.id);
+}
+
+async function addDeviceToGroupFromDevices(encodedHostname, encodedMac, groupId){
+  const hostname = decodeURIComponent(encodedHostname || '');
+  const mac = decodeURIComponent(encodedMac || '');
+  if(!hostname || !groupId) return;
+
+  const resp = await jpost(`/api/devices/${encodeURIComponent(hostname)}/group/${groupId}${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`, {});
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz gruba eklenemedi');
+    return;
+  }
+  await loadDevices();
+  renderGroupsTable();
+}
+
 async function addDeviceToGroup(groupId){
   const select = document.getElementById(`group-device-select-${groupId}`);
   const [encodedHostname, encodedMac] = String(select?.value || '').split('|');
@@ -2910,9 +2970,9 @@ async function init(){
   activateSection('section-devices');
   loadVisibleDeviceColumns();
   renderDeviceColumnControls();
-  await loadDevices();
   await loadWidgets();
   await loadGroupsPlaylists();
+  await loadDevices();
   await loadMedia();
   togglePlaylistItemInputs();
   updateWidgetPreview();
