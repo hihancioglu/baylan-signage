@@ -1749,6 +1749,41 @@ def update_device_settings(hostname):
     return jsonify({"error": "device-level settings are disabled; use group settings"}), 410
 
 
+@app.delete("/api/devices/<hostname>")
+def delete_device(hostname):
+    if _auth_failed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = db_session()
+    try:
+        device = _find_device(db, hostname, _request_mac_address())
+        if not device:
+            return jsonify({"error": "device not found"}), 404
+
+        device_id = device.id
+        device_hostname = device.hostname
+        device_mac = device.mac_address
+        identity = _device_identity(device_hostname, device_mac)
+        deleted_memberships = db.query(DeviceGroup).filter_by(device_id=device_id).delete(synchronize_session=False)
+        db.delete(device)
+        db.commit()
+
+        sid = connected.pop(identity, None)
+        connected.pop(device_hostname, None)
+        if sid:
+            sid_to_host.pop(sid, None)
+            sid_to_mac.pop(sid, None)
+
+        LATEST_HEALTH_METRICS.pop(identity, None)
+        LATEST_HEALTH_METRICS.pop(device_hostname, None)
+        LATEST_SCREENSHOTS.pop(identity, None)
+        LATEST_SCREENSHOTS.pop(device_hostname, None)
+
+        return jsonify({"ok": True, "deleted_device_id": device_id, "deleted_memberships": deleted_memberships})
+    finally:
+        db.close()
+
+
 @app.post("/api/devices/<hostname>/group/<int:group_id>")
 def bind_device_group(hostname, group_id):
     if _auth_failed():
