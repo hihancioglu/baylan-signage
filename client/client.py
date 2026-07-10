@@ -22,6 +22,7 @@ import tempfile
 from copy import deepcopy
 from queue import Empty, Queue
 from urllib import request as urllib_request
+from urllib.parse import urlparse
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
@@ -128,10 +129,65 @@ def _get_windows_adapter_mac_address() -> str:
     return fallback
 
 
+def _server_url_for_identity() -> str:
+    return os.getenv("SERVER_URL", "http://baylan-portainer:5080")
+
+
+def _route_local_ip_for_url(server_url: str) -> str:
+    parsed = urlparse(server_url if "://" in str(server_url or "") else f"http://{server_url}")
+    host = parsed.hostname
+    if not host:
+        return ""
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect((host, port))
+            return str(probe.getsockname()[0] or "")
+    except Exception:
+        return ""
+
+
+def _mac_address_for_local_ip(local_ip: str) -> str:
+    local_ip = str(local_ip or "").strip()
+    if not local_ip:
+        return ""
+
+    try:
+        psutil_module = importlib.import_module("psutil")
+        interfaces = psutil_module.net_if_addrs() or {}
+    except Exception:
+        return ""
+
+    for addresses in interfaces.values():
+        has_local_ip = False
+        candidate_mac = ""
+        for address in addresses or []:
+            value = str(getattr(address, "address", "") or "").split("%", 1)[0]
+            if value == local_ip:
+                has_local_ip = True
+            normalized = _normalize_mac_address(value)
+            if re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", normalized):
+                candidate_mac = normalized
+        if has_local_ip and candidate_mac:
+            return candidate_mac
+    return ""
+
+
+def _get_server_route_mac_address(server_url: str | None = None) -> str:
+    local_ip = _route_local_ip_for_url(server_url or _server_url_for_identity())
+    return _mac_address_for_local_ip(local_ip)
+
+
 def _get_primary_mac_address() -> str:
     configured = _normalize_mac_address(os.getenv("CLIENT_MAC_ADDRESS"))
     if configured:
         return configured
+
+    route_mac = _get_server_route_mac_address()
+    if route_mac:
+        return route_mac
 
     if platform.system().lower().startswith("win"):
         adapter_mac = _get_windows_adapter_mac_address()
@@ -143,6 +199,7 @@ def _get_primary_mac_address() -> str:
     if _is_usable_mac_address(uuid_mac):
         return uuid_mac
     return ""
+
 
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
