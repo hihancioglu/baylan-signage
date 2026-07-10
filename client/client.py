@@ -46,15 +46,103 @@ def _normalize_mac_address(value: object) -> str:
     return raw
 
 
+def _is_locally_administered_mac(mac_address: str) -> bool:
+    normalized = _normalize_mac_address(mac_address)
+    if not normalized:
+        return True
+
+    first_octet = normalized.split(":", 1)[0]
+    try:
+        return bool(int(first_octet, 16) & 0x02)
+    except ValueError:
+        return True
+
+
+def _is_usable_mac_address(mac_address: str) -> bool:
+    normalized = _normalize_mac_address(mac_address)
+    if not normalized:
+        return False
+
+    hex_chars = normalized.replace(":", "")
+    if len(hex_chars) != 12:
+        return False
+
+    if hex_chars in {"000000000000", "ffffffffffff"}:
+        return False
+
+    # Sanal/rasgele üretilmiş adresler panelde cihaz kimliği olarak stabil olmayabilir.
+    return not _is_locally_administered_mac(normalized)
+
+
+def _run_mac_command(command: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=5,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if platform.system().lower().startswith("win") else 0,
+        )
+    except Exception:
+        return ""
+
+    if completed.returncode != 0:
+        return ""
+    return "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+
+
+def _extract_mac_addresses(text: str) -> list[str]:
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"(?i)(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}", text or ""):
+        normalized = _normalize_mac_address(match.group(0))
+        if normalized and normalized not in seen:
+            addresses.append(normalized)
+            seen.add(normalized)
+    return addresses
+
+
+def _get_windows_adapter_mac_address() -> str:
+    commands = [
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-NetAdapter -Physical | Where-Object {$_.Status -eq 'Up'} | "
+            "Sort-Object InterfaceMetric, ifIndex | Select-Object -ExpandProperty MacAddress",
+        ],
+        ["getmac", "/fo", "csv", "/nh"],
+        ["ipconfig", "/all"],
+    ]
+
+    fallback = ""
+    for command in commands:
+        for address in _extract_mac_addresses(_run_mac_command(command)):
+            if _is_usable_mac_address(address):
+                return address
+            if not fallback and address:
+                fallback = address
+    return fallback
+
+
 def _get_primary_mac_address() -> str:
     configured = _normalize_mac_address(os.getenv("CLIENT_MAC_ADDRESS"))
     if configured:
         return configured
 
+    if platform.system().lower().startswith("win"):
+        adapter_mac = _get_windows_adapter_mac_address()
+        if adapter_mac:
+            return adapter_mac
+
     node = uuid.getnode()
-    if (node >> 40) % 2:
-        return ""
-    return ":".join(f"{(node >> shift) & 0xff:02x}" for shift in range(40, -1, -8))
+    uuid_mac = ":".join(f"{(node >> shift) & 0xff:02x}" for shift in range(40, -1, -8))
+    if _is_usable_mac_address(uuid_mac):
+        return uuid_mac
+    return ""
 
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
@@ -1105,6 +1193,8 @@ sio = socketio.Client(
 )
 hostname = socket.gethostname()
 mac_address = _get_primary_mac_address()
+if not IS_WIDGET_VIEWER_PROCESS:
+    log_info(f"🖧 client identity: hostname={hostname} mac_address={mac_address or '-'}")
 connection_lock = threading.Lock()
 next_connect_attempt_at = 0.0
 connection_outage_active = False
