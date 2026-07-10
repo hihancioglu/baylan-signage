@@ -930,7 +930,7 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeDeviceKey}', '${safeHostname}', '${safeMac}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button></div></td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="InventoryID" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions"><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-primary" onclick="saveDeviceAlias('${safeDeviceKey}', '${safeHostname}', '${safeMac}')">Kaydet</button><button class="btn btn-sm btn-outline-secondary" onclick="showDeviceScreenshot('${safeHostname}', this)">ScreenShot</button><button class="btn btn-sm btn-outline-danger" onclick="deleteDevice('${safeHostname}', '${safeMac}')">Sil</button></div></td>`;
     body.appendChild(tr);
   });
   applyDeviceColumnVisibility();
@@ -1133,6 +1133,25 @@ async function saveDeviceAlias(encodedDeviceKey, encodedHostname, encodedMac){
     return;
   }
   await loadDevices();
+}
+
+async function deleteDevice(encodedHostname, encodedMac){
+  const hostname = decodeURIComponent(encodedHostname || '');
+  const mac = decodeURIComponent(encodedMac || '');
+  if(!hostname) return;
+
+  const label = mac ? `${hostname} (${mac})` : hostname;
+  if(!confirm(`${label} cihaz kaydı silinsin mi? Grup atamaları da kaldırılacak. Cihaz hala online ise yeniden heartbeat attığında tekrar oluşabilir.`)){
+    return;
+  }
+
+  const resp = await jdelete(`/api/devices/${encodeURIComponent(hostname)}${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`);
+  if(!resp.ok){
+    alert(resp.error || 'Cihaz silinemedi');
+    return;
+  }
+  await loadDevices();
+  await loadGroupsPlaylists();
 }
 
 

@@ -664,6 +664,44 @@ class TestConfigPush(unittest.TestCase):
         finally:
             db.close()
 
+    def test_delete_device_removes_selected_mac_and_group_memberships(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="Delete Device Group")
+            keep = self.main.Device(hostname="pc-delete", mac_address="00:11:22:33:44:66")
+            remove = self.main.Device(hostname="pc-delete", mac_address="66:77:88:99:aa:cc")
+            db.add_all([group, keep, remove])
+            db.commit()
+
+            db.add(self.main.DeviceGroup(device_id=remove.id, group_id=group.id, is_active=True))
+            db.commit()
+            remove_id = remove.id
+            keep_id = keep.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            resp = self.main.app.test_client().delete(
+                "/api/devices/pc-delete?mac_address=66:77:88:99:aa:cc"
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json() or {}
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual(payload.get("deleted_device_id"), remove_id)
+        self.assertEqual(payload.get("deleted_memberships"), 1)
+
+        db = self.main.db_session()
+        try:
+            self.assertIsNotNone(db.query(self.main.Device).filter_by(id=keep_id).first())
+            self.assertIsNone(db.query(self.main.Device).filter_by(id=remove_id).first())
+            self.assertEqual(db.query(self.main.DeviceGroup).filter_by(device_id=remove_id).count(), 0)
+            db.query(self.main.Device).filter_by(id=keep_id).delete()
+            db.query(self.main.Group).filter_by(name="Delete Device Group").delete()
+            db.commit()
+        finally:
+            db.close()
+
 
 
     def test_register_and_heartbeat_store_updater_version(self):
