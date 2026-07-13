@@ -69,6 +69,30 @@ class TestClientIdentity(unittest.TestCase):
 
         self.assertEqual(mac_address, "66:77:88:99:aa:bb")
 
+    def test_connection_mac_uses_only_current_server_route(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            client, "_get_server_route_mac_address", return_value="aa:bb:cc:dd:ee:ff"
+        ), patch.object(
+            client, "_get_windows_adapter_mac_address", return_value="00:11:22:33:44:55"
+        ):
+            mac_address = client._get_connection_mac_address("http://signage.example.local:5080")
+
+        self.assertEqual(mac_address, "aa:bb:cc:dd:ee:ff")
+
+    def test_refresh_connection_identity_clears_startup_fallback_without_route(self):
+        previous_mac = client.mac_address
+        try:
+            client.mac_address = "00:11:22:33:44:55"
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                client, "_get_connection_mac_address", return_value=""
+            ):
+                refreshed = client.refresh_connection_identity("unit-test")
+
+            self.assertEqual(refreshed, "")
+            self.assertEqual(client.mac_address, "")
+        finally:
+            client.mac_address = previous_mac
+
 
 if __name__ == "__main__":
     unittest.main()
