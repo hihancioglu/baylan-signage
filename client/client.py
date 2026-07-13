@@ -201,6 +201,15 @@ def _get_primary_mac_address() -> str:
     return ""
 
 
+def _get_connection_mac_address(server_url: str | None = None) -> str:
+    """Return the MAC address of the adapter currently routed to the server."""
+
+    configured = _normalize_mac_address(os.getenv("CLIENT_MAC_ADDRESS"))
+    if configured:
+        return configured
+    return _get_server_route_mac_address(server_url or _server_url_for_identity())
+
+
 def _module_base() -> Path:
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
@@ -1255,6 +1264,28 @@ if not IS_WIDGET_VIEWER_PROCESS:
 connection_lock = threading.Lock()
 next_connect_attempt_at = 0.0
 connection_outage_active = False
+
+
+def refresh_connection_identity(reason: str = "") -> str:
+    global mac_address
+    routed_mac = _get_connection_mac_address(SERVER_URL)
+    if routed_mac and routed_mac != mac_address:
+        previous = mac_address or "-"
+        mac_address = routed_mac
+        if not IS_WIDGET_VIEWER_PROCESS:
+            log_info(
+                f"🖧 client identity refreshed: hostname={hostname} mac_address={mac_address} "
+                f"previous={previous} reason={reason or '-'}"
+            )
+    elif not routed_mac and mac_address and not os.getenv("CLIENT_MAC_ADDRESS"):
+        previous = mac_address
+        mac_address = ""
+        if not IS_WIDGET_VIEWER_PROCESS:
+            log_warning(
+                f"⚠️ routed network identity unavailable; clearing startup MAC fallback "
+                f"previous={previous} reason={reason or '-'}"
+            )
+    return mac_address
 
 idle_timeout_sec = DEFAULT_IDLE_TIMEOUT_SEC
 idle_mode_enabled = True
@@ -4167,7 +4198,10 @@ def _handle_command(command):
     if cmd_type == "PING":
         return "pong"
     if cmd_type == "REFRESH_CONFIG":
-        sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
+        sio.emit(
+            "pull_config",
+            {"hostname": hostname, "mac_address": refresh_connection_identity("command_refresh_config")},
+        )
         return "config_pull_requested"
     if cmd_type == "EMERGENCY_START":
         emergency_active = True
@@ -4269,6 +4303,7 @@ def connect():
     if connection_outage_active:
         log_info("✅ Server bağlantısı geri geldi")
     connection_outage_active = False
+    current_mac_address = refresh_connection_identity("socket_connect")
     print("✅ Connected to server")
 
     sio.emit(
@@ -4276,7 +4311,7 @@ def connect():
         {
             "secret": SECRET,
             "hostname": hostname,
-            "mac_address": mac_address,
+            "mac_address": current_mac_address,
             "ip": socket.gethostbyname(hostname),
             "username": os.getenv("CLIENT_USERNAME", "test_user"),
             "department": os.getenv("CLIENT_DEPARTMENT", "URETIM"),
@@ -4289,7 +4324,7 @@ def connect():
             **_get_update_status_payload(),
         },
     )
-    sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
+    sio.emit("pull_config", {"hostname": hostname, "mac_address": current_mac_address})
 
 
 @sio.event
@@ -4811,11 +4846,12 @@ def main():
                         continue
 
                     try:
+                        current_mac_address = refresh_connection_identity("heartbeat")
                         sio.emit(
                             "heartbeat",
                             {
                                 "hostname": hostname,
-                                "mac_address": mac_address,
+                                "mac_address": current_mac_address,
                                 "current_state": current_state.value,
                                 "state": current_state.value,
                                 "idle_seconds": round(idle_sec, 1),
@@ -4841,7 +4877,11 @@ def main():
                 if CONFIG_PULL_INTERVAL_SEC > 0 and now >= next_config_pull_at:
                     if sio.connected:
                         try:
-                            sio.emit("pull_config", {"hostname": hostname, "mac_address": mac_address})
+                            current_mac_address = refresh_connection_identity("periodic_pull")
+                            sio.emit(
+                                "pull_config",
+                                {"hostname": hostname, "mac_address": current_mac_address},
+                            )
                             print("🔄 periodic config pull requested")
                         except Exception as pull_err:
                             log_error(f"⚠️ Periodic config pull failed: {pull_err}")
