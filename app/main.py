@@ -4,6 +4,7 @@ eventlet.monkey_patch()
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -12,7 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, url_for, session, redirect
 from flask_socketio import SocketIO, emit, join_room
@@ -823,6 +824,104 @@ def _parse_inventory_ids(value) -> list[str]:
     return inventory_ids
 
 
+PRODUCTION_WIDGET_BASE_URL = "https://hub.baylan.info.tr/automation/production-widget"
+
+
+def _production_grid_dimensions(count: int) -> tuple[int, int]:
+    """Return a deterministic, landscape-friendly grid for ``count`` cells."""
+    count = max(1, int(count or 0))
+    if count == 1:
+        return 1, 1
+    if count == 2:
+        return 2, 1
+    if count <= 4:
+        return 2, 2
+    if count <= 6:
+        return 3, 2
+    if count <= 9:
+        return 3, 3
+    if count <= 12:
+        return 4, 3
+
+    columns = math.ceil(math.sqrt(count * 16 / 9))
+    rows = math.ceil(count / columns)
+    return columns, rows
+
+
+def _production_grid_config(content) -> dict:
+    defaults = {
+        "base_url": PRODUCTION_WIDGET_BASE_URL,
+        "theme": "light",
+        "refresh_interval": 30,
+        "scale": None,
+    }
+    try:
+        parsed = json.loads(content) if isinstance(content, str) else content
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parsed = None
+    if not isinstance(parsed, dict):
+        return defaults
+
+    base_url = str(parsed.get("base_url") or "").strip() or defaults["base_url"]
+    theme = str(parsed.get("theme") or "light").strip().lower()
+    if theme not in {"light", "dark"}:
+        theme = "light"
+    try:
+        refresh_interval = max(5, int(parsed.get("refresh_interval", 30)))
+    except (TypeError, ValueError):
+        refresh_interval = 30
+    scale = parsed.get("scale")
+    if scale is not None:
+        scale = str(scale).strip() or None
+    return {
+        "base_url": base_url,
+        "theme": theme,
+        "refresh_interval": refresh_interval,
+        "scale": scale,
+    }
+
+
+def _production_widget_url(config: dict, inventory_id: str) -> str:
+    parsed_url = urlparse(config["base_url"])
+    replaced_keys = {"deviceAlias", "theme", "refreshInterval", "scale"}
+    query = [(key, value) for key, value in parse_qsl(parsed_url.query, keep_blank_values=True) if key not in replaced_keys]
+    query.extend([
+        ("deviceAlias", inventory_id),
+        ("theme", config["theme"]),
+        ("refreshInterval", str(config["refresh_interval"])),
+    ])
+    if config.get("scale") is not None:
+        query.append(("scale", str(config["scale"])))
+    return urlunparse(parsed_url._replace(query=urlencode(query)))
+
+
+def _build_production_grid_payload(device, production_config, name="Üretim Ekranı") -> dict:
+    """Translate a semantic production widget into the existing dashboard contract."""
+    config = _production_grid_config(production_config)
+    inventory_ids = _parse_inventory_ids(getattr(device, "inventory_id", ""))
+    if not inventory_ids:
+        return {
+            "name": name,
+            "columns": 1,
+            "rows": 1,
+            "widgets": [{
+                "type": "card",
+                "html": '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:24px;box-sizing:border-box;text-align:center;">Bu cihaz için Inventory ID tanımlı değil.</div>',
+            }],
+        }
+
+    columns, rows = _production_grid_dimensions(len(inventory_ids))
+    return {
+        "name": name,
+        "columns": columns,
+        "rows": rows,
+        "widgets": [
+            {"type": "iframe", "url": _production_widget_url(config, inventory_id)}
+            for inventory_id in inventory_ids
+        ],
+    }
+
+
 def _widget_runtime_vars(device) -> dict[str, str]:
     inventory_ids = _parse_inventory_ids(getattr(device, "inventory_id", ""))
     inventory_id = inventory_ids[0] if inventory_ids else ""
@@ -1178,7 +1277,7 @@ def join_group_rooms(db, sid, hostname, mac_address=None):
         join_room(f"group:{membership.group_id}")
 
 
-def _build_playlist_runtime_payload(db, playlist, runtime_vars, widgets_by_id, media_name_by_path):
+def _build_playlist_runtime_payload(db, playlist, device, runtime_vars, widgets_by_id, media_name_by_path):
     if not playlist or not playlist.enabled:
         return None
 
@@ -1238,6 +1337,13 @@ def _build_playlist_runtime_payload(db, playlist, runtime_vars, widgets_by_id, m
                         parsed_dashboard_payload["widgets"] = resolved_widgets
                         widget_payload = parsed_dashboard_payload
                         widget_payload["name"] = widget_def.get("name") or ""
+                    widget_url = None
+                elif widget_type == "production_grid":
+                    widget_payload = _build_production_grid_payload(
+                        device,
+                        widget_def.get("content") or "",
+                        widget_name or "Üretim Ekranı",
+                    )
                     widget_url = None
                 else:
                     widget_url = None
@@ -1429,6 +1535,7 @@ def build_config(hostname, mac_address=None):
         primary_payload = _build_playlist_runtime_payload(
             db,
             primary_playlist,
+            device,
             runtime_vars,
             widgets_by_id,
             media_name_by_path,
@@ -1443,6 +1550,7 @@ def build_config(hostname, mac_address=None):
             monitor_payload = _build_playlist_runtime_payload(
                 db,
                 monitor_playlist,
+                device,
                 runtime_vars,
                 widgets_by_id,
                 media_name_by_path,
@@ -2271,8 +2379,8 @@ def create_widget():
         return jsonify({"error": "name required"}), 400
     if not content:
         return jsonify({"error": "content required"}), 400
-    if widget_type not in {"html", "url", "dashboard"}:
-        return jsonify({"error": "type must be one of: html, url, dashboard"}), 400
+    if widget_type not in {"html", "url", "dashboard", "production_grid"}:
+        return jsonify({"error": "type must be one of: html, url, dashboard, production_grid"}), 400
 
     db = db_session()
     try:
@@ -2300,8 +2408,8 @@ def update_widget(widget_id):
         return jsonify({"error": "name required"}), 400
     if not content:
         return jsonify({"error": "content required"}), 400
-    if widget_type not in {"html", "url", "dashboard"}:
-        return jsonify({"error": "type must be one of: html, url, dashboard"}), 400
+    if widget_type not in {"html", "url", "dashboard", "production_grid"}:
+        return jsonify({"error": "type must be one of: html, url, dashboard, production_grid"}), 400
 
     db = db_session()
     try:
