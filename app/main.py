@@ -811,20 +811,49 @@ def _canonical_ad_username(username: str) -> str:
     return normalized
 
 
+def _parse_inventory_ids(value) -> list[str]:
+    """Return unique, non-empty inventory IDs while preserving their order."""
+    inventory_ids = []
+    seen = set()
+    for raw_inventory_id in str(value or "").split(","):
+        inventory_id = raw_inventory_id.strip()
+        if inventory_id and inventory_id not in seen:
+            inventory_ids.append(inventory_id)
+            seen.add(inventory_id)
+    return inventory_ids
+
+
 def _widget_runtime_vars(device) -> dict[str, str]:
-    inventory_id = str(getattr(device, "inventory_id", "") or "").strip()
+    inventory_ids = _parse_inventory_ids(getattr(device, "inventory_id", ""))
+    inventory_id = inventory_ids[0] if inventory_ids else ""
     hostname = str(getattr(device, "hostname", "") or "").strip()
-    return {
+    runtime_vars = {
         "inventory_id": inventory_id,
         "INVENTORY_ID": inventory_id,
         "device_hostname": hostname,
         "DEVICE_HOSTNAME": hostname,
     }
+    for index, indexed_inventory_id in enumerate(inventory_ids, start=1):
+        runtime_vars[f"inventory_id{index}"] = indexed_inventory_id
+        runtime_vars[f"INVENTORY_ID{index}"] = indexed_inventory_id
+    return runtime_vars
 
 
 def _apply_widget_runtime_vars(value, runtime_vars: dict[str, str]):
     if isinstance(value, str):
-        text = value
+        # Resolve indexed inventory placeholders first. This both avoids the
+        # legacy $inventory_id token matching their prefix and removes indexes
+        # that are not available on the target device.
+        indexed_pattern = re.compile(
+            r"\{\{(inventory_id\d+)\}\}|\$\{(inventory_id\d+)\}|\$(inventory_id\d+)\b",
+            re.IGNORECASE,
+        )
+
+        def replace_indexed(match):
+            key = next(group for group in match.groups() if group is not None)
+            return (runtime_vars or {}).get(key, "")
+
+        text = indexed_pattern.sub(replace_indexed, value)
         for key, replacement in (runtime_vars or {}).items():
             text = text.replace(f"{{{{{key}}}}}", replacement)
             text = text.replace(f"${{{key}}}", replacement)
@@ -1722,11 +1751,11 @@ def update_device_alias(hostname):
 
     payload = request.get_json(silent=True) or {}
     alias = (payload.get("alias") or "").strip()
-    inventory_id = (payload.get("inventory_id") or "").strip()
+    inventory_id = ",".join(_parse_inventory_ids(payload.get("inventory_id")))
     if len(alias) > 128:
         return jsonify({"error": "alias too long (max 128)"}), 400
-    if len(inventory_id) > 128:
-        return jsonify({"error": "inventory_id too long (max 128)"}), 400
+    if len(inventory_id) > 1024:
+        return jsonify({"error": "inventory_id too long (max 1024)"}), 400
 
     db = db_session()
     try:

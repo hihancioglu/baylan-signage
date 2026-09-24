@@ -10,7 +10,7 @@ class Device(Base):
     hostname = Column(String(128), nullable=False, index=True)
     mac_address = Column(String(64), unique=True, index=True)
     alias = Column(String(128))
-    inventory_id = Column(String(128))
+    inventory_id = Column(String(1024))
     ip = Column(String(64))
     username = Column(String(128))
     department = Column(String(128))
