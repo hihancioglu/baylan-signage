@@ -234,10 +234,11 @@
                   </div>
                   <div class="col-12 col-md-3">
                     <label class="form-label">Tür</label>
-                    <select id="widget-type" class="form-select" onchange="updateWidgetPreview()">
+                    <select id="widget-type" class="form-select" onchange="onWidgetTypeChange()">
                       <option value="html">HTML</option>
                       <option value="url">URL</option>
                       <option value="dashboard">Dashboard (Çoklu Iframe/Video)</option>
+                      <option value="production_grid">Üretim Ekranı (Otomatik Inventory Grid)</option>
                     </select>
                   </div>
                   <div class="col-12 col-md-5">
@@ -252,7 +253,7 @@
                       <button class="btn btn-outline-primary" type="button" onclick="applyWidgetTemplate()">Şablonu Uygula</button>
                     </div>
                   </div>
-                  <div class="col-12">
+                  <div class="col-12" id="widget-content-wrap">
                     <label class="form-label">İçerik alanı</label>
                     <textarea id="widget-content" class="form-control" rows="5" placeholder="HTML içeriği veya URL" oninput="updateWidgetPreview()"></textarea>
                     <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
@@ -261,6 +262,18 @@
                       <button class="btn btn-sm btn-outline-secondary" type="button" onclick="insertSelectedRuntimeVariable('widget-content', 'widget-runtime-variable')">Ekle</button>
                     </div>
                   </div>
+                </div>
+                <div id="widget-production-grid-settings" class="d-none mt-3">
+                  <div class="mini-card"><div class="card-body">
+                    <h3 class="h6 mb-3">Üretim Grid Ayarları</h3>
+                    <div class="row g-2">
+                      <div class="col-12 col-lg-6"><label class="form-label">Baylan Hub URL</label><input id="production-grid-base-url" class="form-control" value="https://hub.baylan.info.tr/automation/production-widget" oninput="syncProductionGridConfig()" /></div>
+                      <div class="col-6 col-lg-2"><label class="form-label">Tema</label><select id="production-grid-theme" class="form-select" onchange="syncProductionGridConfig()"><option value="light">Light</option><option value="dark">Dark</option></select></div>
+                      <div class="col-6 col-lg-2"><label class="form-label">Yenileme Süresi (sn)</label><input id="production-grid-refresh" type="number" min="5" value="30" class="form-control" oninput="syncProductionGridConfig()" /></div>
+                      <div class="col-6 col-lg-2"><label class="form-label">Scale (opsiyonel)</label><input id="production-grid-scale" type="number" min="0.1" step="0.1" placeholder="örn. 2.8" class="form-control" oninput="syncProductionGridConfig()" /></div>
+                      <div class="col-12"><label class="form-label">Önizlenecek Cihaz</label><select id="production-grid-preview-device" class="form-select" onchange="updateWidgetPreview()"><option value="">Cihaz seçin</option></select><div class="form-text">Bu seçim yalnızca önizleme içindir; widget ayarlarına kaydedilmez.</div></div>
+                    </div>
+                  </div></div>
                 </div>
                 <div id="widget-dashboard-builder" class="d-none mt-3">
                   <div class="mini-card">
@@ -1145,6 +1158,65 @@ function parseInventoryIds(value){
   });
 }
 
+const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
+
+function productionGridDimensions(count){
+  const size = Math.max(1, Number(count) || 0);
+  if(size === 1) return {columns: 1, rows: 1};
+  if(size === 2) return {columns: 2, rows: 1};
+  if(size <= 4) return {columns: 2, rows: 2};
+  if(size <= 6) return {columns: 3, rows: 2};
+  if(size <= 9) return {columns: 3, rows: 3};
+  if(size <= 12) return {columns: 4, rows: 3};
+  const columns = Math.ceil(Math.sqrt(size * 16 / 9));
+  return {columns, rows: Math.ceil(size / columns)};
+}
+
+function productionGridConfigFromForm(){
+  const scaleValue = String(document.getElementById('production-grid-scale')?.value || '').trim();
+  return {
+    base_url: String(document.getElementById('production-grid-base-url')?.value || '').trim() || PRODUCTION_GRID_DEFAULT_URL,
+    theme: document.getElementById('production-grid-theme')?.value === 'dark' ? 'dark' : 'light',
+    refresh_interval: Math.max(5, Number(document.getElementById('production-grid-refresh')?.value) || 30),
+    scale: scaleValue === '' ? null : Number(scaleValue)
+  };
+}
+
+function syncProductionGridConfig(){
+  if(document.getElementById('widget-type')?.value !== 'production_grid') return;
+  document.getElementById('widget-content').value = JSON.stringify(productionGridConfigFromForm(), null, 2);
+  updateWidgetPreview();
+}
+
+function onWidgetTypeChange(){
+  if(document.getElementById('widget-type')?.value === 'production_grid'){
+    fillProductionGridSettings(document.getElementById('widget-content')?.value || '');
+  }
+  updateWidgetPreview();
+}
+
+function fillProductionGridSettings(content){
+  let config = {};
+  try { config = JSON.parse(content || '{}'); } catch(_err) { config = {}; }
+  if(!config || typeof config !== 'object' || Array.isArray(config)) config = {};
+  document.getElementById('production-grid-base-url').value = String(config.base_url || PRODUCTION_GRID_DEFAULT_URL);
+  document.getElementById('production-grid-theme').value = config.theme === 'dark' ? 'dark' : 'light';
+  document.getElementById('production-grid-refresh').value = String(Math.max(5, Number(config.refresh_interval) || 30));
+  document.getElementById('production-grid-scale').value = config.scale == null ? '' : String(config.scale);
+  document.getElementById('widget-content').value = JSON.stringify(productionGridConfigFromForm(), null, 2);
+}
+
+function refreshProductionGridDevicePicker(){
+  const picker = document.getElementById('production-grid-preview-device');
+  if(!picker) return;
+  const selected = picker.value;
+  picker.innerHTML = '<option value="">Cihaz seçin</option>' + (cachedDevices || []).map((device, index) => {
+    const title = `${device.alias || device.hostname || 'Cihaz'} / ${device.hostname || '-'} — ${device.inventory_id || 'Inventory ID yok'}`;
+    return `<option value="${index}">${escapeHtml(title)}</option>`;
+  }).join('');
+  if(selected && Number(selected) < (cachedDevices || []).length) picker.value = selected;
+}
+
 function refreshRuntimeVariablePickers(){
   const maxInventoryIds = Math.max(1, ...(cachedDevices || []).map(device => parseInventoryIds(device.inventory_id).length));
   const options = [
@@ -1179,6 +1251,7 @@ async function loadDevices(){
   cachedDevices = devices || [];
   renderDevicesTable();
   refreshRuntimeVariablePickers();
+  refreshProductionGridDevicePicker();
 
   const deviceSelect = document.getElementById('device-select');
   if(deviceSelect){
@@ -1324,6 +1397,8 @@ function resetWidgetForm(){
   document.getElementById('widget-id').value = '';
   document.getElementById('widget-name').value = '';
   document.getElementById('widget-type').value = 'html';
+  document.getElementById('widget-content').value = '';
+  fillProductionGridSettings('');
   document.getElementById('widget-content').value = '';
   document.getElementById('widget-template-select').value = '';
   document.getElementById('dashboard-columns').value = '2';
@@ -1825,6 +1900,7 @@ function fillWidgetForm(widgetId){
   const content = widget.content || widget.payload || widget.widget_payload || widget.url || '';
   document.getElementById('widget-content').value = content;
   if((widget.type || '').toLowerCase() === 'dashboard') syncDashboardBuilderFromContent(content);
+  if((widget.type || '').toLowerCase() === 'production_grid') fillProductionGridSettings(content);
   updateWidgetPreview();
 }
 
@@ -1835,6 +1911,10 @@ function updateWidgetPreview(){
   const previewFrame = document.getElementById('widget-preview-frame');
   const dashboardBuilder = document.getElementById('widget-dashboard-builder');
   dashboardBuilder.classList.toggle('d-none', type !== 'dashboard');
+  const productionSettings = document.getElementById('widget-production-grid-settings');
+  productionSettings.classList.toggle('d-none', type !== 'production_grid');
+  document.getElementById('widget-content-wrap').classList.toggle('d-none', type === 'production_grid');
+  if(type === 'production_grid' && !content) fillProductionGridSettings('');
   if(type === 'dashboard' && !collectDashboardCellData().length) reflowDashboardIframeRows();
 
   if(!preview || !previewFrame) return;
@@ -1931,8 +2011,35 @@ function updateWidgetPreview(){
     return;
   }
 
-  if(type === 'dashboard'){
-    const config = extractDashboardConfig(content);
+  if(type === 'dashboard' || type === 'production_grid'){
+    let config = extractDashboardConfig(content);
+    if(type === 'production_grid'){
+      const productionConfig = productionGridConfigFromForm();
+      const deviceIndex = document.getElementById('production-grid-preview-device')?.value;
+      const device = deviceIndex === '' ? null : (cachedDevices || [])[Number(deviceIndex)];
+      const inventoryIds = parseInventoryIds(device?.inventory_id);
+      const dimensions = productionGridDimensions(inventoryIds.length);
+      config = {
+        columns: dimensions.columns,
+        rows: dimensions.rows,
+        widgets: inventoryIds.map(inventoryId => {
+          let url;
+          try {
+            url = new URL(productionConfig.base_url, window.location.origin);
+            url.searchParams.set('deviceAlias', inventoryId);
+            url.searchParams.set('theme', productionConfig.theme);
+            url.searchParams.set('refreshInterval', String(productionConfig.refresh_interval));
+            if(productionConfig.scale == null) url.searchParams.delete('scale');
+            else url.searchParams.set('scale', String(productionConfig.scale));
+          } catch(_err) { return {type: 'empty'}; }
+          return {type: 'iframe', url: url.toString()};
+        })
+      };
+      if(!inventoryIds.length){
+        renderPreviewDoc('<div class="empty root">Önizleme için Inventory ID tanımlı bir cihaz seçin.</div>');
+        return;
+      }
+    }
     if(!config){
       renderPreviewDoc('<div class="warning root">Dashboard JSON formatı geçersiz.</div>');
       return;
