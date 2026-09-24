@@ -571,12 +571,54 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(payload["rows"], 1)
         self.assertEqual(payload["widgets"][0]["col_span"], 3)
 
+    def test_parse_inventory_ids_normalizes_empty_and_duplicate_values(self):
+        self.assertEqual(
+            self.main._parse_inventory_ids("INV1, INV2,,INV1"),
+            ["INV1", "INV2"],
+        )
+
+    def test_widget_runtime_vars_support_indexed_and_legacy_inventory_ids(self):
+        device = self.main.Device(hostname="screen-1", inventory_id="INV1,INV2,INV3")
+        runtime_vars = self.main._widget_runtime_vars(device)
+
+        self.assertEqual(runtime_vars["inventory_id"], "INV1")
+        self.assertEqual(runtime_vars["inventory_id1"], "INV1")
+        self.assertEqual(runtime_vars["inventory_id2"], "INV2")
+        self.assertEqual(runtime_vars["inventory_id3"], "INV3")
+        self.assertEqual(runtime_vars["INVENTORY_ID3"], "INV3")
+
+    def test_widget_runtime_resolution_supports_formats_and_removes_missing_index(self):
+        runtime_vars = self.main._widget_runtime_vars(
+            self.main.Device(hostname="screen-1", inventory_id="A100,B200")
+        )
+        value = (
+            "https://stats.example.com?a=${inventory_id1}&b=$INVENTORY_ID2"
+            "&missing={{inventory_id3}}&host=${device_hostname}"
+        )
+
+        self.assertEqual(
+            self.main._apply_widget_runtime_vars(value, runtime_vars),
+            "https://stats.example.com?a=A100&b=B200&missing=&host=screen-1",
+        )
+
+    def test_single_inventory_id_keeps_legacy_placeholder_formats(self):
+        runtime_vars = self.main._widget_runtime_vars(
+            self.main.Device(hostname="screen-legacy", inventory_id="INV42")
+        )
+        self.assertEqual(
+            self.main._apply_widget_runtime_vars(
+                "${inventory_id}|{{inventory_id}}|$INVENTORY_ID|${inventory_id1}",
+                runtime_vars,
+            ),
+            "INV42|INV42|INV42|INV42",
+        )
+
     def test_build_config_replaces_inventory_id_placeholders_for_widget_urls(self):
         db = self.main.db_session()
         try:
             group = self.main.Group(name="Inventory Group")
             playlist = self.main.Playlist(name="Inventory Playlist", enabled=True, loop_mode="sequential")
-            device = self.main.Device(hostname="pc-inventory-widget", inventory_id="INV-42")
+            device = self.main.Device(hostname="pc-inventory-widget", inventory_id="1001,1002")
             db.add_all([group, playlist, device])
             db.commit()
 
@@ -586,7 +628,7 @@ class TestConfigPush(unittest.TestCase):
                 self.main.PlaylistItem(
                     playlist_id=playlist.id,
                     item_type="widget",
-                    widget_payload='{"widgets":[{"type":"iframe","url":"https://stats.example.com?inventory={{inventory_id}}&host=$DEVICE_HOSTNAME"}]}',
+                    widget_payload='{"widgets":[{"type":"iframe","url":"https://example.local/a?id=${inventory_id1}"},{"type":"iframe","url":"https://example.local/b?id=${inventory_id2}"}]}',
                     order_no=0,
                 )
             )
@@ -595,10 +637,14 @@ class TestConfigPush(unittest.TestCase):
             db.close()
 
         cfg = self.main.build_config("pc-inventory-widget")
-        self.assertEqual(cfg["widget_runtime_vars"]["inventory_id"], "INV-42")
+        self.assertEqual(cfg["widget_runtime_vars"]["inventory_id"], "1001")
         self.assertEqual(
             cfg["videos"][0]["widget_payload"]["widgets"][0]["url"],
-            "https://stats.example.com?inventory=INV-42&host=pc-inventory-widget",
+            "https://example.local/a?id=1001",
+        )
+        self.assertEqual(
+            cfg["videos"][0]["widget_payload"]["widgets"][1]["url"],
+            "https://example.local/b?id=1002",
         )
         db = self.main.db_session()
         try:
@@ -648,17 +694,17 @@ class TestConfigPush(unittest.TestCase):
         with patch("app.main._auth_failed", return_value=False):
             resp = self.main.app.test_client().patch(
                 "/api/devices/pc-meta/alias",
-                json={"alias": "Satış Ekranı", "inventory_id": "INV-SALES-01"},
+                json={"alias": "Üretim Ekranı", "inventory_id": "1001, 1002, , 1001, 1003"},
             )
         self.assertEqual(resp.status_code, 200)
         payload = resp.get_json() or {}
-        self.assertEqual(payload.get("device", {}).get("inventory_id"), "INV-SALES-01")
+        self.assertEqual(payload.get("device", {}).get("inventory_id"), "1001,1002,1003")
 
         db = self.main.db_session()
         try:
             row = db.query(self.main.Device).filter_by(hostname="pc-meta").first()
             self.assertIsNotNone(row)
-            self.assertEqual(row.inventory_id, "INV-SALES-01")
+            self.assertEqual(row.inventory_id, "1001,1002,1003")
             db.delete(row)
             db.commit()
         finally:
