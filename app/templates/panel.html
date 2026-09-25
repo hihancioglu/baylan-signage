@@ -768,6 +768,9 @@ function escapeHtml(value){
 function activateSection(sectionId){
   document.querySelectorAll('.tab-section').forEach(section => section.classList.toggle('d-none', section.id !== sectionId));
   document.querySelectorAll('#panel-menu .nav-link').forEach(link => link.classList.toggle('active', link.dataset.section === sectionId));
+  if(sectionId === 'section-groups'){
+    renderGroupsTable();
+  }
 }
 
 document.querySelectorAll('#panel-menu .nav-link').forEach(link => {
@@ -2400,14 +2403,25 @@ function deviceLabel(device){
   return alias || String(device?.hostname || '');
 }
 
+function deviceBelongsToGroup(device, group){
+  if(device?.group_id != null){
+    return Number(device.group_id) === Number(group?.id);
+  }
+  return String(device?.group || '') === String(group?.name || '');
+}
+
+function deviceHasGroup(device){
+  return device?.group_id != null || Boolean(device?.group);
+}
+
 function renderGroupsTable(){
   const body = document.getElementById('groups-body');
   body.innerHTML = '';
   (cachedGroups || []).forEach(g => {
-    const groupDevices = (cachedDevices || []).filter(d => d.group === g.name);
+    const groupDevices = (cachedDevices || []).filter(d => deviceBelongsToGroup(d, g));
     const deviceOptions = (cachedDevices || [])
-      .filter(d => !d.group || d.group === g.name)
-      .map(d => `<option value="${encodeURIComponent(d.hostname || '')}|${encodeURIComponent(d.mac_address || '')}">${deviceLabel(d)}${d.mac_address ? ` (${d.mac_address})` : ''}${d.group === g.name ? ' (grupta)' : ''}</option>`)
+      .filter(d => !deviceHasGroup(d) || deviceBelongsToGroup(d, g))
+      .map(d => `<option value="${encodeURIComponent(d.hostname || '')}|${encodeURIComponent(d.mac_address || '')}">${deviceLabel(d)}${d.mac_address ? ` (${d.mac_address})` : ''}${deviceBelongsToGroup(d, g) ? ' (grupta)' : ''}</option>`)
       .join('');
     const groupDeviceBadges = groupDevices.length
       ? groupDevices.map(d => `<span class="badge text-bg-light border d-inline-flex align-items-center gap-2 me-1 mb-1">${d.hostname}<button type="button" class="btn-close btn-close-sm" aria-label="Cihazı gruptan çıkar" onclick="removeDeviceFromGroup(decodeURIComponent('${encodeURIComponent(d.hostname)}'), decodeURIComponent('${encodeURIComponent(d.mac_address || '')}'))"></button></span>`).join('')
@@ -2618,8 +2632,8 @@ async function saveGroupModal(){
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById('group-edit-modal')).hide();
-  await loadGroupsPlaylists();
   await loadDevices();
+  await loadGroupsPlaylists();
 }
 
 async function deleteGroup(groupId){
@@ -2633,8 +2647,8 @@ async function deleteGroup(groupId){
     alert(resp.error || 'Grup silinemedi');
     return;
   }
-  await loadGroupsPlaylists();
   await loadDevices();
+  await loadGroupsPlaylists();
 }
 
 async function createPlaylist(){
@@ -3230,8 +3244,8 @@ async function init(){
   loadVisibleDeviceColumns();
   renderDeviceColumnControls();
   await loadWidgets();
-  await loadGroupsPlaylists();
   await loadDevices();
+  await loadGroupsPlaylists();
   await loadMedia();
   togglePlaylistItemInputs();
   updateWidgetPreview();

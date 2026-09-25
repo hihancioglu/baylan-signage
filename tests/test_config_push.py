@@ -683,6 +683,45 @@ class TestConfigPush(unittest.TestCase):
         self.assertEqual(target.get("agent_version"), "build-20260101120000")
         self.assertEqual(target.get("cpu_temperature"), "63.2°C")
 
+    def test_devices_api_includes_stable_group_id_after_group_rename(self):
+        db = self.main.db_session()
+        try:
+            group = self.main.Group(name="URETIM")
+            device = self.main.Device(hostname="SCREEN-01")
+            db.add_all([group, device])
+            db.commit()
+            db.add(self.main.DeviceGroup(device_id=device.id, group_id=group.id, is_active=True))
+            db.commit()
+            group_id = group.id
+            device_id = device.id
+        finally:
+            db.close()
+
+        with patch("app.main._auth_failed", return_value=False):
+            client = self.main.app.test_client()
+            response = client.get("/api/devices")
+            rename_response = client.patch(f"/api/groups/{group_id}", json={"name": "URETIM_HAT1"})
+            renamed_response = client.get("/api/devices")
+
+        self.assertEqual(response.status_code, 200)
+        device_payload = next(row for row in response.get_json() if row.get("hostname") == "SCREEN-01")
+        self.assertEqual(device_payload.get("group"), "URETIM")
+        self.assertEqual(device_payload.get("group_id"), group_id)
+
+        self.assertEqual(rename_response.status_code, 200)
+        renamed_payload = next(row for row in renamed_response.get_json() if row.get("hostname") == "SCREEN-01")
+        self.assertEqual(renamed_payload.get("group"), "URETIM_HAT1")
+        self.assertEqual(renamed_payload.get("group_id"), group_id)
+
+        db = self.main.db_session()
+        try:
+            db.query(self.main.DeviceGroup).filter_by(device_id=device_id).delete()
+            db.query(self.main.Device).filter_by(id=device_id).delete()
+            db.query(self.main.Group).filter_by(id=group_id).delete()
+            db.commit()
+        finally:
+            db.close()
+
     def test_update_device_alias_can_persist_inventory_id(self):
         db = self.main.db_session()
         try:

@@ -1036,7 +1036,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
     media_by_relative_path = media_by_relative_path or {}
     media_by_stored_name = media_by_stored_name or {}
     active_group = (
-        db.query(Group.name)
+        db.query(Group.id, Group.name)
         .join(DeviceGroup, DeviceGroup.group_id == Group.id)
         .filter(DeviceGroup.device_id == device.id, DeviceGroup.is_active.is_(True))
         .order_by(DeviceGroup.assigned_at.desc())
@@ -1066,7 +1066,8 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         "health_metrics": LATEST_HEALTH_METRICS.get(_device_identity(device.hostname, device.mac_address)) or LATEST_HEALTH_METRICS.get(device.hostname),
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
-        "group": active_group[0] if active_group else None,
+        "group_id": active_group[0] if active_group else None,
+        "group": active_group[1] if active_group else None,
     }
 
 
