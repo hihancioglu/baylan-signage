@@ -52,14 +52,11 @@
       const raw = String(params.get("debug") || "").trim().toLowerCase();
       return raw === "1" || raw === "true" || raw === "yes";
     })();
-    const PRODUCTION_AUTO_HUB_SCALE = 2.8;
-    const PRODUCTION_FIT_BASE_WIDTH = 1100;
-    const PRODUCTION_FIT_BASE_HEIGHT = 900;
-    const PRODUCTION_FIT_SAFETY = 0.97;
+    const PRODUCTION_AUTO_HUB_SCALE = 1.0;
+    const PRODUCTION_FIT_BASE_WIDTH = 620;
+    const PRODUCTION_FIT_BASE_HEIGHT = 500;
+    const PRODUCTION_FIT_SAFETY = 0.995;
     const PRODUCTION_GRID_GAP = 4;
-    const SINGLE_CARD_HEIGHT_SAFETY = 0.998;
-    const SINGLE_CARD_WIDTH_SAFETY = 0.999;
-    const SINGLE_CARD_FIT_INSET = 2;
 
     function isProductionAutoFitWidget(widget) {
       return String(widget?.fit_mode || "") === "production_auto";
@@ -88,10 +85,8 @@
       const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
       const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
       const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
-      const contentZoom = positiveFitNumber(widget.fit_content_zoom, 1);
       const fitOffsetX = finiteFitNumber(widget.fit_offset_x, 0);
       const fitOffsetY = finiteFitNumber(widget.fit_offset_y, 0);
-      const singleCardFit = isSingleProductionAutoFitLayout(config);
       stage.style.width = `${fitWidth}px`;
       stage.style.height = `${fitHeight}px`;
       stage.style.left = `calc(50% + ${fitOffsetX}px)`;
@@ -99,62 +94,23 @@
 
       const updateFit = () => {
         const cellRect = wrapper.getBoundingClientRect();
-        const viewportRect = document.documentElement.getBoundingClientRect();
         if (cellRect.width <= 0 || cellRect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
-        let baseScale;
-        let singleCardMetrics = null;
-        if (singleCardFit) {
-          const usableWidth = cellRect.width - SINGLE_CARD_FIT_INSET;
-          const usableHeight = cellRect.height - SINGLE_CARD_FIT_INSET;
-          const scaleByHeight = usableHeight / fitHeight;
-          const scaleByWidth = usableWidth / fitWidth;
-          const effectiveScale = Math.min(
-            scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY,
-            scaleByWidth * SINGLE_CARD_WIDTH_SAFETY
-          );
-          baseScale = effectiveScale;
-          singleCardMetrics = { usableWidth, usableHeight, scaleByHeight, scaleByWidth, effectiveScale };
-        } else {
-          const scaleByWidth = cellRect.width / fitWidth;
-          const scaleByHeight = cellRect.height / fitHeight;
-          baseScale = Math.min(scaleByWidth, scaleByHeight) * fitSafety;
-        }
-        const finalScale = baseScale * contentZoom;
-        if (!Number.isFinite(finalScale) || finalScale <= 0) return;
-        stage.style.transform = `translate(-50%, -50%) scale(${finalScale})`;
-        if (singleCardFit) {
-          const { usableWidth, usableHeight, scaleByHeight, scaleByWidth, effectiveScale } = singleCardMetrics;
-          debugLog(
-            "single-card-fit",
-            `viewport=${Math.round(viewportRect.width)}x${Math.round(viewportRect.height)} | ` +
-              `cell=${Math.round(cellRect.width)}x${Math.round(cellRect.height)} | ` +
-              `usable=${Math.round(usableWidth)}x${Math.round(usableHeight)} | ` +
-              `virtual=${fitWidth}x${fitHeight} | ` +
-              `scaleByHeight=${scaleByHeight.toFixed(3)} | ` +
-              `scaleByWidth=${scaleByWidth.toFixed(3)} | ` +
-              `baseScale=${effectiveScale.toFixed(3)} | ` +
-              `contentZoom=${contentZoom.toFixed(3)} | ` +
-              `finalScale=${finalScale.toFixed(3)} | widgetIndex=${widgetIndex}`
-          );
-        } else {
-          const scaleByWidth = cellRect.width / fitWidth;
-          const scaleByHeight = cellRect.height / fitHeight;
-          debugLog("production runtime fit", {
-            widgetIndex,
-            cell: `${Math.round(cellRect.width)}x${Math.round(cellRect.height)}`,
-            virtual: `${fitWidth}x${fitHeight}`,
-            scaleX: Number(scaleByWidth.toFixed(2)),
-            scaleY: Number(scaleByHeight.toFixed(2)),
-            baseScale: Number(baseScale.toFixed(3)),
-            contentZoom: Number(contentZoom.toFixed(3)),
-            finalScale: Number(finalScale.toFixed(3)),
-            dpr: window.devicePixelRatio,
-          });
-        }
+        const scaleX = cellRect.width / fitWidth;
+        const scaleY = cellRect.height / fitHeight;
+        const baseScale = Math.min(scaleX, scaleY) * fitSafety;
+        if (!Number.isFinite(baseScale) || baseScale <= 0) return;
+        stage.style.transform = `translate(-50%, -50%) scale(${baseScale})`;
+        debugLog(
+          "production-runtime-fit",
+          `index=${widgetIndex} | cell=${cellRect.width.toFixed(1)}x${cellRect.height.toFixed(1)} | ` +
+            `virtual=${fitWidth}x${fitHeight} | scaleX=${scaleX.toFixed(4)} | ` +
+            `scaleY=${scaleY.toFixed(4)} | effectiveScale=${baseScale.toFixed(4)}`
+        );
       };
       const observer = new ResizeObserver(updateFit);
       observer.observe(wrapper);
       wrapper.__cleanup = () => observer.disconnect();
+      updateFit();
       return updateFit;
     }
 
@@ -304,7 +260,8 @@
           `viewport=${Math.round(availableWidth)}x${Math.round(availableHeight)} | count=${count} | ` +
             `selected=${selected.columns}x${selected.rows} | cardAspect=${cardAspect.toFixed(3)} | ` +
             `cell=${selected.cellWidth.toFixed(1)}x${selected.cellHeight.toFixed(1)} | ` +
-            `hubScale=${PRODUCTION_AUTO_HUB_SCALE} | outerScale=${(selected.cellWidth / fitWidth).toFixed(3)}`
+            `virtual=${fitWidth}x${fitHeight} | hubScale=${PRODUCTION_AUTO_HUB_SCALE} | ` +
+            `outerScale=${(Math.min(selected.cellWidth / fitWidth, selected.cellHeight / fitHeight) * PRODUCTION_FIT_SAFETY).toFixed(3)}`
         );
       };
       const observer = new ResizeObserver(updateLayout);

@@ -1251,10 +1251,10 @@ function parseInventoryIds(value){
 
 const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
 const PRODUCTION_GRID_BASE_SCALE = 2.8;
-const PRODUCTION_AUTO_HUB_SCALE = 2.8;
-const PRODUCTION_FIT_BASE_WIDTH = 1100;
-const PRODUCTION_FIT_BASE_HEIGHT = 900;
-const PRODUCTION_FIT_SAFETY = 0.97;
+const PRODUCTION_AUTO_HUB_SCALE = 1.0;
+const PRODUCTION_FIT_BASE_WIDTH = 620;
+const PRODUCTION_FIT_BASE_HEIGHT = 500;
+const PRODUCTION_FIT_SAFETY = 0.995;
 
 function productionGridDimensions(count){
   const size = Math.max(1, Number(count) || 0);

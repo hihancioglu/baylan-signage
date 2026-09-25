@@ -192,7 +192,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
     def test_production_auto_fit_metadata_survives_viewer_normalization(self):
-        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 1100, "fit_height": 900, "fit_safety": 0.97, "fit_content_zoom": 1.55}
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 620, "fit_height": 500, "fit_safety": 0.995}
         result = widget_viewer._normalize_widget_payload({"widgets": [widget]})
 
         self.assertEqual(result["widgets"][0], widget)
@@ -202,17 +202,16 @@ class TestWidgetViewer(unittest.TestCase):
         fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
 
         self.assertIn("new ResizeObserver(updateFit)", fit_helper)
-        self.assertIn("Math.min(scaleByWidth, scaleByHeight) * fitSafety", fit_helper)
-        self.assertIn("const finalScale = baseScale * contentZoom;", fit_helper)
-        self.assertIn("scale(${finalScale})", fit_helper)
-        self.assertIn("scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY", fit_helper)
-        self.assertIn("scaleByWidth * SINGLE_CARD_WIDTH_SAFETY", fit_helper)
+        self.assertIn("Math.min(scaleX, scaleY) * fitSafety", fit_helper)
+        self.assertIn("scale(${baseScale})", fit_helper)
+        self.assertNotIn("contentZoom", fit_helper)
+        self.assertNotIn("finalScale", fit_helper)
         self.assertNotIn("Math.min(1", fit_helper)
         self.assertNotIn("devicePixelRatio", fit_helper.split("stage.style.transform", 1)[0])
         self.assertNotIn("frame.src", fit_helper)
         self.assertIn("observer.disconnect()", fit_helper)
 
-    def test_widget_engine_production_crop_is_centered_and_clipped(self):
+    def test_widget_engine_production_stage_is_centered_and_contained(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
         fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
 
@@ -225,9 +224,9 @@ class TestWidgetViewer(unittest.TestCase):
     def test_widget_engine_single_production_fit_is_height_first_and_compact(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
-        self.assertIn("const SINGLE_CARD_HEIGHT_SAFETY = 0.998;", engine)
-        self.assertIn("const SINGLE_CARD_WIDTH_SAFETY = 0.999;", engine)
-        self.assertIn("const SINGLE_CARD_FIT_INSET = 2;", engine)
+        self.assertIn("const PRODUCTION_FIT_BASE_WIDTH = 620;", engine)
+        self.assertIn("const PRODUCTION_FIT_BASE_HEIGHT = 500;", engine)
+        self.assertIn("const PRODUCTION_FIT_SAFETY = 0.995;", engine)
         self.assertIn("function isSingleProductionAutoFitLayout(config)", engine)
         self.assertIn('String(widgets[0]?.type || "").toLowerCase() === "iframe"', engine)
         self.assertIn('String(widgets[0]?.fit_mode || "") === "production_auto"', engine)
@@ -235,9 +234,8 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn(".production-grid-stage { display: flex; flex-wrap: wrap;", engine)
         self.assertIn("const cols = singleCardFit ? 1", engine)
         self.assertIn("const targetRows = singleCardFit ? 1", engine)
-        self.assertIn('debugLog(\n            "single-card-fit"', engine)
-        self.assertIn("`viewport=${Math.round(viewportRect.width)}x${Math.round(viewportRect.height)} | `", engine)
-        self.assertIn("`usable=${Math.round(usableWidth)}x${Math.round(usableHeight)} | `", engine)
+        self.assertIn('debugLog(\n          "production-runtime-fit"', engine)
+        self.assertNotIn("single-card-fit", engine)
 
     def test_widget_engine_runtime_optimizes_production_grid_without_navigation(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
