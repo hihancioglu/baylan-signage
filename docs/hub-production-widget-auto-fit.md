@@ -1,20 +1,23 @@
 # Signage-side `production-widget` Auto Fit
 
-No Baylan Hub change is required. Auto mode deliberately sends the Hub its
-existing neutral `scale=1` value. The Signage widget engine then fits the entire
-cross-origin iframe to each real grid cell.
+No Baylan Hub change is required. Auto mode sends the Hub the readable design
+scale `2.8`. The Signage widget engine then fits the entire cross-origin iframe
+to each real grid cell.
 
 ## Payload contract
 
-* Auto: `scale=1`, `reload_policy=stable`, `fit_mode=production_auto`, virtual
-  dimensions 640×520, and safety factor 0.97.
+* Auto: `scale=2.8`, `reload_policy=stable`, `fit_mode=production_auto`, virtual
+  dimensions 1100×900, and safety factor 0.97.
 * Manual: the configured numeric `scale` remains in the URL and no fit metadata
   is added.
 
 ## Runtime fit
 
-The engine places the iframe in an absolutely positioned 640×520 virtual stage,
-centered in its grid-cell wrapper. For every wrapper measurement it computes:
+The engine places the iframe in an absolutely positioned 1100×900 virtual stage,
+centered in its grid-cell wrapper. It evaluates every possible column count from
+the real container size, selects the candidate with the largest card area, and
+uses a centered wrapping flex stage with a 4px gap. For every wrapper measurement
+it computes:
 
 ```js
 const rect = wrapper.getBoundingClientRect();
@@ -31,8 +34,9 @@ iframe URL or DOM node. The observer is disconnected during widget cleanup.
 
 ## Acceptance
 
-Exercise 1, 4, 6, 7, 9, and 12 cards at 1920×1080 (100% and 125% display
+Exercise 1, 2, 4, 6, 7, 8, 9, and 12 cards at 1920×1080 (100% and 125% display
 scaling), 1366×768, and 2560×1440. In every cell verify two-axis centering,
 unchanged aspect ratio, no clipping or scrollbar, and visibility of the complete
-card. Seven inventories must remain a 3×3 grid. A live resize must update the CSS
-transform without causing iframe navigation.
+card. Seven inventories should select 4×2 at this aspect ratio instead of the old
+3×3 layout. A live resize must optimize the grid and update the CSS transform
+without causing iframe navigation.

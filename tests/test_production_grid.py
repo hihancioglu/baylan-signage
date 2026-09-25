@@ -81,8 +81,8 @@ class TestProductionGrid(unittest.TestCase):
         url = self._payload("576", scale_mode="manual", scale="")["widgets"][0]["url"]
         self.assertNotIn("scale", parse_qs(urlparse(url).query, keep_blank_values=True))
 
-    def test_auto_mode_uses_neutral_hub_scale_and_client_fit_metadata(self):
-        for count in (1, 2, 4, 6, 7, 9, 12):
+    def test_auto_mode_uses_design_hub_scale_and_client_fit_metadata(self):
+        for count in (1, 2, 4, 6, 7, 8, 9, 12):
             inventory_id = ",".join(str(576 + index) for index in range(count))
             with self.subTest(inventory_id=inventory_id):
                 payload = self._payload(inventory_id, scale_mode="auto", scale="1.23")
@@ -90,18 +90,18 @@ class TestProductionGrid(unittest.TestCase):
                     parse_qs(urlparse(widget["url"]).query)["scale"][0]
                     for widget in payload["widgets"]
                 }
-                self.assertEqual(scales, {"1"})
+                self.assertEqual(scales, {"2.8"})
                 for widget in payload["widgets"]:
                     self.assertEqual(widget["reload_policy"], "stable")
                     self.assertEqual(widget["fit_mode"], "production_auto")
-                    self.assertEqual(widget["fit_width"], 640)
-                    self.assertEqual(widget["fit_height"], 520)
+                    self.assertEqual(widget["fit_width"], 1100)
+                    self.assertEqual(widget["fit_height"], 900)
                     self.assertEqual(widget["fit_safety"], 0.97)
 
-    def test_seven_inventory_grid_uses_client_auto_fit_and_stable_iframes(self):
+    def test_seven_inventory_grid_delegates_layout_to_client_auto_fit(self):
         payload = self._payload("576,577,578,579,580,581,582", scale_mode="auto")
         self.assertEqual((payload["columns"], payload["rows"]), (3, 3))
-        self.assertTrue(all(parse_qs(urlparse(widget["url"]).query)["scale"] == ["1"] for widget in payload["widgets"]))
+        self.assertTrue(all(parse_qs(urlparse(widget["url"]).query)["scale"] == ["2.8"] for widget in payload["widgets"]))
         self.assertTrue(all(widget["fit_mode"] == "production_auto" for widget in payload["widgets"]))
         self.assertTrue(all(widget["reload_policy"] == "stable" for widget in payload["widgets"]))
 
@@ -114,7 +114,7 @@ class TestProductionGrid(unittest.TestCase):
         self.assertEqual(automatic["scale_mode"], "auto")
         payload = self._payload("576,577,578,579", scale_mode="auto", scale=None)
         query = parse_qs(urlparse(payload["widgets"][0]["url"]).query)
-        self.assertEqual(query["scale"], ["1"])
+        self.assertEqual(query["scale"], ["2.8"])
 
     def test_manual_mode_uses_stored_scale_for_every_widget(self):
         payload = self._payload("576,577,578,579", scale_mode="manual", scale=1.25)
