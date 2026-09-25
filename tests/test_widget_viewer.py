@@ -191,6 +191,23 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("refreshIntervalSeconds", engine)
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
+    def test_production_auto_fit_metadata_survives_viewer_normalization(self):
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 640, "fit_height": 520, "fit_safety": 0.97}
+        result = widget_viewer._normalize_widget_payload({"widgets": [widget]})
+
+        self.assertEqual(result["widgets"][0], widget)
+
+    def test_widget_engine_fits_production_canvas_without_dpr_or_reload(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
+
+        self.assertIn("new ResizeObserver(updateFit)", fit_helper)
+        self.assertIn("Math.min(scaleX, scaleY) * fitSafety", fit_helper)
+        self.assertNotIn("Math.min(1", fit_helper)
+        self.assertNotIn("devicePixelRatio", fit_helper.split('debugLog("production runtime fit"', 1)[0])
+        self.assertNotIn("frame.src", fit_helper)
+        self.assertIn("observer.disconnect()", fit_helper)
+
     def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 

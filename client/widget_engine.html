@@ -7,8 +7,12 @@
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
+    #widgets.production-grid-layout.single-production-widget { padding: 4px; gap: 0; }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; }
+    .production-auto-fit { position: relative; overflow: hidden; }
+    .production-fit-stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; }
+    .production-fit-stage iframe { width: 100%; height: 100%; border: 0; }
     iframe.widget {
       width: 100%;
       height: 100%;
@@ -46,6 +50,49 @@
       const raw = String(params.get("debug") || "").trim().toLowerCase();
       return raw === "1" || raw === "true" || raw === "yes";
     })();
+    const PRODUCTION_FIT_BASE_WIDTH = 640;
+    const PRODUCTION_FIT_BASE_HEIGHT = 520;
+    const PRODUCTION_FIT_SAFETY = 0.97;
+
+    function isProductionAutoFitWidget(widget) {
+      return String(widget?.fit_mode || "") === "production_auto";
+    }
+
+    function positiveFitNumber(value, fallback) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    function setupProductionAutoFit(wrapper, stage, widget, widgetIndex) {
+      const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
+      const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
+      const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
+      stage.style.width = `${fitWidth}px`;
+      stage.style.height = `${fitHeight}px`;
+
+      const updateFit = () => {
+        const rect = wrapper.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
+        const scaleX = rect.width / fitWidth;
+        const scaleY = rect.height / fitHeight;
+        const scale = Math.min(scaleX, scaleY) * fitSafety;
+        if (!Number.isFinite(scale) || scale <= 0) return;
+        stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        debugLog("production runtime fit", {
+          widgetIndex,
+          cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+          virtual: `${fitWidth}x${fitHeight}`,
+          scaleX: Number(scaleX.toFixed(2)),
+          scaleY: Number(scaleY.toFixed(2)),
+          effectiveScale: Number(scale.toFixed(2)),
+          dpr: window.devicePixelRatio,
+        });
+      };
+      const observer = new ResizeObserver(updateFit);
+      observer.observe(wrapper);
+      wrapper.__cleanup = () => observer.disconnect();
+      return updateFit;
+    }
 
     function debugLog(message, extra) {
       if (!debugEnabled) return;
@@ -123,10 +170,13 @@
       const container = document.getElementById("widgets");
       const columns = Array.isArray(config.columns) ? config.columns.length : Number(config.columns || 1);
       const cols = Math.max(1, Number(columns) || 1);
+      const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
       container.style.setProperty("--cols", String(cols));
+      const allProductionAutoFit = widgetCount > 0 && config.widgets.every(isProductionAutoFitWidget);
+      container.classList.toggle("production-grid-layout", allProductionAutoFit);
+      container.classList.toggle("single-production-widget", allProductionAutoFit && widgetCount === 1);
 
       const minRows = Number(config.rows || 0);
-      const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
       const targetRows = Math.max(minRows, Math.ceil(widgetCount / cols));
       if (targetRows > 0) {
         container.style.gridTemplateRows = `repeat(${targetRows}, minmax(0, 1fr))`;
@@ -144,12 +194,12 @@
           let url;
           try { url = new URL(frame.dataset.instanceSrc, window.location.href); } catch (_err) { return; }
           if (!url.pathname.includes('/automation/production-widget')) return;
-          const bounds = frame.getBoundingClientRect();
+          const bounds = frame.closest('.iframe-widget').getBoundingClientRect();
           debugLog('production viewport', {
             physical: `${Math.round(window.innerWidth * window.devicePixelRatio)}x${Math.round(window.innerHeight * window.devicePixelRatio)}`,
             css: `${Math.round(bounds.width)}x${Math.round(bounds.height)}`,
             devicePixelRatio: window.devicePixelRatio,
-            scale_mode: url.searchParams.get('scale') === 'auto' ? 'auto' : 'manual',
+            scale_mode: frame.closest('.production-auto-fit') ? 'auto' : 'manual',
             widgetIndex: Number(frame.dataset.widgetIndex || -1),
           });
         });
@@ -212,7 +262,7 @@
     }
 
 
-    function scheduleIframeLoad(frame, url, widgetIndex = -1, reloadPolicy = "default") {
+    function scheduleIframeLoad(frame, url, widgetIndex = -1, reloadPolicy = "default", beforeNavigate = null) {
       const source = normalizeIframeUrl(url);
       frame.name = `baylan-widget-frame-${Math.max(0, widgetIndex)}-${Math.random().toString(36).slice(2)}`;
       frame.dataset.originalSrc = source;
@@ -220,6 +270,7 @@
       frame.dataset.widgetIndex = String(widgetIndex);
       frame.dataset.reloadPolicy = String(reloadPolicy || "default").toLowerCase();
       window.requestAnimationFrame(() => {
+        if (typeof beforeNavigate === "function") beforeNavigate();
         frame.dataset.navigationStarted = "true";
         debugLog("iframe initial navigation", {
           widgetIndex,
@@ -811,6 +862,8 @@
         if (widgetType === "iframe") {
           const wrapper = document.createElement("div");
           wrapper.className = "widget iframe-widget";
+          const productionAutoFit = isProductionAutoFitWidget(w);
+          if (productionAutoFit) wrapper.classList.add("production-auto-fit");
           if (colSpan > 1) {
             wrapper.style.gridColumn = `span ${colSpan}`;
           }
@@ -864,9 +917,18 @@
             });
           });
 
-          wrapper.appendChild(frame);
+          let updateProductionFit = null;
+          if (productionAutoFit) {
+            const stage = document.createElement("div");
+            stage.className = "production-fit-stage";
+            stage.appendChild(frame);
+            wrapper.appendChild(stage);
+            updateProductionFit = setupProductionAutoFit(wrapper, stage, w, index);
+          } else {
+            wrapper.appendChild(frame);
+          }
           wrapper.appendChild(buildIframeFallback(w.url));
-          scheduleIframeLoad(frame, w.url, index, w.reload_policy);
+          scheduleIframeLoad(frame, w.url, index, w.reload_policy, updateProductionFit);
           window.setTimeout(() => {
             try {
               frame.style.transform = "translateZ(0)";

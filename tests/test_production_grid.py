@@ -81,7 +81,7 @@ class TestProductionGrid(unittest.TestCase):
         url = self._payload("576", scale_mode="manual", scale="")["widgets"][0]["url"]
         self.assertNotIn("scale", parse_qs(urlparse(url).query, keep_blank_values=True))
 
-    def test_auto_mode_is_forwarded_for_every_grid_size(self):
+    def test_auto_mode_uses_neutral_hub_scale_and_client_fit_metadata(self):
         for count in (1, 2, 4, 6, 7, 9, 12):
             inventory_id = ",".join(str(576 + index) for index in range(count))
             with self.subTest(inventory_id=inventory_id):
@@ -90,12 +90,19 @@ class TestProductionGrid(unittest.TestCase):
                     parse_qs(urlparse(widget["url"]).query)["scale"][0]
                     for widget in payload["widgets"]
                 }
-                self.assertEqual(scales, {"auto"})
+                self.assertEqual(scales, {"1"})
+                for widget in payload["widgets"]:
+                    self.assertEqual(widget["reload_policy"], "stable")
+                    self.assertEqual(widget["fit_mode"], "production_auto")
+                    self.assertEqual(widget["fit_width"], 640)
+                    self.assertEqual(widget["fit_height"], 520)
+                    self.assertEqual(widget["fit_safety"], 0.97)
 
-    def test_seven_inventory_grid_uses_auto_scale_and_stable_iframes(self):
+    def test_seven_inventory_grid_uses_client_auto_fit_and_stable_iframes(self):
         payload = self._payload("576,577,578,579,580,581,582", scale_mode="auto")
         self.assertEqual((payload["columns"], payload["rows"]), (3, 3))
-        self.assertTrue(all(parse_qs(urlparse(widget["url"]).query)["scale"] == ["auto"] for widget in payload["widgets"]))
+        self.assertTrue(all(parse_qs(urlparse(widget["url"]).query)["scale"] == ["1"] for widget in payload["widgets"]))
+        self.assertTrue(all(widget["fit_mode"] == "production_auto" for widget in payload["widgets"]))
         self.assertTrue(all(widget["reload_policy"] == "stable" for widget in payload["widgets"]))
 
     def test_legacy_scale_is_manual_and_missing_scale_defaults_to_auto(self):
@@ -107,7 +114,7 @@ class TestProductionGrid(unittest.TestCase):
         self.assertEqual(automatic["scale_mode"], "auto")
         payload = self._payload("576,577,578,579", scale_mode="auto", scale=None)
         query = parse_qs(urlparse(payload["widgets"][0]["url"]).query)
-        self.assertEqual(query["scale"], ["auto"])
+        self.assertEqual(query["scale"], ["1"])
 
     def test_manual_mode_uses_stored_scale_for_every_widget(self):
         payload = self._payload("576,577,578,579", scale_mode="manual", scale=1.25)
@@ -116,6 +123,7 @@ class TestProductionGrid(unittest.TestCase):
             for widget in payload["widgets"]
         ]
         self.assertEqual(scales, ["1.25"] * 4)
+        self.assertTrue(all("fit_mode" not in widget for widget in payload["widgets"]))
 
     def test_production_grid_widget_api_and_device_specific_runtime_payload(self):
         client = self.main.app.test_client()
