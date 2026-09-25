@@ -31,6 +31,54 @@ MEDIA_EXTENSION_PATTERN = re.compile(
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
 WIDGET_VIEWER_LOG_NAME = "widget_viewer.log"
+_DPI_AWARENESS_MODE: str | None = None
+
+
+def _configure_windows_dpi_awareness() -> str:
+    """Enable the best available Windows per-monitor DPI mode, best-effort.
+
+    This must run before a WebView window is created.  The selected mode makes
+    window bounds and rendering accurate; it is not a production-card scale
+    input because WebView viewport measurements are already CSS pixels.
+    """
+    global _DPI_AWARENESS_MODE
+    if _DPI_AWARENESS_MODE is not None:
+        return _DPI_AWARENESS_MODE
+    if os.name != "nt":
+        _DPI_AWARENESS_MODE = "not-windows"
+        return _DPI_AWARENESS_MODE
+
+    mode = "unavailable"
+    try:
+        user32 = ctypes.windll.user32
+        modern_api = getattr(user32, "SetProcessDpiAwarenessContext", None)
+        if modern_api is not None and modern_api(ctypes.c_void_p(-4)):
+            mode = "per-monitor-v2"
+            _DPI_AWARENESS_MODE = mode
+            return mode
+    except Exception:
+        pass
+
+    try:
+        shcore = ctypes.windll.shcore
+        per_monitor_api = getattr(shcore, "SetProcessDpiAwareness", None)
+        if per_monitor_api is not None and per_monitor_api(2) == 0:
+            mode = "per-monitor"
+            _DPI_AWARENESS_MODE = mode
+            return mode
+    except Exception:
+        pass
+
+    try:
+        user32 = ctypes.windll.user32
+        legacy_api = getattr(user32, "SetProcessDPIAware", None)
+        if legacy_api is not None and legacy_api():
+            mode = "system-aware"
+    except Exception:
+        pass
+
+    _DPI_AWARENESS_MODE = mode
+    return mode
 
 
 def _resolve_widget_viewer_log_path() -> Path:
@@ -755,11 +803,13 @@ def _start_with_pywebview(
     start_hidden: bool = False,
     monitor_bounds: tuple[int, int, int, int] | None = None,
 ) -> None:
+    dpi_awareness_mode = _configure_windows_dpi_awareness()
     import webview
     debug_bridge = _WidgetEngineDebugBridge()
     _debug_log(
         "pywebview create_window request | "
-        f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
+        f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds} "
+        f"dpi_awareness={dpi_awareness_mode}"
     )
 
     window_kwargs: dict = {
@@ -887,6 +937,9 @@ def _start_with_pywebview(
 
 
 def main() -> int:
+    # DPI mode is process-wide and must be selected before importing/creating
+    # any GUI backend or WebView window.
+    dpi_awareness_mode = _configure_windows_dpi_awareness()
     if len(sys.argv) < 2:
         _safe_print("Kullanım: widget_viewer.py <widget_url>")
         return 2
@@ -902,7 +955,7 @@ def main() -> int:
     monitor_bounds = runtime_options.monitor_bounds
     _debug_log(
         f"main start | argv={sys.argv} runtime_ipc={runtime_ipc} "
-        f"start_hidden={start_hidden} monitor_bounds={monitor_bounds}"
+        f"start_hidden={start_hidden} monitor_bounds={monitor_bounds} dpi_awareness={dpi_awareness_mode}"
     )
 
     try:
