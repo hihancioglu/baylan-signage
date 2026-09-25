@@ -42,6 +42,16 @@ class TestProductionGrid(unittest.TestCase):
                     aliases,
                 )
 
+    def test_all_production_iframes_use_stable_reload_policy(self):
+        for count in (1, 4, 6):
+            inventory_ids = ",".join(str(576 + index) for index in range(count))
+            with self.subTest(count=count):
+                widgets = self._payload(inventory_ids)["widgets"]
+                self.assertEqual(len(widgets), count)
+                self.assertTrue(all(widget["type"] == "iframe" for widget in widgets))
+                self.assertTrue(all(widget["reload_policy"] == "stable" for widget in widgets))
+                self.assertTrue(all("refreshInterval=30" in widget["url"] for widget in widgets))
+
     def test_duplicate_inventory_ids_are_removed_by_existing_parser(self):
         payload = self._payload("576,577,576")
         self.assertEqual(len(payload["widgets"]), 2)

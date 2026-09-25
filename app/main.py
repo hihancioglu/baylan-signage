@@ -938,7 +938,11 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
         "columns": columns,
         "rows": rows,
         "widgets": [
-            {"type": "iframe", "url": _production_widget_url(config, inventory_id, effective_scale)}
+            {
+                "type": "iframe",
+                "url": _production_widget_url(config, inventory_id, effective_scale),
+                "reload_policy": "stable",
+            }
             for inventory_id in inventory_ids
         ],
     }
