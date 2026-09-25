@@ -10,6 +10,41 @@ from client import widget_viewer
 
 
 class TestWidgetViewer(unittest.TestCase):
+    def setUp(self):
+        widget_viewer._DPI_AWARENESS_MODE = None
+
+    def test_dpi_awareness_is_noop_off_windows(self):
+        with patch("client.widget_viewer.os.name", "posix"):
+            self.assertEqual(widget_viewer._configure_windows_dpi_awareness(), "not-windows")
+
+    def test_dpi_awareness_prefers_per_monitor_v2(self):
+        fake_user32 = unittest.mock.Mock()
+        fake_user32.SetProcessDpiAwarenessContext.return_value = True
+        fake_windll = unittest.mock.Mock(user32=fake_user32)
+        with patch("client.widget_viewer.os.name", "nt"), patch.object(widget_viewer.ctypes, "windll", fake_windll, create=True):
+            self.assertEqual(widget_viewer._configure_windows_dpi_awareness(), "per-monitor-v2")
+        fake_user32.SetProcessDpiAwarenessContext.assert_called_once()
+
+    def test_dpi_awareness_falls_back_to_shcore(self):
+        fake_user32 = unittest.mock.Mock()
+        fake_user32.SetProcessDpiAwarenessContext.return_value = False
+        fake_shcore = unittest.mock.Mock()
+        fake_shcore.SetProcessDpiAwareness.return_value = 0
+        fake_windll = unittest.mock.Mock(user32=fake_user32, shcore=fake_shcore)
+        with patch("client.widget_viewer.os.name", "nt"), patch.object(widget_viewer.ctypes, "windll", fake_windll, create=True):
+            self.assertEqual(widget_viewer._configure_windows_dpi_awareness(), "per-monitor")
+        fake_shcore.SetProcessDpiAwareness.assert_called_once_with(2)
+
+    def test_dpi_awareness_falls_back_to_legacy_without_crashing(self):
+        fake_user32 = unittest.mock.Mock()
+        fake_user32.SetProcessDpiAwarenessContext.side_effect = OSError("unsupported")
+        fake_user32.SetProcessDPIAware.return_value = True
+        fake_shcore = unittest.mock.Mock()
+        fake_shcore.SetProcessDpiAwareness.side_effect = OSError("unsupported")
+        fake_windll = unittest.mock.Mock(user32=fake_user32, shcore=fake_shcore)
+        with patch("client.widget_viewer.os.name", "nt"), patch.object(widget_viewer.ctypes, "windll", fake_windll, create=True):
+            self.assertEqual(widget_viewer._configure_windows_dpi_awareness(), "system-aware")
+
     def test_gui_candidates_default_includes_auto_and_edge(self):
         with patch.dict("os.environ", {}, clear=False):
             candidates = widget_viewer._gui_candidates()

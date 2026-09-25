@@ -135,6 +135,28 @@
       }
     }
 
+    let productionViewportLogTimer = null;
+    function logProductionViewports() {
+      if (!debugEnabled) return;
+      window.clearTimeout(productionViewportLogTimer);
+      productionViewportLogTimer = window.setTimeout(() => {
+        document.querySelectorAll('iframe[data-instance-src]').forEach((frame) => {
+          let url;
+          try { url = new URL(frame.dataset.instanceSrc, window.location.href); } catch (_err) { return; }
+          if (!url.pathname.includes('/automation/production-widget')) return;
+          const bounds = frame.getBoundingClientRect();
+          debugLog('production viewport', {
+            physical: `${Math.round(window.innerWidth * window.devicePixelRatio)}x${Math.round(window.innerHeight * window.devicePixelRatio)}`,
+            css: `${Math.round(bounds.width)}x${Math.round(bounds.height)}`,
+            devicePixelRatio: window.devicePixelRatio,
+            scale_mode: url.searchParams.get('scale') === 'auto' ? 'auto' : 'manual',
+            widgetIndex: Number(frame.dataset.widgetIndex || -1),
+          });
+        });
+      }, 150);
+    }
+    window.addEventListener('resize', logProductionViewports);
+
     function parseSpanValue(widget, keys, fallback = 1) {
       if (!widget || typeof widget !== "object") return fallback;
       for (const key of keys) {
@@ -205,6 +227,7 @@
           url: source,
         });
         frame.src = source;
+        logProductionViewports();
       });
       return source;
     }

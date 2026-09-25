@@ -826,8 +826,6 @@ def _parse_inventory_ids(value) -> list[str]:
 
 PRODUCTION_WIDGET_BASE_URL = "https://hub.baylan.info.tr/automation/production-widget"
 PRODUCTION_GRID_BASE_SCALE = 2.8
-MIN_AUTO_SCALE = 0.5
-MAX_AUTO_SCALE = 2.8
 
 
 def _production_grid_dimensions(count: int) -> tuple[int, int]:
@@ -849,13 +847,6 @@ def _production_grid_dimensions(count: int) -> tuple[int, int]:
     columns = math.ceil(math.sqrt(count * 16 / 9))
     rows = math.ceil(count / columns)
     return columns, rows
-
-
-def _production_grid_auto_scale(columns: int, rows: int) -> float:
-    """Return a bounded scale suited to the largest production-grid dimension."""
-    divisor = max(1, int(columns or 0), int(rows or 0))
-    scale = PRODUCTION_GRID_BASE_SCALE / divisor
-    return round(min(MAX_AUTO_SCALE, max(MIN_AUTO_SCALE, scale)), 2)
 
 
 def _production_grid_config(content) -> dict:
@@ -928,11 +919,10 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
         }
 
     columns, rows = _production_grid_dimensions(len(inventory_ids))
-    effective_scale = (
-        _production_grid_auto_scale(columns, rows)
-        if config["scale_mode"] == "auto"
-        else config["scale"]
-    )
+    # The Hub page can measure the actual CSS viewport of each iframe.  Grid
+    # dimensions are deliberately only layout metadata; deriving a numeric
+    # scale from them cannot account for the viewport, engine gaps, or DPI.
+    effective_scale = "auto" if config["scale_mode"] == "auto" else config["scale"]
     return {
         "name": name,
         "columns": columns,
