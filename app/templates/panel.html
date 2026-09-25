@@ -1252,8 +1252,12 @@ function parseInventoryIds(value){
 const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
 const PRODUCTION_GRID_BASE_SCALE = 2.8;
 const PRODUCTION_AUTO_HUB_SCALE = 1.0;
-const PRODUCTION_FIT_BASE_WIDTH = 620;
-const PRODUCTION_FIT_BASE_HEIGHT = 500;
+const PRODUCTION_FIT_VIEWPORT_WIDTH = 620;
+const PRODUCTION_FIT_VIEWPORT_HEIGHT = 500;
+const PRODUCTION_FIT_CONTENT_WIDTH = 394;
+const PRODUCTION_FIT_CONTENT_HEIGHT = 326;
+const PRODUCTION_FIT_CONTENT_CENTER_X = 310;
+const PRODUCTION_FIT_CONTENT_CENTER_Y = 226;
 const PRODUCTION_FIT_SAFETY = 0.995;
 
 function productionGridDimensions(count){
@@ -2058,7 +2062,7 @@ function updateWidgetPreview(){
       .live-frame{width:100%;height:100%;border:0;background:#000;display:block;}
       .dashboard-wrap{display:grid;gap:10px;padding:10px;box-sizing:border-box;grid-template-columns:repeat(var(--cols,1), minmax(0,1fr));grid-auto-rows:minmax(0,1fr);}
       .dashboard-cell{background:#0f172a;border-radius:8px;overflow:hidden;min-height:0;min-width:0;position:relative;}
-      .production-fit-stage{position:absolute;left:50%;top:50%;transform-origin:center center;}
+      .production-fit-stage{position:absolute;transform-origin:0 0;}
       .production-fit-stage .live-frame{width:100%;height:100%;}
       .dashboard-cell-empty{display:flex;align-items:center;justify-content:center;color:#64748b;font-size:15px;border:1px dashed rgba(148,163,184,.35);background:rgba(15,23,42,.7);}
       .warning{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box;color:#fecaca;background:#450a0a;text-align:center;}
@@ -2169,8 +2173,12 @@ function updateWidgetPreview(){
           const widget = {type: 'iframe', url: url.toString()};
           if(autoFit){
             widget.fit_mode = 'production_auto';
-            widget.fit_width = PRODUCTION_FIT_BASE_WIDTH;
-            widget.fit_height = PRODUCTION_FIT_BASE_HEIGHT;
+            widget.fit_viewport_width = PRODUCTION_FIT_VIEWPORT_WIDTH;
+            widget.fit_viewport_height = PRODUCTION_FIT_VIEWPORT_HEIGHT;
+            widget.fit_content_width = PRODUCTION_FIT_CONTENT_WIDTH;
+            widget.fit_content_height = PRODUCTION_FIT_CONTENT_HEIGHT;
+            widget.fit_content_center_x = PRODUCTION_FIT_CONTENT_CENTER_X;
+            widget.fit_content_center_y = PRODUCTION_FIT_CONTENT_CENTER_Y;
             widget.fit_safety = PRODUCTION_FIT_SAFETY;
           }
           return widget;
@@ -2191,7 +2199,7 @@ function updateWidgetPreview(){
       const rowSpan = Math.max(1, Number(w?.row_span || w?.rowspan || w?.merge_rows || 1) || 1);
       if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: '', colSpan, rowSpan};
       const widgetType = String(w.type || '').toLowerCase();
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan, fitMode: String(w.fit_mode || ''), fitWidth: Number(w.fit_width), fitHeight: Number(w.fit_height), fitSafety: Number(w.fit_safety)};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan, fitMode: String(w.fit_mode || ''), viewportWidth: Number(w.fit_viewport_width || w.fit_width), viewportHeight: Number(w.fit_viewport_height || w.fit_height), contentWidth: Number(w.fit_content_width), contentHeight: Number(w.fit_content_height), contentCenterX: Number(w.fit_content_center_x), contentCenterY: Number(w.fit_content_center_y), fitSafety: Number(w.fit_safety)};
       if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'playlist') return {type: 'playlist', source: `playlist:${String(w.playlist_id || '').trim()}`, colSpan, rowSpan};
@@ -2227,14 +2235,18 @@ function updateWidgetPreview(){
       const url = normalizeUrl(cell.source);
       if(!url) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
       if(cell.fitMode === 'production_auto'){
-        const fitWidth = cell.fitWidth > 0 ? cell.fitWidth : PRODUCTION_FIT_BASE_WIDTH;
-        const fitHeight = cell.fitHeight > 0 ? cell.fitHeight : PRODUCTION_FIT_BASE_HEIGHT;
+        const viewportWidth = cell.viewportWidth > 0 ? cell.viewportWidth : PRODUCTION_FIT_VIEWPORT_WIDTH;
+        const viewportHeight = cell.viewportHeight > 0 ? cell.viewportHeight : PRODUCTION_FIT_VIEWPORT_HEIGHT;
+        const contentWidth = cell.contentWidth > 0 ? cell.contentWidth : PRODUCTION_FIT_CONTENT_WIDTH;
+        const contentHeight = cell.contentHeight > 0 ? cell.contentHeight : PRODUCTION_FIT_CONTENT_HEIGHT;
+        const contentCenterX = Number.isFinite(cell.contentCenterX) && cell.contentCenterX > 0 ? cell.contentCenterX : PRODUCTION_FIT_CONTENT_CENTER_X;
+        const contentCenterY = Number.isFinite(cell.contentCenterY) && cell.contentCenterY > 0 ? cell.contentCenterY : PRODUCTION_FIT_CONTENT_CENTER_Y;
         const fitSafety = cell.fitSafety > 0 ? cell.fitSafety : PRODUCTION_FIT_SAFETY;
-        return `<div class="dashboard-cell production-auto-fit" data-fit-width="${fitWidth}" data-fit-height="${fitHeight}" data-fit-safety="${fitSafety}"${spanStyle}><div class="production-fit-stage" style="width:${fitWidth}px;height:${fitHeight}px"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div></div>`;
+        return `<div class="dashboard-cell production-auto-fit" data-content-width="${contentWidth}" data-content-height="${contentHeight}" data-content-center-x="${contentCenterX}" data-content-center-y="${contentCenterY}" data-fit-safety="${fitSafety}"${spanStyle}><div class="production-fit-stage" style="width:${viewportWidth}px;height:${viewportHeight}px"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div></div>`;
       }
       return `<div class="dashboard-cell"${spanStyle}><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
     }).join('');
-    const previewFitScript = `<script>(()=>{document.querySelectorAll('.production-auto-fit').forEach((wrapper)=>{const stage=wrapper.querySelector('.production-fit-stage');const update=()=>{const rect=wrapper.getBoundingClientRect();const width=Number(wrapper.dataset.fitWidth);const height=Number(wrapper.dataset.fitHeight);const safety=Number(wrapper.dataset.fitSafety);if(rect.width<=0||rect.height<=0||width<=0||height<=0)return;const scaleX=rect.width/width;const scaleY=rect.height/height;const scale=Math.min(scaleX,scaleY)*safety;if(scale>0)stage.style.transform='translate(-50%, -50%) scale('+scale+')';};new ResizeObserver(update).observe(wrapper);update();});})();<\/script>`;
+    const previewFitScript = `<script>(()=>{document.querySelectorAll('.production-auto-fit').forEach((wrapper)=>{const stage=wrapper.querySelector('.production-fit-stage');const update=()=>{const rect=wrapper.getBoundingClientRect();const width=Number(wrapper.dataset.contentWidth);const height=Number(wrapper.dataset.contentHeight);const centerX=Number(wrapper.dataset.contentCenterX);const centerY=Number(wrapper.dataset.contentCenterY);const safety=Number(wrapper.dataset.fitSafety);if(rect.width<=0||rect.height<=0||width<=0||height<=0)return;const scaleX=rect.width/width;const scaleY=rect.height/height;const scale=Math.min(scaleX,scaleY)*safety;if(scale>0){stage.style.left=(rect.width/2-centerX*scale)+'px';stage.style.top=(rect.height/2-centerY*scale)+'px';stage.style.transform='scale('+scale+')';}};new ResizeObserver(update).observe(wrapper);update();});})();<\/script>`;
     renderPreviewDoc(`<div class="dashboard-wrap root" style="--cols:${cols};grid-template-rows:repeat(${rows}, minmax(0,1fr));">${cellsHtml}</div>${previewFitScript}`);
     return;
   }

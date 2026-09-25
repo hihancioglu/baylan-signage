@@ -192,7 +192,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
     def test_production_auto_fit_metadata_survives_viewer_normalization(self):
-        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 620, "fit_height": 500, "fit_safety": 0.995}
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_viewport_width": 620, "fit_viewport_height": 500, "fit_content_width": 394, "fit_content_height": 326, "fit_content_center_x": 310, "fit_content_center_y": 226, "fit_safety": 0.995}
         result = widget_viewer._normalize_widget_payload({"widgets": [widget]})
 
         self.assertEqual(result["widgets"][0], widget)
@@ -203,7 +203,9 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertIn("new ResizeObserver(updateFit)", fit_helper)
         self.assertIn("Math.min(scaleX, scaleY) * fitSafety", fit_helper)
-        self.assertIn("scale(${baseScale})", fit_helper)
+        self.assertIn("const scaleX = usableCellWidth / contentWidth;", fit_helper)
+        self.assertIn("const scaleY = usableCellHeight / contentHeight;", fit_helper)
+        self.assertIn("scale(${scale})", fit_helper)
         self.assertNotIn("contentZoom", fit_helper)
         self.assertNotIn("finalScale", fit_helper)
         self.assertNotIn("Math.min(1", fit_helper)
@@ -216,16 +218,18 @@ class TestWidgetViewer(unittest.TestCase):
         fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
 
         self.assertIn(".production-auto-fit { position: relative; overflow: hidden; }", engine)
-        self.assertIn(".production-fit-stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; }", engine)
-        self.assertIn("finiteFitNumber(widget.fit_offset_x, 0)", fit_helper)
-        self.assertIn("finiteFitNumber(widget.fit_offset_y, 0)", fit_helper)
-        self.assertIn("translate(-50%, -50%)", fit_helper)
+        self.assertIn(".production-fit-stage { position: absolute; transform-origin: 0 0; }", engine)
+        self.assertIn("const stageLeft = targetCenterX - (contentCenterX * scale);", fit_helper)
+        self.assertIn("const stageTop = targetCenterY - (contentCenterY * scale);", fit_helper)
+        self.assertNotIn("translate(-50%, -50%)", fit_helper)
 
     def test_widget_engine_single_production_fit_is_height_first_and_compact(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
-        self.assertIn("const PRODUCTION_FIT_BASE_WIDTH = 620;", engine)
-        self.assertIn("const PRODUCTION_FIT_BASE_HEIGHT = 500;", engine)
+        self.assertIn("const PRODUCTION_FIT_VIEWPORT_WIDTH = 620;", engine)
+        self.assertIn("const PRODUCTION_FIT_VIEWPORT_HEIGHT = 500;", engine)
+        self.assertIn("const PRODUCTION_FIT_CONTENT_WIDTH = 394;", engine)
+        self.assertIn("const PRODUCTION_FIT_CONTENT_HEIGHT = 326;", engine)
         self.assertIn("const PRODUCTION_FIT_SAFETY = 0.995;", engine)
         self.assertIn("function isSingleProductionAutoFitLayout(config)", engine)
         self.assertIn('String(widgets[0]?.type || "").toLowerCase() === "iframe"', engine)
@@ -234,7 +238,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn(".production-grid-stage { display: flex; flex-wrap: wrap;", engine)
         self.assertIn("const cols = singleCardFit ? 1", engine)
         self.assertIn("const targetRows = singleCardFit ? 1", engine)
-        self.assertIn('debugLog(\n          "production-runtime-fit"', engine)
+        self.assertIn('debugLog(\n          "production-content-fit"', engine)
         self.assertNotIn("single-card-fit", engine)
 
     def test_widget_engine_runtime_optimizes_production_grid_without_navigation(self):
@@ -243,6 +247,7 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertIn("for (let columns = 1; columns <= count; columns += 1)", optimizer)
         self.assertIn("const rows = Math.ceil(count / columns);", optimizer)
+        self.assertIn("const cardAspect = contentWidth / contentHeight;", optimizer)
         self.assertIn("const cellWidth = Math.min(maxCellWidthByScreen, maxCellHeightByScreen * cardAspect);", optimizer)
         self.assertIn("const score = cellWidth * cellHeight;", optimizer)
         self.assertIn('debugLog(\n          "production-grid-layout"', optimizer)
