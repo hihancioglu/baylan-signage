@@ -213,12 +213,17 @@ class TestWidgetViewer(unittest.TestCase):
     def test_widget_engine_single_production_fit_is_height_first_and_compact(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
-        self.assertIn("const SINGLE_CARD_HEIGHT_SAFETY = 0.985;", engine)
-        self.assertIn("const SINGLE_CARD_WIDTH_SAFETY = 0.998;", engine)
-        self.assertIn("function isSingleProductionAutoFitLayout(config, widget, widgetCount)", engine)
-        self.assertIn('String(widget?.type || "").toLowerCase() === "iframe"', engine)
-        self.assertIn('String(widget?.fit_mode || "") === "production_auto"', engine)
-        self.assertIn("#widgets.production-grid-single-fit { padding: 4px; gap: 0; }", engine)
+        self.assertIn("const SINGLE_CARD_HEIGHT_SAFETY = 0.995;", engine)
+        self.assertIn("const SINGLE_CARD_WIDTH_SAFETY = 0.999;", engine)
+        self.assertIn("const SINGLE_CARD_FIT_INSET = 2;", engine)
+        self.assertIn("function isSingleProductionAutoFitLayout(config)", engine)
+        self.assertIn('String(widgets[0]?.type || "").toLowerCase() === "iframe"', engine)
+        self.assertIn('String(widgets[0]?.fit_mode || "") === "production_auto"', engine)
+        self.assertIn("#widgets.production-grid-single-fit { padding: 0 !important; gap: 0 !important; }", engine)
+        self.assertIn("const cols = singleCardFit ? 1", engine)
+        self.assertIn("const targetRows = singleCardFit ? 1", engine)
+        self.assertIn("viewport:", engine)
+        self.assertIn("usable:", engine)
         self.assertIn('debugLog("production runtime fit single-card"', engine)
 
     def test_widget_engine_uses_controlled_iframe_recovery(self):
