@@ -13,7 +13,7 @@
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; }
     .production-auto-fit { position: relative; overflow: hidden; }
-    .production-fit-stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; }
+    .production-fit-stage { position: absolute; transform-origin: 0 0; }
     .production-fit-stage iframe { width: 100%; height: 100%; border: 0; }
     iframe.widget {
       width: 100%;
@@ -53,8 +53,12 @@
       return raw === "1" || raw === "true" || raw === "yes";
     })();
     const PRODUCTION_AUTO_HUB_SCALE = 1.0;
-    const PRODUCTION_FIT_BASE_WIDTH = 620;
-    const PRODUCTION_FIT_BASE_HEIGHT = 500;
+    const PRODUCTION_FIT_VIEWPORT_WIDTH = 620;
+    const PRODUCTION_FIT_VIEWPORT_HEIGHT = 500;
+    const PRODUCTION_FIT_CONTENT_WIDTH = 394;
+    const PRODUCTION_FIT_CONTENT_HEIGHT = 326;
+    const PRODUCTION_FIT_CONTENT_CENTER_X = 310;
+    const PRODUCTION_FIT_CONTENT_CENTER_Y = 226;
     const PRODUCTION_FIT_SAFETY = 0.995;
     const PRODUCTION_GRID_GAP = 4;
 
@@ -82,29 +86,39 @@
     }
 
     function setupProductionAutoFit(wrapper, stage, widget, widgetIndex, config) {
-      const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
-      const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
+      const viewportWidth = positiveFitNumber(widget.fit_viewport_width, positiveFitNumber(widget.fit_width, PRODUCTION_FIT_VIEWPORT_WIDTH));
+      const viewportHeight = positiveFitNumber(widget.fit_viewport_height, positiveFitNumber(widget.fit_height, PRODUCTION_FIT_VIEWPORT_HEIGHT));
+      const contentWidth = positiveFitNumber(widget.fit_content_width, PRODUCTION_FIT_CONTENT_WIDTH);
+      const contentHeight = positiveFitNumber(widget.fit_content_height, PRODUCTION_FIT_CONTENT_HEIGHT);
+      const contentCenterX = finiteFitNumber(widget.fit_content_center_x, PRODUCTION_FIT_CONTENT_CENTER_X);
+      const contentCenterY = finiteFitNumber(widget.fit_content_center_y, PRODUCTION_FIT_CONTENT_CENTER_Y);
       const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
-      const fitOffsetX = finiteFitNumber(widget.fit_offset_x, 0);
-      const fitOffsetY = finiteFitNumber(widget.fit_offset_y, 0);
-      stage.style.width = `${fitWidth}px`;
-      stage.style.height = `${fitHeight}px`;
-      stage.style.left = `calc(50% + ${fitOffsetX}px)`;
-      stage.style.top = `calc(50% + ${fitOffsetY}px)`;
+      stage.style.width = `${viewportWidth}px`;
+      stage.style.height = `${viewportHeight}px`;
 
       const updateFit = () => {
         const cellRect = wrapper.getBoundingClientRect();
-        if (cellRect.width <= 0 || cellRect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
-        const scaleX = cellRect.width / fitWidth;
-        const scaleY = cellRect.height / fitHeight;
-        const baseScale = Math.min(scaleX, scaleY) * fitSafety;
-        if (!Number.isFinite(baseScale) || baseScale <= 0) return;
-        stage.style.transform = `translate(-50%, -50%) scale(${baseScale})`;
+        if (cellRect.width <= 0 || cellRect.height <= 0) return;
+        const usableCellWidth = cellRect.width;
+        const usableCellHeight = cellRect.height;
+        const scaleX = usableCellWidth / contentWidth;
+        const scaleY = usableCellHeight / contentHeight;
+        const scale = Math.min(scaleX, scaleY) * fitSafety;
+        if (!Number.isFinite(scale) || scale <= 0) return;
+        const targetCenterX = cellRect.width / 2;
+        const targetCenterY = cellRect.height / 2;
+        const stageLeft = targetCenterX - (contentCenterX * scale);
+        const stageTop = targetCenterY - (contentCenterY * scale);
+        stage.style.left = `${stageLeft}px`;
+        stage.style.top = `${stageTop}px`;
+        stage.style.transform = `scale(${scale})`;
         debugLog(
-          "production-runtime-fit",
-          `index=${widgetIndex} | cell=${cellRect.width.toFixed(1)}x${cellRect.height.toFixed(1)} | ` +
-            `virtual=${fitWidth}x${fitHeight} | scaleX=${scaleX.toFixed(4)} | ` +
-            `scaleY=${scaleY.toFixed(4)} | effectiveScale=${baseScale.toFixed(4)}`
+          "production-content-fit",
+          `widgetIndex=${widgetIndex} | cell=${cellRect.width.toFixed(1)}x${cellRect.height.toFixed(1)} | ` +
+            `viewport=${viewportWidth}x${viewportHeight} | content=${contentWidth}x${contentHeight} | ` +
+            `contentCenter=${contentCenterX}x${contentCenterY} | scaleX=${scaleX.toFixed(3)} | ` +
+            `scaleY=${scaleY.toFixed(3)} | scale=${scale.toFixed(3)} | ` +
+            `stageLeft=${stageLeft.toFixed(1)} | stageTop=${stageTop.toFixed(1)}`
         );
       };
       const observer = new ResizeObserver(updateFit);
@@ -218,9 +232,9 @@
       const widgets = Array.isArray(config.widgets) ? config.widgets : [];
       const count = widgets.length;
       if (!count) return () => {};
-      const fitWidth = positiveFitNumber(widgets[0].fit_width, PRODUCTION_FIT_BASE_WIDTH);
-      const fitHeight = positiveFitNumber(widgets[0].fit_height, PRODUCTION_FIT_BASE_HEIGHT);
-      const cardAspect = fitWidth / fitHeight;
+      const contentWidth = positiveFitNumber(widgets[0].fit_content_width, PRODUCTION_FIT_CONTENT_WIDTH);
+      const contentHeight = positiveFitNumber(widgets[0].fit_content_height, PRODUCTION_FIT_CONTENT_HEIGHT);
+      const cardAspect = contentWidth / contentHeight;
 
       const updateLayout = () => {
         const viewport = container.getBoundingClientRect();
@@ -258,10 +272,8 @@
         debugLog(
           "production-grid-layout",
           `viewport=${Math.round(availableWidth)}x${Math.round(availableHeight)} | count=${count} | ` +
-            `selected=${selected.columns}x${selected.rows} | cardAspect=${cardAspect.toFixed(3)} | ` +
-            `cell=${selected.cellWidth.toFixed(1)}x${selected.cellHeight.toFixed(1)} | ` +
-            `virtual=${fitWidth}x${fitHeight} | hubScale=${PRODUCTION_AUTO_HUB_SCALE} | ` +
-            `outerScale=${(Math.min(selected.cellWidth / fitWidth, selected.cellHeight / fitHeight) * PRODUCTION_FIT_SAFETY).toFixed(3)}`
+            `cardAspect=${cardAspect.toFixed(3)} | selected=${selected.columns}x${selected.rows} | ` +
+            `cell=${selected.cellWidth.toFixed(1)}x${selected.cellHeight.toFixed(1)}`
         );
       };
       const observer = new ResizeObserver(updateLayout);

@@ -94,9 +94,15 @@ class TestProductionGrid(unittest.TestCase):
                 for widget in payload["widgets"]:
                     self.assertEqual(widget["reload_policy"], "stable")
                     self.assertEqual(widget["fit_mode"], "production_auto")
-                    self.assertEqual(widget["fit_width"], 620)
-                    self.assertEqual(widget["fit_height"], 500)
+                    self.assertEqual(widget["fit_viewport_width"], 620)
+                    self.assertEqual(widget["fit_viewport_height"], 500)
+                    self.assertEqual(widget["fit_content_width"], 394)
+                    self.assertEqual(widget["fit_content_height"], 326)
+                    self.assertEqual(widget["fit_content_center_x"], 310)
+                    self.assertEqual(widget["fit_content_center_y"], 226)
                     self.assertEqual(widget["fit_safety"], 0.995)
+                    self.assertNotIn("fit_width", widget)
+                    self.assertNotIn("fit_height", widget)
                     self.assertNotIn("fit_content_zoom", widget)
 
     def test_manual_mode_does_not_add_client_content_zoom_metadata(self):
