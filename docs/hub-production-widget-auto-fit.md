@@ -1,19 +1,19 @@
 # Signage-side `production-widget` Auto Fit
 
-No Baylan Hub change is required. Auto mode sends the Hub the readable design
-scale `2.8`. The Signage widget engine then fits the entire cross-origin iframe
-to each real grid cell.
+No Baylan Hub change is required. Auto mode keeps the Hub at its natural scale
+`1`. The Signage widget engine is the only scale authority and fits the entire
+cross-origin iframe to each real grid cell.
 
 ## Payload contract
 
-* Auto: `scale=2.8`, `reload_policy=stable`, `fit_mode=production_auto`, virtual
-  dimensions 1100×900, and safety factor 0.97.
+* Auto: `scale=1`, `reload_policy=stable`, `fit_mode=production_auto`, virtual
+  dimensions 620×500, and safety factor 0.995.
 * Manual: the configured numeric `scale` remains in the URL and no fit metadata
   is added.
 
 ## Runtime fit
 
-The engine places the iframe in an absolutely positioned 1100×900 virtual stage,
+The engine places the iframe in an absolutely positioned 620×500 virtual stage,
 centered in its grid-cell wrapper. It evaluates every possible column count from
 the real container size, selects the candidate with the largest card area, and
 uses a centered wrapping flex stage with a 4px gap. For every wrapper measurement

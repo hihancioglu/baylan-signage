@@ -20,7 +20,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
 
     def test_production_auto_fit_metadata_survives_player_normalization(self):
         player = self._build_player()
-        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 640, "fit_height": 520, "fit_safety": 0.97, "fit_content_zoom": 1.55}
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 620, "fit_height": 500, "fit_safety": 0.995}
 
         result = player._normalize_widget_payload({"widgets": [widget]})
 

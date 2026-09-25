@@ -826,11 +826,10 @@ def _parse_inventory_ids(value) -> list[str]:
 
 PRODUCTION_WIDGET_BASE_URL = "https://hub.baylan.info.tr/automation/production-widget"
 PRODUCTION_GRID_BASE_SCALE = 2.8
-PRODUCTION_AUTO_HUB_SCALE = 2.8
-PRODUCTION_FIT_BASE_WIDTH = 1100
-PRODUCTION_FIT_BASE_HEIGHT = 900
-PRODUCTION_FIT_SAFETY = 0.97
-PRODUCTION_FIT_CONTENT_ZOOM = 1.55
+PRODUCTION_AUTO_HUB_SCALE = 1
+PRODUCTION_FIT_BASE_WIDTH = 620
+PRODUCTION_FIT_BASE_HEIGHT = 500
+PRODUCTION_FIT_SAFETY = 0.995
 
 
 def _production_grid_dimensions(count: int) -> tuple[int, int]:
@@ -925,8 +924,8 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
 
     columns, rows = _production_grid_dimensions(len(inventory_ids))
     auto_fit = config["scale_mode"] == "auto"
-    # Hub renders the production card at a readable design scale. The signage
-    # client then fits that complete virtual canvas to the measured CSS viewport.
+    # Auto mode keeps the Hub at its natural scale. The signage client is the
+    # sole scaling authority and fits the complete virtual canvas to each cell.
     effective_scale = PRODUCTION_AUTO_HUB_SCALE if auto_fit else config["scale"]
 
     def production_widget(inventory_id: str) -> dict:
@@ -941,7 +940,6 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
                 "fit_width": PRODUCTION_FIT_BASE_WIDTH,
                 "fit_height": PRODUCTION_FIT_BASE_HEIGHT,
                 "fit_safety": PRODUCTION_FIT_SAFETY,
-                "fit_content_zoom": PRODUCTION_FIT_CONTENT_ZOOM,
             })
         return widget
 
