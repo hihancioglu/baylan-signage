@@ -192,7 +192,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
     def test_production_auto_fit_metadata_survives_viewer_normalization(self):
-        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 640, "fit_height": 520, "fit_safety": 0.97}
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 1100, "fit_height": 900, "fit_safety": 0.97}
         result = widget_viewer._normalize_widget_payload({"widgets": [widget]})
 
         self.assertEqual(result["widgets"][0], widget)
@@ -219,14 +219,25 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn("function isSingleProductionAutoFitLayout(config)", engine)
         self.assertIn('String(widgets[0]?.type || "").toLowerCase() === "iframe"', engine)
         self.assertIn('String(widgets[0]?.fit_mode || "") === "production_auto"', engine)
-        self.assertIn("#widgets.production-grid-single-fit { padding: 0 !important; gap: 0 !important; }", engine)
-        self.assertIn("#widgets.production-grid-single-fit > .widget { width: 100%; height: 100%;", engine)
-        self.assertIn("#widgets.production-grid-single-fit > .production-auto-fit { inset: 0; }", engine)
+        self.assertIn("#widgets.production-grid-layout { display: flex; padding: 0; gap: 0; }", engine)
+        self.assertIn(".production-grid-stage { display: flex; flex-wrap: wrap;", engine)
         self.assertIn("const cols = singleCardFit ? 1", engine)
         self.assertIn("const targetRows = singleCardFit ? 1", engine)
         self.assertIn('debugLog(\n            "single-card-fit"', engine)
         self.assertIn("`viewport=${Math.round(viewportRect.width)}x${Math.round(viewportRect.height)} | `", engine)
         self.assertIn("`usable=${Math.round(usableWidth)}x${Math.round(usableHeight)} | `", engine)
+
+    def test_widget_engine_runtime_optimizes_production_grid_without_navigation(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        optimizer = engine.split("function optimizeProductionGrid", 1)[1].split("let productionViewportLogTimer", 1)[0]
+
+        self.assertIn("for (let columns = 1; columns <= count; columns += 1)", optimizer)
+        self.assertIn("const rows = Math.ceil(count / columns);", optimizer)
+        self.assertIn("const cellWidth = Math.min(maxCellWidthByScreen, maxCellHeightByScreen * cardAspect);", optimizer)
+        self.assertIn("const score = cellWidth * cellHeight;", optimizer)
+        self.assertIn('debugLog(\n          "production-grid-layout"', optimizer)
+        self.assertIn("new ResizeObserver(updateLayout)", optimizer)
+        self.assertNotIn("frame.src", optimizer)
 
     def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")

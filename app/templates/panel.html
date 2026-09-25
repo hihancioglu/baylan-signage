@@ -1251,8 +1251,9 @@ function parseInventoryIds(value){
 
 const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
 const PRODUCTION_GRID_BASE_SCALE = 2.8;
-const PRODUCTION_FIT_BASE_WIDTH = 640;
-const PRODUCTION_FIT_BASE_HEIGHT = 520;
+const PRODUCTION_AUTO_HUB_SCALE = 2.8;
+const PRODUCTION_FIT_BASE_WIDTH = 1100;
+const PRODUCTION_FIT_BASE_HEIGHT = 900;
 const PRODUCTION_FIT_SAFETY = 0.97;
 
 function productionGridDimensions(count){
@@ -2151,7 +2152,7 @@ function updateWidgetPreview(){
       const inventoryIds = parseInventoryIds(device?.inventory_id);
       const dimensions = productionGridDimensions(inventoryIds.length);
       const autoFit = productionConfig.scale_mode === 'auto';
-      const effectiveScale = autoFit ? '1' : productionConfig.scale;
+      const effectiveScale = autoFit ? PRODUCTION_AUTO_HUB_SCALE : productionConfig.scale;
       config = {
         columns: dimensions.columns,
         rows: dimensions.rows,

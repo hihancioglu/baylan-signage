@@ -7,9 +7,9 @@
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
-    #widgets.production-grid-single-fit { padding: 0 !important; gap: 0 !important; }
-    #widgets.production-grid-single-fit > .widget { width: 100%; height: 100%; margin: 0; border-radius: 0; }
-    #widgets.production-grid-single-fit > .production-auto-fit { inset: 0; }
+    #widgets.production-grid-layout { display: flex; padding: 0; gap: 0; }
+    .production-grid-stage { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 4px; margin: auto; }
+    .production-grid-stage > .widget { flex: 0 0 auto; margin: 0; border-radius: 0; }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; }
     .production-auto-fit { position: relative; overflow: hidden; }
@@ -52,9 +52,11 @@
       const raw = String(params.get("debug") || "").trim().toLowerCase();
       return raw === "1" || raw === "true" || raw === "yes";
     })();
-    const PRODUCTION_FIT_BASE_WIDTH = 640;
-    const PRODUCTION_FIT_BASE_HEIGHT = 520;
+    const PRODUCTION_AUTO_HUB_SCALE = 2.8;
+    const PRODUCTION_FIT_BASE_WIDTH = 1100;
+    const PRODUCTION_FIT_BASE_HEIGHT = 900;
     const PRODUCTION_FIT_SAFETY = 0.97;
+    const PRODUCTION_GRID_GAP = 4;
     const SINGLE_CARD_HEIGHT_SAFETY = 0.998;
     const SINGLE_CARD_WIDTH_SAFETY = 0.999;
     const SINGLE_CARD_FIT_INSET = 2;
@@ -227,6 +229,11 @@
         singleCardFit
       );
 
+      if (allProductionAutoFit) {
+        container.style.removeProperty("grid-template-rows");
+        return;
+      }
+
       const minRows = Number(config.rows || 0);
       const targetRows = singleCardFit ? 1 : Math.max(minRows, Math.ceil(widgetCount / cols));
       if (targetRows > 0) {
@@ -234,6 +241,61 @@
       } else {
         container.style.removeProperty("grid-template-rows");
       }
+    }
+
+    function optimizeProductionGrid(container, stage, config) {
+      const widgets = Array.isArray(config.widgets) ? config.widgets : [];
+      const count = widgets.length;
+      if (!count) return () => {};
+      const fitWidth = positiveFitNumber(widgets[0].fit_width, PRODUCTION_FIT_BASE_WIDTH);
+      const fitHeight = positiveFitNumber(widgets[0].fit_height, PRODUCTION_FIT_BASE_HEIGHT);
+      const cardAspect = fitWidth / fitHeight;
+
+      const updateLayout = () => {
+        const viewport = container.getBoundingClientRect();
+        const availableWidth = viewport.width;
+        const availableHeight = viewport.height;
+        if (availableWidth <= 0 || availableHeight <= 0) return;
+        let selected = null;
+        const candidates = [];
+        for (let columns = 1; columns <= count; columns += 1) {
+          const rows = Math.ceil(count / columns);
+          const maxCellWidthByScreen = (availableWidth - ((columns - 1) * PRODUCTION_GRID_GAP)) / columns;
+          const maxCellHeightByScreen = (availableHeight - ((rows - 1) * PRODUCTION_GRID_GAP)) / rows;
+          const cellWidth = Math.min(maxCellWidthByScreen, maxCellHeightByScreen * cardAspect);
+          const cellHeight = cellWidth / cardAspect;
+          const score = cellWidth * cellHeight;
+          const candidate = { columns, rows, cellWidth, cellHeight, score, emptySlots: (columns * rows) - count };
+          candidates.push(candidate);
+          if (
+            !selected ||
+            score > selected.score * 1.005 ||
+            (score >= selected.score * 0.995 && candidate.emptySlots < selected.emptySlots)
+          ) selected = candidate;
+        }
+        if (!selected || selected.cellWidth <= 0 || selected.cellHeight <= 0) return;
+        stage.style.width = `${(selected.columns * selected.cellWidth) + ((selected.columns - 1) * PRODUCTION_GRID_GAP)}px`;
+        stage.style.height = `${(selected.rows * selected.cellHeight) + ((selected.rows - 1) * PRODUCTION_GRID_GAP)}px`;
+        stage.querySelectorAll(":scope > .production-auto-fit").forEach((wrapper) => {
+          wrapper.style.width = `${selected.cellWidth}px`;
+          wrapper.style.height = `${selected.cellHeight}px`;
+        });
+        candidates.forEach((candidate) => debugLog(
+          "production-grid-candidate",
+          `${candidate.columns}x${candidate.rows} score=${candidate.score.toFixed(1)} empty=${candidate.emptySlots}`
+        ));
+        debugLog(
+          "production-grid-layout",
+          `viewport=${Math.round(availableWidth)}x${Math.round(availableHeight)} | count=${count} | ` +
+            `selected=${selected.columns}x${selected.rows} | cardAspect=${cardAspect.toFixed(3)} | ` +
+            `cell=${selected.cellWidth.toFixed(1)}x${selected.cellHeight.toFixed(1)} | ` +
+            `hubScale=${PRODUCTION_AUTO_HUB_SCALE} | outerScale=${(selected.cellWidth / fitWidth).toFixed(3)}`
+        );
+      };
+      const observer = new ResizeObserver(updateLayout);
+      observer.observe(container);
+      updateLayout();
+      return () => observer.disconnect();
     }
 
     let productionViewportLogTimer = null;
@@ -890,6 +952,7 @@
 
     function loadWidgets(config) {
       const container = document.getElementById("widgets");
+      if (typeof container.__productionGridCleanup === "function") container.__productionGridCleanup();
       cleanupMediaElements(container);
       container.innerHTML = "";
       const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
@@ -898,6 +961,13 @@
       const singleIframeMode =
         widgetCount === 1 &&
         String((config.widgets[0] && config.widgets[0].type) || "").toLowerCase() === "iframe";
+      const productionGrid = widgetCount > 0 && config.widgets.every(isProductionAutoFitWidget);
+      const productionStage = productionGrid ? document.createElement("div") : null;
+      if (productionStage) {
+        productionStage.className = "production-grid-stage";
+        container.appendChild(productionStage);
+      }
+      const widgetHost = productionStage || container;
 
       (config.widgets || []).forEach((w, index) => {
         if (isCellCoveredByPreviousSpan(config.widgets, index, cols)) {
@@ -992,7 +1062,7 @@
               window.location.replace(w.url);
             }
           });
-          container.appendChild(wrapper);
+          widgetHost.appendChild(wrapper);
           return;
         }
         if (widgetType === "card") {
@@ -1005,7 +1075,7 @@
             card.style.gridRow = `span ${rowSpan}`;
           }
           card.innerHTML = w.html || "";
-          container.appendChild(card);
+          widgetHost.appendChild(card);
           return;
         }
         if (widgetType === "embed") {
@@ -1028,7 +1098,7 @@
             }
             scriptNode.replaceWith(runnable);
           });
-          container.appendChild(embed);
+          widgetHost.appendChild(embed);
           return;
         }
         if (widgetType === "video" || widgetType === "image") {
@@ -1039,7 +1109,7 @@
           if (rowSpan > 1) {
             mediaWidget.style.gridRow = `span ${rowSpan}`;
           }
-          container.appendChild(mediaWidget);
+          widgetHost.appendChild(mediaWidget);
           return;
         }
         if (widgetType === "playlist") {
@@ -1050,7 +1120,7 @@
           if (rowSpan > 1) {
             playlistWidget.style.gridRow = `span ${rowSpan}`;
           }
-          container.appendChild(playlistWidget);
+          widgetHost.appendChild(playlistWidget);
           return;
         }
         if (widgetType === "empty") {
@@ -1062,10 +1132,13 @@
           if (rowSpan > 1) {
             empty.style.gridRow = `span ${rowSpan}`;
           }
-          container.appendChild(empty);
+          widgetHost.appendChild(empty);
           return;
         }
       });
+      if (productionStage) {
+        container.__productionGridCleanup = optimizeProductionGrid(container, productionStage, config);
+      }
     }
 
     function syncPlaylistCache(syncPayload) {
