@@ -825,6 +825,9 @@ def _parse_inventory_ids(value) -> list[str]:
 
 
 PRODUCTION_WIDGET_BASE_URL = "https://hub.baylan.info.tr/automation/production-widget"
+PRODUCTION_GRID_BASE_SCALE = 2.8
+MIN_AUTO_SCALE = 0.5
+MAX_AUTO_SCALE = 2.8
 
 
 def _production_grid_dimensions(count: int) -> tuple[int, int]:
@@ -848,12 +851,20 @@ def _production_grid_dimensions(count: int) -> tuple[int, int]:
     return columns, rows
 
 
+def _production_grid_auto_scale(columns: int, rows: int) -> float:
+    """Return a bounded scale suited to the largest production-grid dimension."""
+    divisor = max(1, int(columns or 0), int(rows or 0))
+    scale = PRODUCTION_GRID_BASE_SCALE / divisor
+    return round(min(MAX_AUTO_SCALE, max(MIN_AUTO_SCALE, scale)), 2)
+
+
 def _production_grid_config(content) -> dict:
     defaults = {
         "base_url": PRODUCTION_WIDGET_BASE_URL,
         "theme": "light",
         "refresh_interval": 30,
-        "scale": None,
+        "scale_mode": "auto",
+        "scale": PRODUCTION_GRID_BASE_SCALE,
     }
     try:
         parsed = json.loads(content) if isinstance(content, str) else content
@@ -873,15 +884,21 @@ def _production_grid_config(content) -> dict:
     scale = parsed.get("scale")
     if scale is not None:
         scale = str(scale).strip() or None
+    scale_mode = parsed.get("scale_mode")
+    if scale_mode not in {"auto", "manual"}:
+        # Legacy configurations controlled scale directly. Preserve their
+        # appearance by interpreting a populated scale as manual mode.
+        scale_mode = "manual" if scale is not None else "auto"
     return {
         "base_url": base_url,
         "theme": theme,
         "refresh_interval": refresh_interval,
+        "scale_mode": scale_mode,
         "scale": scale,
     }
 
 
-def _production_widget_url(config: dict, inventory_id: str) -> str:
+def _production_widget_url(config: dict, inventory_id: str, scale=None) -> str:
     parsed_url = urlparse(config["base_url"])
     replaced_keys = {"deviceAlias", "theme", "refreshInterval", "scale"}
     query = [(key, value) for key, value in parse_qsl(parsed_url.query, keep_blank_values=True) if key not in replaced_keys]
@@ -890,8 +907,8 @@ def _production_widget_url(config: dict, inventory_id: str) -> str:
         ("theme", config["theme"]),
         ("refreshInterval", str(config["refresh_interval"])),
     ])
-    if config.get("scale") is not None:
-        query.append(("scale", str(config["scale"])))
+    if scale is not None:
+        query.append(("scale", str(scale)))
     return urlunparse(parsed_url._replace(query=urlencode(query)))
 
 
@@ -911,12 +928,17 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
         }
 
     columns, rows = _production_grid_dimensions(len(inventory_ids))
+    effective_scale = (
+        _production_grid_auto_scale(columns, rows)
+        if config["scale_mode"] == "auto"
+        else config["scale"]
+    )
     return {
         "name": name,
         "columns": columns,
         "rows": rows,
         "widgets": [
-            {"type": "iframe", "url": _production_widget_url(config, inventory_id)}
+            {"type": "iframe", "url": _production_widget_url(config, inventory_id, effective_scale)}
             for inventory_id in inventory_ids
         ],
     }

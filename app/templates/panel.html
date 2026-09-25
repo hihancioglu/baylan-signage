@@ -270,8 +270,9 @@
                       <div class="col-12 col-lg-6"><label class="form-label">Baylan Hub URL</label><input id="production-grid-base-url" class="form-control" value="https://hub.baylan.info.tr/automation/production-widget" oninput="syncProductionGridConfig()" /></div>
                       <div class="col-6 col-lg-2"><label class="form-label">Tema</label><select id="production-grid-theme" class="form-select" onchange="syncProductionGridConfig()"><option value="light">Light</option><option value="dark">Dark</option></select></div>
                       <div class="col-6 col-lg-2"><label class="form-label">Yenileme Süresi (sn)</label><input id="production-grid-refresh" type="number" min="5" value="30" class="form-control" oninput="syncProductionGridConfig()" /></div>
-                      <div class="col-6 col-lg-2"><label class="form-label">Scale (opsiyonel)</label><input id="production-grid-scale" type="number" min="0.1" step="0.1" placeholder="örn. 2.8" class="form-control" oninput="syncProductionGridConfig()" /></div>
-                      <div class="col-12"><label class="form-label">Önizlenecek Cihaz</label><select id="production-grid-preview-device" class="form-select" onchange="updateWidgetPreview()"><option value="">Cihaz seçin</option></select><div class="form-text">Bu seçim yalnızca önizleme içindir; widget ayarlarına kaydedilmez.</div></div>
+                      <div class="col-6 col-lg-2"><label class="form-label">Scale Modu</label><select id="production-grid-scale-mode" class="form-select" onchange="syncProductionGridConfig()"><option value="auto">Otomatik</option><option value="manual">Manuel</option></select></div>
+                      <div class="col-6 col-lg-2"><label class="form-label">Scale</label><input id="production-grid-scale" type="number" min="0.1" step="0.1" value="2.8" class="form-control" oninput="syncProductionGridConfig()" /><div id="production-grid-auto-scale-preview" class="form-text">Önizleme Auto Scale: 2.80</div></div>
+                      <div class="col-12"><label class="form-label">Önizlenecek Cihaz</label><select id="production-grid-preview-device" class="form-select" onchange="updateProductionGridScaleControls(); updateWidgetPreview()"><option value="">Cihaz seçin</option></select><div class="form-text">Bu seçim yalnızca önizleme içindir; widget ayarlarına kaydedilmez.</div></div>
                     </div>
                   </div></div>
                 </div>
@@ -1249,6 +1250,7 @@ function parseInventoryIds(value){
 }
 
 const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
+const PRODUCTION_GRID_BASE_SCALE = 2.8;
 
 function productionGridDimensions(count){
   const size = Math.max(1, Number(count) || 0);
@@ -1262,18 +1264,43 @@ function productionGridDimensions(count){
   return {columns, rows: Math.ceil(size / columns)};
 }
 
+function productionGridAutoScale(columns, rows){
+  const minScale = 0.5;
+  const maxScale = 2.8;
+  const divisor = Math.max(1, Number(columns) || 0, Number(rows) || 0);
+  const value = PRODUCTION_GRID_BASE_SCALE / divisor;
+  return Number(Math.min(maxScale, Math.max(minScale, value)).toFixed(2));
+}
+
+function updateProductionGridScaleControls(){
+  const mode = document.getElementById('production-grid-scale-mode')?.value === 'manual' ? 'manual' : 'auto';
+  const scaleInput = document.getElementById('production-grid-scale');
+  if(scaleInput) scaleInput.disabled = mode === 'auto';
+  const deviceIndex = document.getElementById('production-grid-preview-device')?.value;
+  const device = deviceIndex === '' ? null : (cachedDevices || [])[Number(deviceIndex)];
+  const dimensions = productionGridDimensions(parseInventoryIds(device?.inventory_id).length);
+  const autoScale = productionGridAutoScale(dimensions.columns, dimensions.rows);
+  const preview = document.getElementById('production-grid-auto-scale-preview');
+  if(preview){
+    preview.textContent = `Önizleme Auto Scale: ${autoScale.toFixed(2)}`;
+    preview.classList.toggle('d-none', mode !== 'auto');
+  }
+}
+
 function productionGridConfigFromForm(){
   const scaleValue = String(document.getElementById('production-grid-scale')?.value || '').trim();
   return {
     base_url: String(document.getElementById('production-grid-base-url')?.value || '').trim() || PRODUCTION_GRID_DEFAULT_URL,
     theme: document.getElementById('production-grid-theme')?.value === 'dark' ? 'dark' : 'light',
     refresh_interval: Math.max(5, Number(document.getElementById('production-grid-refresh')?.value) || 30),
-    scale: scaleValue === '' ? null : Number(scaleValue)
+    scale_mode: document.getElementById('production-grid-scale-mode')?.value === 'manual' ? 'manual' : 'auto',
+    scale: scaleValue === '' ? PRODUCTION_GRID_BASE_SCALE : Number(scaleValue)
   };
 }
 
 function syncProductionGridConfig(){
   if(document.getElementById('widget-type')?.value !== 'production_grid') return;
+  updateProductionGridScaleControls();
   document.getElementById('widget-content').value = JSON.stringify(productionGridConfigFromForm(), null, 2);
   updateWidgetPreview();
 }
@@ -1292,7 +1319,12 @@ function fillProductionGridSettings(content){
   document.getElementById('production-grid-base-url').value = String(config.base_url || PRODUCTION_GRID_DEFAULT_URL);
   document.getElementById('production-grid-theme').value = config.theme === 'dark' ? 'dark' : 'light';
   document.getElementById('production-grid-refresh').value = String(Math.max(5, Number(config.refresh_interval) || 30));
-  document.getElementById('production-grid-scale').value = config.scale == null ? '' : String(config.scale);
+  const scaleMode = config.scale_mode === 'auto' || config.scale_mode === 'manual'
+    ? config.scale_mode
+    : (config.scale == null ? 'auto' : 'manual');
+  document.getElementById('production-grid-scale-mode').value = scaleMode;
+  document.getElementById('production-grid-scale').value = config.scale == null ? String(PRODUCTION_GRID_BASE_SCALE) : String(config.scale);
+  updateProductionGridScaleControls();
   document.getElementById('widget-content').value = JSON.stringify(productionGridConfigFromForm(), null, 2);
 }
 
@@ -2125,6 +2157,9 @@ function updateWidgetPreview(){
       const device = deviceIndex === '' ? null : (cachedDevices || [])[Number(deviceIndex)];
       const inventoryIds = parseInventoryIds(device?.inventory_id);
       const dimensions = productionGridDimensions(inventoryIds.length);
+      const effectiveScale = productionConfig.scale_mode === 'auto'
+        ? productionGridAutoScale(dimensions.columns, dimensions.rows)
+        : productionConfig.scale;
       config = {
         columns: dimensions.columns,
         rows: dimensions.rows,
@@ -2135,8 +2170,8 @@ function updateWidgetPreview(){
             url.searchParams.set('deviceAlias', inventoryId);
             url.searchParams.set('theme', productionConfig.theme);
             url.searchParams.set('refreshInterval', String(productionConfig.refresh_interval));
-            if(productionConfig.scale == null) url.searchParams.delete('scale');
-            else url.searchParams.set('scale', String(productionConfig.scale));
+            if(effectiveScale == null) url.searchParams.delete('scale');
+            else url.searchParams.set('scale', String(effectiveScale));
           } catch(_err) { return {type: 'empty'}; }
           return {type: 'iframe', url: url.toString()};
         })

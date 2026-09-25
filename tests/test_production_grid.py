@@ -68,8 +68,48 @@ class TestProductionGrid(unittest.TestCase):
         self.assertEqual(query["kept"], ["yes"])
 
     def test_empty_scale_is_omitted(self):
-        url = self._payload("576", scale="")["widgets"][0]["url"]
+        url = self._payload("576", scale_mode="manual", scale="")["widgets"][0]["url"]
         self.assertNotIn("scale", parse_qs(urlparse(url).query, keep_blank_values=True))
+
+    def test_auto_scale_matches_grid_dimensions_and_is_normalized(self):
+        scenarios = [
+            ("576", "2.8"),
+            ("576,577", "1.4"),
+            ("576,577,578,579", "1.4"),
+            ("576,577,578,579,580,581", "0.93"),
+            (",".join(str(value) for value in range(12)), "0.7"),
+        ]
+        for inventory_id, expected_scale in scenarios:
+            with self.subTest(inventory_id=inventory_id):
+                payload = self._payload(inventory_id, scale_mode="auto", scale="1.23")
+                scales = {
+                    parse_qs(urlparse(widget["url"]).query)["scale"][0]
+                    for widget in payload["widgets"]
+                }
+                self.assertEqual(scales, {expected_scale})
+
+    def test_auto_scale_is_clamped(self):
+        self.assertEqual(self.main._production_grid_auto_scale(1, 1), 2.8)
+        self.assertEqual(self.main._production_grid_auto_scale(100, 1), 0.5)
+
+    def test_legacy_scale_is_manual_and_missing_scale_defaults_to_auto(self):
+        legacy = self.main._production_grid_config({"scale": 1.75})
+        self.assertEqual(legacy["scale_mode"], "manual")
+        self.assertEqual(legacy["scale"], "1.75")
+
+        automatic = self.main._production_grid_config({"theme": "light"})
+        self.assertEqual(automatic["scale_mode"], "auto")
+        payload = self._payload("576,577,578,579", scale_mode="auto", scale=None)
+        query = parse_qs(urlparse(payload["widgets"][0]["url"]).query)
+        self.assertEqual(query["scale"], ["1.4"])
+
+    def test_manual_mode_uses_stored_scale_for_every_widget(self):
+        payload = self._payload("576,577,578,579", scale_mode="manual", scale=2.8)
+        scales = [
+            parse_qs(urlparse(widget["url"]).query)["scale"][0]
+            for widget in payload["widgets"]
+        ]
+        self.assertEqual(scales, ["2.8"] * 4)
 
     def test_production_grid_widget_api_and_device_specific_runtime_payload(self):
         client = self.main.app.test_client()
