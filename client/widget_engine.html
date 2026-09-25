@@ -7,7 +7,8 @@
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
-    #widgets.production-grid-single-fit { padding: 4px; gap: 0; }
+    #widgets.production-grid-single-fit { padding: 0 !important; gap: 0 !important; }
+    #widgets.production-grid-single-fit > .widget { margin: 0; border-radius: 0; }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; }
     .production-auto-fit { position: relative; overflow: hidden; }
@@ -53,18 +54,20 @@
     const PRODUCTION_FIT_BASE_WIDTH = 640;
     const PRODUCTION_FIT_BASE_HEIGHT = 520;
     const PRODUCTION_FIT_SAFETY = 0.97;
-    const SINGLE_CARD_HEIGHT_SAFETY = 0.985;
-    const SINGLE_CARD_WIDTH_SAFETY = 0.998;
+    const SINGLE_CARD_HEIGHT_SAFETY = 0.995;
+    const SINGLE_CARD_WIDTH_SAFETY = 0.999;
+    const SINGLE_CARD_FIT_INSET = 2;
 
     function isProductionAutoFitWidget(widget) {
       return String(widget?.fit_mode || "") === "production_auto";
     }
 
-    function isSingleProductionAutoFitLayout(config, widget, widgetCount) {
+    function isSingleProductionAutoFitLayout(config) {
+      const widgets = Array.isArray(config?.widgets) ? config.widgets : [];
       return (
-        widgetCount === 1 &&
-        String(widget?.type || "").toLowerCase() === "iframe" &&
-        String(widget?.fit_mode || "") === "production_auto"
+        widgets.length === 1 &&
+        String(widgets[0]?.type || "").toLowerCase() === "iframe" &&
+        String(widgets[0]?.fit_mode || "") === "production_auto"
       );
     }
 
@@ -73,19 +76,26 @@
       return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
-    function setupProductionAutoFit(wrapper, stage, widget, widgetIndex, config, widgetCount) {
+    function setupProductionAutoFit(wrapper, stage, widget, widgetIndex, config) {
       const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
       const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
       const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
-      const singleCardFit = isSingleProductionAutoFitLayout(config, widget, widgetCount);
+      const singleCardFit = isSingleProductionAutoFitLayout(config);
       stage.style.width = `${fitWidth}px`;
       stage.style.height = `${fitHeight}px`;
 
       const updateFit = () => {
-        const rect = wrapper.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
-        const scaleByWidth = rect.width / fitWidth;
-        const scaleByHeight = rect.height / fitHeight;
+        const cellRect = wrapper.getBoundingClientRect();
+        const viewportRect = document.documentElement.getBoundingClientRect();
+        if (cellRect.width <= 0 || cellRect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
+        const horizontalInset = singleCardFit ? SINGLE_CARD_FIT_INSET : 0;
+        const verticalInset = singleCardFit ? SINGLE_CARD_FIT_INSET : 0;
+        const usableRect = {
+          width: Math.max(0, cellRect.width - horizontalInset),
+          height: Math.max(0, cellRect.height - verticalInset),
+        };
+        const scaleByWidth = usableRect.width / fitWidth;
+        const scaleByHeight = usableRect.height / fitHeight;
         const scale = singleCardFit
           ? Math.min(
               scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY,
@@ -97,7 +107,9 @@
         if (singleCardFit) {
           debugLog("production runtime fit single-card", {
             widgetIndex,
-            cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+            viewport: `${Math.round(viewportRect.width)}x${Math.round(viewportRect.height)}`,
+            cell: `${Math.round(cellRect.width)}x${Math.round(cellRect.height)}`,
+            usable: `${Math.round(usableRect.width)}x${Math.round(usableRect.height)}`,
             virtual: `${fitWidth}x${fitHeight}`,
             scaleByHeight: Number(scaleByHeight.toFixed(2)),
             scaleByWidth: Number(scaleByWidth.toFixed(2)),
@@ -109,7 +121,7 @@
         } else {
           debugLog("production runtime fit", {
             widgetIndex,
-            cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+            cell: `${Math.round(cellRect.width)}x${Math.round(cellRect.height)}`,
             virtual: `${fitWidth}x${fitHeight}`,
             scaleX: Number(scaleByWidth.toFixed(2)),
             scaleY: Number(scaleByHeight.toFixed(2)),
@@ -198,19 +210,20 @@
 
     function applyLayout(config) {
       const container = document.getElementById("widgets");
+      const singleCardFit = isSingleProductionAutoFitLayout(config);
       const columns = Array.isArray(config.columns) ? config.columns.length : Number(config.columns || 1);
-      const cols = Math.max(1, Number(columns) || 1);
+      const cols = singleCardFit ? 1 : Math.max(1, Number(columns) || 1);
       const widgetCount = Array.isArray(config.widgets) ? config.widgets.length : 0;
       container.style.setProperty("--cols", String(cols));
       const allProductionAutoFit = widgetCount > 0 && config.widgets.every(isProductionAutoFitWidget);
       container.classList.toggle("production-grid-layout", allProductionAutoFit);
       container.classList.toggle(
         "production-grid-single-fit",
-        isSingleProductionAutoFitLayout(config, config.widgets[0], widgetCount)
+        singleCardFit
       );
 
       const minRows = Number(config.rows || 0);
-      const targetRows = Math.max(minRows, Math.ceil(widgetCount / cols));
+      const targetRows = singleCardFit ? 1 : Math.max(minRows, Math.ceil(widgetCount / cols));
       if (targetRows > 0) {
         container.style.gridTemplateRows = `repeat(${targetRows}, minmax(0, 1fr))`;
       } else {
@@ -956,7 +969,7 @@
             stage.className = "production-fit-stage";
             stage.appendChild(frame);
             wrapper.appendChild(stage);
-            updateProductionFit = setupProductionAutoFit(wrapper, stage, w, index, config, widgetCount);
+            updateProductionFit = setupProductionAutoFit(wrapper, stage, w, index, config);
           } else {
             wrapper.appendChild(frame);
           }
