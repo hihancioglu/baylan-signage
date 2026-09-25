@@ -79,19 +79,29 @@
       return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
+    function finiteFitNumber(value, fallback) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
     function setupProductionAutoFit(wrapper, stage, widget, widgetIndex, config) {
       const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
       const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
       const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
+      const contentZoom = positiveFitNumber(widget.fit_content_zoom, 1);
+      const fitOffsetX = finiteFitNumber(widget.fit_offset_x, 0);
+      const fitOffsetY = finiteFitNumber(widget.fit_offset_y, 0);
       const singleCardFit = isSingleProductionAutoFitLayout(config);
       stage.style.width = `${fitWidth}px`;
       stage.style.height = `${fitHeight}px`;
+      stage.style.left = `calc(50% + ${fitOffsetX}px)`;
+      stage.style.top = `calc(50% + ${fitOffsetY}px)`;
 
       const updateFit = () => {
         const cellRect = wrapper.getBoundingClientRect();
         const viewportRect = document.documentElement.getBoundingClientRect();
         if (cellRect.width <= 0 || cellRect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
-        let scale;
+        let baseScale;
         let singleCardMetrics = null;
         if (singleCardFit) {
           const usableWidth = cellRect.width - SINGLE_CARD_FIT_INSET;
@@ -102,15 +112,16 @@
             scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY,
             scaleByWidth * SINGLE_CARD_WIDTH_SAFETY
           );
-          scale = effectiveScale;
+          baseScale = effectiveScale;
           singleCardMetrics = { usableWidth, usableHeight, scaleByHeight, scaleByWidth, effectiveScale };
         } else {
           const scaleByWidth = cellRect.width / fitWidth;
           const scaleByHeight = cellRect.height / fitHeight;
-          scale = Math.min(scaleByWidth, scaleByHeight) * fitSafety;
+          baseScale = Math.min(scaleByWidth, scaleByHeight) * fitSafety;
         }
-        if (!Number.isFinite(scale) || scale <= 0) return;
-        stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        const finalScale = baseScale * contentZoom;
+        if (!Number.isFinite(finalScale) || finalScale <= 0) return;
+        stage.style.transform = `translate(-50%, -50%) scale(${finalScale})`;
         if (singleCardFit) {
           const { usableWidth, usableHeight, scaleByHeight, scaleByWidth, effectiveScale } = singleCardMetrics;
           debugLog(
@@ -121,7 +132,9 @@
               `virtual=${fitWidth}x${fitHeight} | ` +
               `scaleByHeight=${scaleByHeight.toFixed(3)} | ` +
               `scaleByWidth=${scaleByWidth.toFixed(3)} | ` +
-              `effectiveScale=${effectiveScale.toFixed(3)} | widgetIndex=${widgetIndex}`
+              `baseScale=${effectiveScale.toFixed(3)} | ` +
+              `contentZoom=${contentZoom.toFixed(3)} | ` +
+              `finalScale=${finalScale.toFixed(3)} | widgetIndex=${widgetIndex}`
           );
         } else {
           const scaleByWidth = cellRect.width / fitWidth;
@@ -132,7 +145,9 @@
             virtual: `${fitWidth}x${fitHeight}`,
             scaleX: Number(scaleByWidth.toFixed(2)),
             scaleY: Number(scaleByHeight.toFixed(2)),
-            effectiveScale: Number(scale.toFixed(2)),
+            baseScale: Number(baseScale.toFixed(3)),
+            contentZoom: Number(contentZoom.toFixed(3)),
+            finalScale: Number(finalScale.toFixed(3)),
             dpr: window.devicePixelRatio,
           });
         }

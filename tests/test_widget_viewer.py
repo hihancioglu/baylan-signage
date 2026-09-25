@@ -192,7 +192,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
     def test_production_auto_fit_metadata_survives_viewer_normalization(self):
-        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 1100, "fit_height": 900, "fit_safety": 0.97}
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 1100, "fit_height": 900, "fit_safety": 0.97, "fit_content_zoom": 1.55}
         result = widget_viewer._normalize_widget_payload({"widgets": [widget]})
 
         self.assertEqual(result["widgets"][0], widget)
@@ -203,12 +203,24 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertIn("new ResizeObserver(updateFit)", fit_helper)
         self.assertIn("Math.min(scaleByWidth, scaleByHeight) * fitSafety", fit_helper)
+        self.assertIn("const finalScale = baseScale * contentZoom;", fit_helper)
+        self.assertIn("scale(${finalScale})", fit_helper)
         self.assertIn("scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY", fit_helper)
         self.assertIn("scaleByWidth * SINGLE_CARD_WIDTH_SAFETY", fit_helper)
         self.assertNotIn("Math.min(1", fit_helper)
         self.assertNotIn("devicePixelRatio", fit_helper.split("stage.style.transform", 1)[0])
         self.assertNotIn("frame.src", fit_helper)
         self.assertIn("observer.disconnect()", fit_helper)
+
+    def test_widget_engine_production_crop_is_centered_and_clipped(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
+
+        self.assertIn(".production-auto-fit { position: relative; overflow: hidden; }", engine)
+        self.assertIn(".production-fit-stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; }", engine)
+        self.assertIn("finiteFitNumber(widget.fit_offset_x, 0)", fit_helper)
+        self.assertIn("finiteFitNumber(widget.fit_offset_y, 0)", fit_helper)
+        self.assertIn("translate(-50%, -50%)", fit_helper)
 
     def test_widget_engine_single_production_fit_is_height_first_and_compact(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
