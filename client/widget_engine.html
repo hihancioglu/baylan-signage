@@ -190,13 +190,20 @@
     }
 
 
-    function scheduleIframeLoad(frame, url, widgetIndex = -1) {
+    function scheduleIframeLoad(frame, url, widgetIndex = -1, reloadPolicy = "default") {
       const source = normalizeIframeUrl(url);
       frame.name = `baylan-widget-frame-${Math.max(0, widgetIndex)}-${Math.random().toString(36).slice(2)}`;
       frame.dataset.originalSrc = source;
       frame.dataset.instanceSrc = source;
       frame.dataset.widgetIndex = String(widgetIndex);
+      frame.dataset.reloadPolicy = String(reloadPolicy || "default").toLowerCase();
       window.requestAnimationFrame(() => {
+        frame.dataset.navigationStarted = "true";
+        debugLog("iframe initial navigation", {
+          widgetIndex,
+          reloadPolicy: frame.dataset.reloadPolicy,
+          url: source,
+        });
         frame.src = source;
       });
       return source;
@@ -277,13 +284,6 @@
           // noop
         }
       });
-      try {
-        if (typeof frame.focus === "function") {
-          frame.focus({ preventScroll: true });
-        }
-      } catch (_err) {
-        // noop
-      }
       debugLog("iframe paint nudged", {
         reason,
         widgetIndex: Number(frame.dataset && frame.dataset.widgetIndex || -1),
@@ -294,8 +294,9 @@
     function attachIframeBlockDetection(wrapper, frame, onBlocked) {
       let settled = false;
       let loadedAtLeastOnce = false;
-      const initialLoadWaitMs = 8000;
-      const maxWaitMs = 30000;
+      const stablePolicy = frame.dataset.reloadPolicy === "stable";
+      const initialLoadWaitMs = stablePolicy ? 30000 : 8000;
+      const maxInitialHardReloads = stablePolicy ? 1 : 4;
       const pollMs = 1500;
       const maxTransientRetries = 4;
       const maxPendingRetries = 4;
@@ -319,15 +320,22 @@
         if (settled) return;
         loadWatchdog = window.setTimeout(() => {
           if (settled || loadedAtLeastOnce) return;
+          if (noLoadRetryCount >= maxInitialHardReloads) {
+            debugLog("iframe initial retry limit reached", {
+              widgetIndex: Number(frame.dataset.widgetIndex || -1),
+              retryCount: noLoadRetryCount,
+              url: baseSrc(),
+            });
+            return;
+          }
           nudgeFramePaint();
           noLoadRetryCount += 1;
-          debugLog("iframe initial load watchdog retry", {
+          debugLog("iframe initial hard retry", {
             widgetIndex: Number(frame.dataset.widgetIndex || -1),
             retryCount: noLoadRetryCount,
             url: baseSrc(),
           });
           reloadWithCacheBust();
-          armLoadWatchdog();
         }, initialLoadWaitMs);
       };
 
@@ -354,7 +362,13 @@
       const success = () => {
         if (settled) return;
         settled = true;
+        frame.dataset.loadState = "settled";
         clearLoadWatchdog();
+        debugLog("iframe settled", {
+          widgetIndex: Number(frame.dataset.widgetIndex || -1),
+          reloadPolicy: frame.dataset.reloadPolicy || "default",
+          url: baseSrc(),
+        });
       };
 
       const verifyFrame = () => {
@@ -390,18 +404,24 @@
 
       frame.addEventListener("error", block);
       frame.addEventListener("load", () => {
+        // Ignore the iframe element's implicit about:blank document. Only the
+        // navigation scheduled above can settle the widget.
+        if (frame.dataset.navigationStarted !== "true") return;
         loadedAtLeastOnce = true;
         clearLoadWatchdog();
+        debugLog("iframe load success", {
+          widgetIndex: Number(frame.dataset.widgetIndex || -1),
+          reloadPolicy: frame.dataset.reloadPolicy || "default",
+          url: baseSrc(),
+        });
+        if (stablePolicy) {
+          success();
+          return;
+        }
         verifyFrame();
       });
 
       armLoadWatchdog();
-      window.setTimeout(() => {
-        if (!settled && !loadedAtLeastOnce) {
-          nudgeFramePaint();
-          reloadWithCacheBust();
-        }
-      }, maxWaitMs);
     }
 
     function recoverUnsettledIframes(reason = "runtime_refresh", options = {}) {
@@ -411,7 +431,23 @@
         const wrapper = frame.closest(".iframe-widget");
         if (!wrapper || wrapper.classList.contains("blocked")) return;
         const state = inspectIframeState(frame);
-        if (!force && state && state.status === "ready") return;
+        const stablePolicy = frame.dataset.reloadPolicy === "stable";
+        if (stablePolicy) {
+          debugLog("iframe recovery skipped: stable policy", {
+            reason,
+            widgetIndex: Number(frame.dataset.widgetIndex || -1),
+            state: state ? state.status : "unknown",
+          });
+          return;
+        }
+        if (state && state.status === "ready") {
+          debugLog("iframe recovery skipped: ready", {
+            reason,
+            widgetIndex: Number(frame.dataset.widgetIndex || -1),
+            reloadPolicy: frame.dataset.reloadPolicy || "default",
+          });
+          return;
+        }
         const source = String(frame.dataset.instanceSrc || "");
         if (!source) return;
         const now = Date.now();
@@ -426,7 +462,6 @@
           url: source,
         });
         nudgeIframePaint(frame, reason);
-        if (force && state && state.status === "ready") return;
         const separator = source.includes("?") ? "&" : "?";
         frame.src = "about:blank";
         window.setTimeout(() => {
@@ -673,7 +708,7 @@
           frame.allow = "autoplay";
           frame.allowFullscreen = true;
           wrapper.appendChild(frame);
-          scheduleIframeLoad(frame, item.url, widgetIndex);
+          scheduleIframeLoad(frame, item.url, widgetIndex, item.reload_policy);
         } else if (itemType === "card" || itemType === "html" || itemType === "embed") {
           const embed = document.createElement("div");
           embed.className = "widget card";
@@ -767,6 +802,8 @@
           frame.referrerPolicy = "no-referrer";
           frame.allow = "autoplay";
           frame.allowFullscreen = true;
+          const stablePolicy = String(w.reload_policy || "").toLowerCase() === "stable";
+          frame.dataset.reloadPolicy = stablePolicy ? "stable" : "default";
 
           const enforceIframeVideosMuted = () => {
             try {
@@ -793,6 +830,10 @@
 
           frame.addEventListener("load", () => {
             enforceIframeVideosMuted();
+            if (stablePolicy) {
+              window.setTimeout(() => nudgeIframePaint(frame, "iframe_load_stable"), 250);
+              return;
+            }
             nudgeIframePaint(frame, "iframe_load");
             [400, 1200, 2500].forEach((delayMs) => {
               window.setTimeout(enforceIframeVideosMuted, delayMs);
@@ -802,7 +843,7 @@
 
           wrapper.appendChild(frame);
           wrapper.appendChild(buildIframeFallback(w.url));
-          scheduleIframeLoad(frame, w.url, index);
+          scheduleIframeLoad(frame, w.url, index, w.reload_policy);
           window.setTimeout(() => {
             try {
               frame.style.transform = "translateZ(0)";
@@ -928,7 +969,7 @@
           // loading spinner after a hidden warm runtime is foregrounded. Mouse
           // hover fixing the cell points to a paint/compositor issue, so first
           // nudge the iframe surface. Only non-ready frames continue to reload.
-          recoverUnsettledIframes("playlist_sync_same_signature", { force: true, minRecoverIntervalMs: 15000 });
+          recoverUnsettledIframes("playlist_sync_same_signature", { force: false, minRecoverIntervalMs: 30000 });
           return;
         }
         lastRenderedSignature = activeWidgetSignature;
@@ -946,11 +987,15 @@
       const config = normalizeConfig(input);
       const normalizedSignature = typeof signature === "string" ? signature.trim() : "";
       if (normalizedSignature && normalizedSignature === lastRenderedSignature) {
-        // Aynı signature tekrar geldiğinde (örn. pencere background->foreground geçişi)
-        // render adımını atlamak siyah ekran/stale içerik bırakabiliyor.
         const cached = widgetPlaylistCache.get(normalizedSignature) || config;
         applyLayout(cached);
-        loadWidgets(cached);
+        document.querySelectorAll(".iframe-widget iframe[data-instance-src]").forEach((frame) => {
+          debugLog("iframe same signature kept alive", {
+            widgetIndex: Number(frame.dataset.widgetIndex || -1),
+            reloadPolicy: frame.dataset.reloadPolicy || "default",
+          });
+        });
+        recoverUnsettledIframes("same_signature", { force: false, minRecoverIntervalMs: 30000 });
         return;
       }
       if (normalizedSignature) {

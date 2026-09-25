@@ -156,14 +156,34 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("refreshIntervalSeconds", engine)
         self.assertNotIn("window.setInterval(loadFreshSource", engine)
 
-    def test_widget_engine_hides_iframe_scrollbars_and_retries_stuck_blank_frames(self):
+    def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
         self.assertIn("scrollbar-width: none;", engine)
         self.assertIn("frame.scrolling = \"no\";", engine)
         self.assertIn("longRetryDelayMs", engine)
         self.assertIn("pendingRetryCount += 1;", engine)
-        self.assertNotIn("maxNoLoadRetries", engine)
+        self.assertIn("const maxInitialHardReloads = stablePolicy ? 1 : 4;", engine)
+        self.assertIn("const initialLoadWaitMs = stablePolicy ? 30000 : 8000;", engine)
+        self.assertNotIn("const maxWaitMs = 30000;", engine)
+
+    def test_widget_engine_keeps_same_signature_iframe_dom_alive(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        same_signature = engine.split(
+            "if (normalizedSignature && normalizedSignature === lastRenderedSignature)", 1
+        )[1].split("if (normalizedSignature)", 1)[0]
+
+        self.assertNotIn("loadWidgets(cached)", same_signature)
+        self.assertIn("iframe same signature kept alive", same_signature)
+        self.assertIn('recoverUnsettledIframes("same_signature", { force: false', same_signature)
+
+    def test_widget_engine_stable_policy_does_not_recover_ready_frames(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn('frame.dataset.reloadPolicy === "stable"', engine)
+        self.assertIn('recoverUnsettledIframes("playlist_sync_same_signature", { force: false', engine)
+        self.assertIn('debugLog("iframe recovery skipped: ready"', engine)
+        self.assertNotIn("frame.focus(", engine)
 
     def test_build_engine_url_keeps_direct_url_when_layout_missing(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
