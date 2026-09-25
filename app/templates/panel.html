@@ -653,6 +653,7 @@ const hdr = { 'Content-Type': 'application/json' };
 let cachedPlaylists = [];
 let cachedGroups = [];
 let cachedDevices = [];
+const deviceEditDrafts = new Map();
 let selectedPlaylistItemId = null;
 let cachedMediaAssets = [];
 let cachedWidgets = [];
@@ -838,6 +839,57 @@ function sortDevices(field){
   renderDevicesTable();
 }
 
+function getDeviceKey(device){
+  return String(device?.device_key || device?.mac_address || device?.hostname || '');
+}
+
+function getDeviceServerValue(deviceKey, field){
+  const device = (cachedDevices || []).find(item => getDeviceKey(item) === deviceKey);
+  return String(device?.[field] || '');
+}
+
+function updateDeviceDraft(deviceKey, field, value){
+  const dirtyFlag = field === 'alias' ? 'dirtyAlias' : 'dirtyInventoryId';
+  const draft = deviceEditDrafts.get(deviceKey) || {};
+  const isDirty = value !== getDeviceServerValue(deviceKey, field);
+
+  if(isDirty){
+    draft[field] = value;
+    draft[dirtyFlag] = true;
+  }else{
+    delete draft[field];
+    delete draft[dirtyFlag];
+  }
+
+  if(draft.dirtyAlias || draft.dirtyInventoryId){
+    deviceEditDrafts.set(deviceKey, draft);
+  }else{
+    deviceEditDrafts.delete(deviceKey);
+  }
+  return isDirty;
+}
+
+function reconcileDeviceEditDrafts(devices){
+  const devicesByKey = new Map(devices.map(device => [getDeviceKey(device), device]));
+  deviceEditDrafts.forEach((draft, deviceKey) => {
+    const device = devicesByKey.get(deviceKey);
+    if(!device){
+      deviceEditDrafts.delete(deviceKey);
+      return;
+    }
+
+    if(draft.dirtyAlias && draft.alias === String(device.alias || '')){
+      delete draft.alias;
+      delete draft.dirtyAlias;
+    }
+    if(draft.dirtyInventoryId && draft.inventory_id === String(device.inventory_id || '')){
+      delete draft.inventory_id;
+      delete draft.dirtyInventoryId;
+    }
+    if(!draft.dirtyAlias && !draft.dirtyInventoryId) deviceEditDrafts.delete(deviceKey);
+  });
+}
+
 function loadVisibleDeviceColumns(){
   try{
     const raw = localStorage.getItem(DEVICE_COLUMNS_STORAGE_KEY);
@@ -902,6 +954,14 @@ function applyDeviceColumnVisibility(){
 function renderDevicesTable(){
   const body = document.getElementById('devices-body');
   if(!body) return;
+  const activeInput = document.activeElement;
+  const focusedEdit = body.contains(activeInput) && activeInput.matches('input[data-device-edit-field]')
+    ? {
+        id: activeInput.id,
+        selectionStart: activeInput.selectionStart,
+        selectionEnd: activeInput.selectionEnd,
+      }
+    : null;
   disposeHealthTooltips();
 
   const onlineCount = (cachedDevices || []).filter(d => d.is_online).length;
@@ -949,15 +1009,42 @@ function renderDevicesTable(){
     const tr = document.createElement('tr');
     const safeHostname = encodeURIComponent(d.hostname || '');
     const safeMac = encodeURIComponent(d.mac_address || '');
-    const safeDeviceKey = encodeURIComponent(d.device_key || d.mac_address || d.hostname || '');
+    const deviceKey = getDeviceKey(d);
+    const safeDeviceKey = encodeURIComponent(deviceKey);
+    const draft = deviceEditDrafts.get(deviceKey);
+    const aliasIsDirty = Boolean(draft?.dirtyAlias);
+    const inventoryIsDirty = Boolean(draft?.dirtyInventoryId);
+    const aliasValue = aliasIsDirty ? draft.alias : String(d.alias || '');
+    const inventoryValue = inventoryIsDirty ? draft.inventory_id : String(d.inventory_id || '');
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm" id="device-alias-${safeDeviceKey}" placeholder="Alias" value="${escapeHtml(d.alias||'')}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm" id="device-inventory-${safeDeviceKey}" placeholder="INV001, INV002, INV003" title="Birden fazla Inventory ID için virgül kullanın." aria-label="Inventory ID'ler" value="${escapeHtml(d.inventory_id||'')}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions">${renderDeviceActions(d, safeDeviceKey, safeHostname, safeMac)}</td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm${aliasIsDirty ? ' border-warning' : ''}" id="device-alias-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="alias" placeholder="Alias" value="${escapeHtml(aliasValue)}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm${inventoryIsDirty ? ' border-warning' : ''}" id="device-inventory-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="inventory_id" placeholder="INV001, INV002, INV003" title="Birden fazla Inventory ID için virgül kullanın." aria-label="Inventory ID'ler" value="${escapeHtml(inventoryValue)}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions">${renderDeviceActions(d, safeDeviceKey, safeHostname, safeMac)}</td>`;
     body.appendChild(tr);
+  });
+  body.querySelectorAll('input[data-device-edit-field]').forEach(input => {
+    input.addEventListener('input', () => {
+      const dirty = updateDeviceDraft(input.dataset.deviceKey, input.dataset.deviceEditField, input.value);
+      input.classList.toggle('border-warning', dirty);
+    });
   });
   applyDeviceColumnVisibility();
   initHealthTooltips();
+  if(focusedEdit){
+    const input = document.getElementById(focusedEdit.id);
+    if(input){
+      try{
+        input.focus({preventScroll: true});
+      }catch(_err){
+        input.focus();
+      }
+      const maxPosition = input.value.length;
+      input.setSelectionRange(
+        Math.min(focusedEdit.selectionStart ?? maxPosition, maxPosition),
+        Math.min(focusedEdit.selectionEnd ?? maxPosition, maxPosition)
+      );
+    }
+  }
 }
 
 
@@ -1247,8 +1334,15 @@ function insertSelectedRuntimeVariable(targetId, selectorId){
 }
 
 async function loadDevices(){
-  const devices = await jget('/api/devices');
-  cachedDevices = devices || [];
+  let devices;
+  try{
+    devices = await jget('/api/devices');
+  }catch(_err){
+    return;
+  }
+  if(!Array.isArray(devices)) return;
+  cachedDevices = devices;
+  reconcileDeviceEditDrafts(devices);
   renderDevicesTable();
   refreshRuntimeVariablePickers();
   refreshProductionGridDevicePicker();
@@ -1270,14 +1364,23 @@ async function saveDeviceAlias(encodedDeviceKey, encodedHostname, encodedMac){
   const inventoryInput = document.getElementById(`device-inventory-${encodeURIComponent(deviceKey)}`);
   if(!input || !inventoryInput) return;
 
-  const resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`, {
-    alias: input.value || '',
-    inventory_id: inventoryInput.value || '',
-  });
+  let resp;
+  try{
+    resp = await jpatch(`/api/devices/${encodeURIComponent(hostname)}/alias${mac ? `?mac_address=${encodeURIComponent(mac)}` : ''}`, {
+      alias: input.value || '',
+      inventory_id: inventoryInput.value || '',
+    });
+  }catch(_err){
+    alert('Alias kaydedilemedi');
+    return;
+  }
   if(!resp.ok){
     alert(resp.error || 'Alias kaydedilemedi');
     return;
   }
+  deviceEditDrafts.delete(deviceKey);
+  input.classList.remove('border-warning');
+  inventoryInput.classList.remove('border-warning');
   await loadDevices();
 }
 
