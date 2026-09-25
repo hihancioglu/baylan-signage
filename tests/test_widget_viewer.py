@@ -202,11 +202,24 @@ class TestWidgetViewer(unittest.TestCase):
         fit_helper = engine.split("function setupProductionAutoFit", 1)[1].split("function debugLog", 1)[0]
 
         self.assertIn("new ResizeObserver(updateFit)", fit_helper)
-        self.assertIn("Math.min(scaleX, scaleY) * fitSafety", fit_helper)
+        self.assertIn("Math.min(scaleByWidth, scaleByHeight) * fitSafety", fit_helper)
+        self.assertIn("scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY", fit_helper)
+        self.assertIn("scaleByWidth * SINGLE_CARD_WIDTH_SAFETY", fit_helper)
         self.assertNotIn("Math.min(1", fit_helper)
-        self.assertNotIn("devicePixelRatio", fit_helper.split('debugLog("production runtime fit"', 1)[0])
+        self.assertNotIn("devicePixelRatio", fit_helper.split("stage.style.transform", 1)[0])
         self.assertNotIn("frame.src", fit_helper)
         self.assertIn("observer.disconnect()", fit_helper)
+
+    def test_widget_engine_single_production_fit_is_height_first_and_compact(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("const SINGLE_CARD_HEIGHT_SAFETY = 0.985;", engine)
+        self.assertIn("const SINGLE_CARD_WIDTH_SAFETY = 0.998;", engine)
+        self.assertIn("function isSingleProductionAutoFitLayout(config, widget, widgetCount)", engine)
+        self.assertIn('String(widget?.type || "").toLowerCase() === "iframe"', engine)
+        self.assertIn('String(widget?.fit_mode || "") === "production_auto"', engine)
+        self.assertIn("#widgets.production-grid-single-fit { padding: 4px; gap: 0; }", engine)
+        self.assertIn('debugLog("production runtime fit single-card"', engine)
 
     def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")

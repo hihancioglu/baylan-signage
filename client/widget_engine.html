@@ -7,7 +7,7 @@
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
-    #widgets.production-grid-layout.single-production-widget { padding: 4px; gap: 0; }
+    #widgets.production-grid-single-fit { padding: 4px; gap: 0; }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
     .iframe-widget { position: relative; }
     .production-auto-fit { position: relative; overflow: hidden; }
@@ -53,9 +53,19 @@
     const PRODUCTION_FIT_BASE_WIDTH = 640;
     const PRODUCTION_FIT_BASE_HEIGHT = 520;
     const PRODUCTION_FIT_SAFETY = 0.97;
+    const SINGLE_CARD_HEIGHT_SAFETY = 0.985;
+    const SINGLE_CARD_WIDTH_SAFETY = 0.998;
 
     function isProductionAutoFitWidget(widget) {
       return String(widget?.fit_mode || "") === "production_auto";
+    }
+
+    function isSingleProductionAutoFitLayout(config, widget, widgetCount) {
+      return (
+        widgetCount === 1 &&
+        String(widget?.type || "").toLowerCase() === "iframe" &&
+        String(widget?.fit_mode || "") === "production_auto"
+      );
     }
 
     function positiveFitNumber(value, fallback) {
@@ -63,30 +73,50 @@
       return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
-    function setupProductionAutoFit(wrapper, stage, widget, widgetIndex) {
+    function setupProductionAutoFit(wrapper, stage, widget, widgetIndex, config, widgetCount) {
       const fitWidth = positiveFitNumber(widget.fit_width, PRODUCTION_FIT_BASE_WIDTH);
       const fitHeight = positiveFitNumber(widget.fit_height, PRODUCTION_FIT_BASE_HEIGHT);
       const fitSafety = positiveFitNumber(widget.fit_safety, PRODUCTION_FIT_SAFETY);
+      const singleCardFit = isSingleProductionAutoFitLayout(config, widget, widgetCount);
       stage.style.width = `${fitWidth}px`;
       stage.style.height = `${fitHeight}px`;
 
       const updateFit = () => {
         const rect = wrapper.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0 || fitWidth <= 0 || fitHeight <= 0) return;
-        const scaleX = rect.width / fitWidth;
-        const scaleY = rect.height / fitHeight;
-        const scale = Math.min(scaleX, scaleY) * fitSafety;
+        const scaleByWidth = rect.width / fitWidth;
+        const scaleByHeight = rect.height / fitHeight;
+        const scale = singleCardFit
+          ? Math.min(
+              scaleByHeight * SINGLE_CARD_HEIGHT_SAFETY,
+              scaleByWidth * SINGLE_CARD_WIDTH_SAFETY
+            )
+          : Math.min(scaleByWidth, scaleByHeight) * fitSafety;
         if (!Number.isFinite(scale) || scale <= 0) return;
         stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
-        debugLog("production runtime fit", {
-          widgetIndex,
-          cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
-          virtual: `${fitWidth}x${fitHeight}`,
-          scaleX: Number(scaleX.toFixed(2)),
-          scaleY: Number(scaleY.toFixed(2)),
-          effectiveScale: Number(scale.toFixed(2)),
-          dpr: window.devicePixelRatio,
-        });
+        if (singleCardFit) {
+          debugLog("production runtime fit single-card", {
+            widgetIndex,
+            cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+            virtual: `${fitWidth}x${fitHeight}`,
+            scaleByHeight: Number(scaleByHeight.toFixed(2)),
+            scaleByWidth: Number(scaleByWidth.toFixed(2)),
+            effectiveScale: Number(scale.toFixed(2)),
+            heightSafety: SINGLE_CARD_HEIGHT_SAFETY,
+            widthSafety: SINGLE_CARD_WIDTH_SAFETY,
+            dpr: window.devicePixelRatio,
+          });
+        } else {
+          debugLog("production runtime fit", {
+            widgetIndex,
+            cell: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+            virtual: `${fitWidth}x${fitHeight}`,
+            scaleX: Number(scaleByWidth.toFixed(2)),
+            scaleY: Number(scaleByHeight.toFixed(2)),
+            effectiveScale: Number(scale.toFixed(2)),
+            dpr: window.devicePixelRatio,
+          });
+        }
       };
       const observer = new ResizeObserver(updateFit);
       observer.observe(wrapper);
@@ -174,7 +204,10 @@
       container.style.setProperty("--cols", String(cols));
       const allProductionAutoFit = widgetCount > 0 && config.widgets.every(isProductionAutoFitWidget);
       container.classList.toggle("production-grid-layout", allProductionAutoFit);
-      container.classList.toggle("single-production-widget", allProductionAutoFit && widgetCount === 1);
+      container.classList.toggle(
+        "production-grid-single-fit",
+        isSingleProductionAutoFitLayout(config, config.widgets[0], widgetCount)
+      );
 
       const minRows = Number(config.rows || 0);
       const targetRows = Math.max(minRows, Math.ceil(widgetCount / cols));
@@ -923,7 +956,7 @@
             stage.className = "production-fit-stage";
             stage.appendChild(frame);
             wrapper.appendChild(stage);
-            updateProductionFit = setupProductionAutoFit(wrapper, stage, w, index);
+            updateProductionFit = setupProductionAutoFit(wrapper, stage, w, index, config, widgetCount);
           } else {
             wrapper.appendChild(frame);
           }
