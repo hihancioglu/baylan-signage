@@ -826,6 +826,9 @@ def _parse_inventory_ids(value) -> list[str]:
 
 PRODUCTION_WIDGET_BASE_URL = "https://hub.baylan.info.tr/automation/production-widget"
 PRODUCTION_GRID_BASE_SCALE = 2.8
+PRODUCTION_FIT_BASE_WIDTH = 640
+PRODUCTION_FIT_BASE_HEIGHT = 520
+PRODUCTION_FIT_SAFETY = 0.97
 
 
 def _production_grid_dimensions(count: int) -> tuple[int, int]:
@@ -919,22 +922,31 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
         }
 
     columns, rows = _production_grid_dimensions(len(inventory_ids))
-    # The Hub page can measure the actual CSS viewport of each iframe.  Grid
-    # dimensions are deliberately only layout metadata; deriving a numeric
-    # scale from them cannot account for the viewport, engine gaps, or DPI.
-    effective_scale = "auto" if config["scale_mode"] == "auto" else config["scale"]
+    auto_fit = config["scale_mode"] == "auto"
+    # Hub always renders its neutral numeric scale in auto mode. The signage
+    # client owns fitting the complete iframe to the actual grid cell.
+    effective_scale = "1" if auto_fit else config["scale"]
+
+    def production_widget(inventory_id: str) -> dict:
+        widget = {
+            "type": "iframe",
+            "url": _production_widget_url(config, inventory_id, effective_scale),
+            "reload_policy": "stable",
+        }
+        if auto_fit:
+            widget.update({
+                "fit_mode": "production_auto",
+                "fit_width": PRODUCTION_FIT_BASE_WIDTH,
+                "fit_height": PRODUCTION_FIT_BASE_HEIGHT,
+                "fit_safety": PRODUCTION_FIT_SAFETY,
+            })
+        return widget
+
     return {
         "name": name,
         "columns": columns,
         "rows": rows,
-        "widgets": [
-            {
-                "type": "iframe",
-                "url": _production_widget_url(config, inventory_id, effective_scale),
-                "reload_policy": "stable",
-            }
-            for inventory_id in inventory_ids
-        ],
+        "widgets": [production_widget(inventory_id) for inventory_id in inventory_ids],
     }
 
 

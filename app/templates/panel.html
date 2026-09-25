@@ -1251,6 +1251,9 @@ function parseInventoryIds(value){
 
 const PRODUCTION_GRID_DEFAULT_URL = 'https://hub.baylan.info.tr/automation/production-widget';
 const PRODUCTION_GRID_BASE_SCALE = 2.8;
+const PRODUCTION_FIT_BASE_WIDTH = 640;
+const PRODUCTION_FIT_BASE_HEIGHT = 520;
+const PRODUCTION_FIT_SAFETY = 0.97;
 
 function productionGridDimensions(count){
   const size = Math.max(1, Number(count) || 0);
@@ -2053,7 +2056,9 @@ function updateWidgetPreview(){
       .url-wrap,.html-wrap,.dashboard-wrap{width:100%;height:100%;}
       .live-frame{width:100%;height:100%;border:0;background:#000;display:block;}
       .dashboard-wrap{display:grid;gap:10px;padding:10px;box-sizing:border-box;grid-template-columns:repeat(var(--cols,1), minmax(0,1fr));grid-auto-rows:minmax(0,1fr);}
-      .dashboard-cell{background:#0f172a;border-radius:8px;overflow:hidden;min-height:0;min-width:0;}
+      .dashboard-cell{background:#0f172a;border-radius:8px;overflow:hidden;min-height:0;min-width:0;position:relative;}
+      .production-fit-stage{position:absolute;left:50%;top:50%;transform-origin:center center;}
+      .production-fit-stage .live-frame{width:100%;height:100%;}
       .dashboard-cell-empty{display:flex;align-items:center;justify-content:center;color:#64748b;font-size:15px;border:1px dashed rgba(148,163,184,.35);background:rgba(15,23,42,.7);}
       .warning{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box;color:#fecaca;background:#450a0a;text-align:center;}
     </style></head><body>${body}</body></html>`;
@@ -2145,7 +2150,8 @@ function updateWidgetPreview(){
       const device = deviceIndex === '' ? null : (cachedDevices || [])[Number(deviceIndex)];
       const inventoryIds = parseInventoryIds(device?.inventory_id);
       const dimensions = productionGridDimensions(inventoryIds.length);
-      const effectiveScale = productionConfig.scale_mode === 'auto' ? 'auto' : productionConfig.scale;
+      const autoFit = productionConfig.scale_mode === 'auto';
+      const effectiveScale = autoFit ? '1' : productionConfig.scale;
       config = {
         columns: dimensions.columns,
         rows: dimensions.rows,
@@ -2159,7 +2165,14 @@ function updateWidgetPreview(){
             if(effectiveScale == null) url.searchParams.delete('scale');
             else url.searchParams.set('scale', String(effectiveScale));
           } catch(_err) { return {type: 'empty'}; }
-          return {type: 'iframe', url: url.toString()};
+          const widget = {type: 'iframe', url: url.toString()};
+          if(autoFit){
+            widget.fit_mode = 'production_auto';
+            widget.fit_width = PRODUCTION_FIT_BASE_WIDTH;
+            widget.fit_height = PRODUCTION_FIT_BASE_HEIGHT;
+            widget.fit_safety = PRODUCTION_FIT_SAFETY;
+          }
+          return widget;
         })
       };
       if(!inventoryIds.length){
@@ -2177,7 +2190,7 @@ function updateWidgetPreview(){
       const rowSpan = Math.max(1, Number(w?.row_span || w?.rowspan || w?.merge_rows || 1) || 1);
       if(!w || typeof w !== 'object' || w.type === 'empty') return {type: 'empty', source: '', colSpan, rowSpan};
       const widgetType = String(w.type || '').toLowerCase();
-      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
+      if(widgetType === 'iframe' || widgetType === 'url') return {type: 'iframe', source: String(w.url || w.content || '').trim(), colSpan, rowSpan, fitMode: String(w.fit_mode || ''), fitWidth: Number(w.fit_width), fitHeight: Number(w.fit_height), fitSafety: Number(w.fit_safety)};
       if(widgetType === 'video') return {type: 'video', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'image') return {type: 'image', source: String(w.url || w.content || '').trim(), colSpan, rowSpan};
       if(widgetType === 'playlist') return {type: 'playlist', source: `playlist:${String(w.playlist_id || '').trim()}`, colSpan, rowSpan};
@@ -2212,9 +2225,16 @@ function updateWidgetPreview(){
       }
       const url = normalizeUrl(cell.source);
       if(!url) return `<div class="dashboard-cell dashboard-cell-empty"${spanStyle}>Boş</div>`;
+      if(cell.fitMode === 'production_auto'){
+        const fitWidth = cell.fitWidth > 0 ? cell.fitWidth : PRODUCTION_FIT_BASE_WIDTH;
+        const fitHeight = cell.fitHeight > 0 ? cell.fitHeight : PRODUCTION_FIT_BASE_HEIGHT;
+        const fitSafety = cell.fitSafety > 0 ? cell.fitSafety : PRODUCTION_FIT_SAFETY;
+        return `<div class="dashboard-cell production-auto-fit" data-fit-width="${fitWidth}" data-fit-height="${fitHeight}" data-fit-safety="${fitSafety}"${spanStyle}><div class="production-fit-stage" style="width:${fitWidth}px;height:${fitHeight}px"><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div></div>`;
+      }
       return `<div class="dashboard-cell"${spanStyle}><iframe class="live-frame" src="${escapeHtml(url)}" referrerpolicy="no-referrer"></iframe></div>`;
     }).join('');
-    renderPreviewDoc(`<div class="dashboard-wrap root" style="--cols:${cols};grid-template-rows:repeat(${rows}, minmax(0,1fr));">${cellsHtml}</div>`);
+    const previewFitScript = `<script>(()=>{document.querySelectorAll('.production-auto-fit').forEach((wrapper)=>{const stage=wrapper.querySelector('.production-fit-stage');const update=()=>{const rect=wrapper.getBoundingClientRect();const width=Number(wrapper.dataset.fitWidth);const height=Number(wrapper.dataset.fitHeight);const safety=Number(wrapper.dataset.fitSafety);if(rect.width<=0||rect.height<=0||width<=0||height<=0)return;const scaleX=rect.width/width;const scaleY=rect.height/height;const scale=Math.min(scaleX,scaleY)*safety;if(scale>0)stage.style.transform='translate(-50%, -50%) scale('+scale+')';};new ResizeObserver(update).observe(wrapper);update();});})();<\/script>`;
+    renderPreviewDoc(`<div class="dashboard-wrap root" style="--cols:${cols};grid-template-rows:repeat(${rows}, minmax(0,1fr));">${cellsHtml}</div>${previewFitScript}`);
     return;
   }
 

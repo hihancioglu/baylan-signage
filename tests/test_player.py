@@ -18,6 +18,14 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def _build_player(self):
         return BorderlessFullscreenPlayer()
 
+    def test_production_auto_fit_metadata_survives_player_normalization(self):
+        player = self._build_player()
+        widget = {"type": "iframe", "url": "https://example.com", "fit_mode": "production_auto", "fit_width": 640, "fit_height": 520, "fit_safety": 0.97}
+
+        result = player._normalize_widget_payload({"widgets": [widget]})
+
+        self.assertEqual(result["widgets"][0], widget)
+
     def test_play_blocking_ignores_stdout_oserror(self):
         player = self._build_player()
         with patch("builtins.print", side_effect=OSError(6, "invalid handle")):
