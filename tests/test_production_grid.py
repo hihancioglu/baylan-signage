@@ -97,6 +97,12 @@ class TestProductionGrid(unittest.TestCase):
                     self.assertEqual(widget["fit_width"], 1100)
                     self.assertEqual(widget["fit_height"], 900)
                     self.assertEqual(widget["fit_safety"], 0.97)
+                    self.assertEqual(widget["fit_content_zoom"], 1.55)
+
+    def test_manual_mode_does_not_add_client_content_zoom_metadata(self):
+        widget = self._payload("576", scale_mode="manual", scale=1.25)["widgets"][0]
+
+        self.assertNotIn("fit_content_zoom", widget)
 
     def test_seven_inventory_grid_delegates_layout_to_client_auto_fit(self):
         payload = self._payload("576,577,578,579,580,581,582", scale_mode="auto")

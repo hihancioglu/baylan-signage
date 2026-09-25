@@ -830,6 +830,7 @@ PRODUCTION_AUTO_HUB_SCALE = 2.8
 PRODUCTION_FIT_BASE_WIDTH = 1100
 PRODUCTION_FIT_BASE_HEIGHT = 900
 PRODUCTION_FIT_SAFETY = 0.97
+PRODUCTION_FIT_CONTENT_ZOOM = 1.55
 
 
 def _production_grid_dimensions(count: int) -> tuple[int, int]:
@@ -940,6 +941,7 @@ def _build_production_grid_payload(device, production_config, name="Üretim Ekra
                 "fit_width": PRODUCTION_FIT_BASE_WIDTH,
                 "fit_height": PRODUCTION_FIT_BASE_HEIGHT,
                 "fit_safety": PRODUCTION_FIT_SAFETY,
+                "fit_content_zoom": PRODUCTION_FIT_CONTENT_ZOOM,
             })
         return widget
 
