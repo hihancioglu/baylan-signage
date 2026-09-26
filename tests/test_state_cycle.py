@@ -10,6 +10,14 @@ import client.client as main
 
 class TestRunStateCycle(unittest.TestCase):
     def setUp(self):
+        # Keep state-cycle tests independent of the host's real input state.
+        # Windows exposes a valid last-input tick, while non-Windows hosts return
+        # no tick; tests that exercise raw-input handling opt in with their own
+        # patch below.
+        self.last_input_tick_patcher = patch.object(main, "get_last_input_tick", return_value=None)
+        self.last_input_tick_patcher.start()
+        self.addCleanup(self.last_input_tick_patcher.stop)
+
         self.orig_state = main.current_state
         self.orig_idle_mode = main.idle_mode_enabled
         self.orig_content_enabled = main.content_enabled
