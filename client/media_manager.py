@@ -635,35 +635,38 @@ class MediaManager:
         entries = state.get("last_successful_playlist_entries") or []
         existing_entries = []
         for entry in entries:
-            local_path = str((entry or {}).get("local_path") or "")
-            if local_path and self._path_exists_safely(Path(local_path)):
-                existing_entries.append(
-                    {
-                        "local_path": local_path,
-                        "duration_sec": (entry or {}).get("duration_sec"),
-                        "media_type": (entry or {}).get("media_type"),
-                        "item_type": (entry or {}).get("item_type"),
-                        "display_name": (entry or {}).get("display_name"),
-                        "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
-                        "widget_payload": (entry or {}).get("widget_payload"),
-                        "widget_url": (entry or {}).get("widget_url"),
-                        "columns": (entry or {}).get("columns"),
-                    }
-                )
-            elif str((entry or {}).get("item_type") or "").strip().lower() == "widget":
-                existing_entries.append(
-                    {
-                        "local_path": local_path,
-                        "duration_sec": (entry or {}).get("duration_sec"),
-                        "media_type": (entry or {}).get("media_type"),
-                        "item_type": "widget",
-                        "display_name": (entry or {}).get("display_name"),
-                        "widget_requires_download": bool((entry or {}).get("widget_requires_download")),
-                        "widget_payload": (entry or {}).get("widget_payload"),
-                        "widget_url": (entry or {}).get("widget_url"),
-                        "columns": (entry or {}).get("columns"),
-                    }
-                )
+            if not isinstance(entry, dict):
+                continue
+
+            local_path = str(entry.get("local_path") or "").strip()
+            item_type = str(entry.get("item_type") or "").strip().lower()
+            widget_payload = entry.get("widget_payload")
+            widget_url = str(entry.get("widget_url") or "").strip()
+
+            if item_type == "widget":
+                has_widget_content = bool(widget_payload or widget_url or local_path)
+                if not has_widget_content:
+                    continue
+                if local_path and not self._is_url(local_path) and not self._path_exists_safely(Path(local_path)):
+                    continue
+            elif not local_path or not self._path_exists_safely(Path(local_path)):
+                continue
+
+            normalized_entry = dict(entry)
+            normalized_entry.update(
+                {
+                    "local_path": local_path,
+                    "duration_sec": entry.get("duration_sec"),
+                    "media_type": entry.get("media_type"),
+                    "item_type": item_type or entry.get("item_type"),
+                    "display_name": entry.get("display_name"),
+                    "widget_requires_download": bool(entry.get("widget_requires_download")),
+                    "widget_payload": widget_payload,
+                    "widget_url": entry.get("widget_url"),
+                    "columns": entry.get("columns"),
+                }
+            )
+            existing_entries.append(normalized_entry)
         return existing_entries
 
     def load_playback_state(self) -> dict:

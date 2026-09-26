@@ -183,6 +183,66 @@ class TestMediaManagerDownloadJitter(unittest.TestCase):
             self.assertEqual(entries[1]["item_type"], "widget")
             self.assertEqual(entries[1]["columns"], [{"width": 12}])
 
+    def test_load_last_successful_playlist_entries_restores_pathless_widget(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            widget_payload = {
+                "name": "Üretim Durumu",
+                "widgets": [{"type": "iframe", "url": "https://example.com"}],
+            }
+            manager._save_state({"last_successful_playlist_entries": [{
+                "local_path": "", "duration_sec": 30, "media_type": "widget",
+                "item_type": "widget", "display_name": "Production Grid",
+                "widget_requires_download": False, "widget_payload": widget_payload,
+                "widget_url": None, "columns": 1,
+            }]})
+
+            entries = manager.load_last_successful_playlist_entries()
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["item_type"], "widget")
+            self.assertEqual(entries[0]["local_path"], "")
+            self.assertEqual(entries[0]["widget_payload"], widget_payload)
+
+    def test_load_last_successful_playlist_entries_drops_empty_widget(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            manager._save_state({"last_successful_playlist_entries": [{
+                "local_path": "", "item_type": "widget",
+                "widget_payload": None, "widget_url": None,
+            }]})
+            self.assertEqual(manager.load_last_successful_playlist_entries(), [])
+
+    def test_load_last_successful_playlist_entries_keeps_existing_media_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            existing = Path(tmpdir) / "existing.jpg"
+            existing.write_bytes(b"image")
+            manager._save_state({"last_successful_playlist_entries": [
+                {"local_path": str(existing), "item_type": "media", "media_type": "image"},
+                {"local_path": str(Path(tmpdir) / "missing.jpg"), "item_type": "media", "media_type": "image"},
+            ]})
+
+            entries = manager.load_last_successful_playlist_entries()
+
+            self.assertEqual([entry["local_path"] for entry in entries], [str(existing)])
+
+    def test_load_last_successful_playlist_entries_restores_url_widget(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = MediaManager(cache_root=tmpdir)
+            url = "https://widget.example.com"
+            manager._save_state({"last_successful_playlist_entries": [{
+                "local_path": url, "item_type": "widget", "media_type": "widget",
+                "widget_payload": {"name": "Widget"}, "widget_url": url,
+            }]})
+
+            with patch.object(manager, "_path_exists_safely") as exists_mock:
+                entries = manager.load_last_successful_playlist_entries()
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["local_path"], url)
+            exists_mock.assert_not_called()
+
 
 class TestMediaManagerSourceResolution(unittest.TestCase):
     def test_sync_playlist_entries_resolves_relative_media_url_with_server_base(self):
