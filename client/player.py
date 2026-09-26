@@ -259,6 +259,14 @@ class BorderlessFullscreenPlayer:
         self._widget_runtime_processes: list[subprocess.Popen] = []
         self._widget_process_stdin_lock = threading.Lock()
         self._widget_runtime_is_backgrounded = True
+        self._widget_runtime_backgrounded_at: float | None = None
+        self._widget_runtime_shutdown_timer: threading.Timer | None = None
+        try:
+            self._widget_runtime_warm_timeout_sec = max(
+                0.0, float(os.getenv("WIDGET_RUNTIME_WARM_TIMEOUT_SEC", "90"))
+            )
+        except (TypeError, ValueError):
+            self._widget_runtime_warm_timeout_sec = 90.0
         self._widget_runtime_restart_count = 0
         self._python_widget_viewer_supported = self._detect_python_widget_viewer_support()
         self._python_widget_viewer_runtime_enabled = True
@@ -1449,6 +1457,7 @@ class BorderlessFullscreenPlayer:
         if not command:
             return None
         command.append("--runtime-ipc")
+        command.append("--baylan-widget-runtime")
         command.append("--start-hidden")
         if isinstance(monitor_index, int) and monitor_index >= 0:
             command.extend(["--monitor", str(monitor_index)])
@@ -1456,6 +1465,65 @@ class BorderlessFullscreenPlayer:
             x, y, width, height = monitor_bounds
             command.append(f"--monitor-bounds={x},{y},{width},{height}")
         return command
+
+    def _cancel_widget_runtime_shutdown_locked(self) -> None:
+        timer = self._widget_runtime_shutdown_timer
+        self._widget_runtime_shutdown_timer = None
+        self._widget_runtime_backgrounded_at = None
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule_widget_runtime_shutdown_locked(self) -> None:
+        self._cancel_widget_runtime_shutdown_locked()
+        backgrounded_at = time.monotonic()
+        self._widget_runtime_backgrounded_at = backgrounded_at
+        timeout = self._widget_runtime_warm_timeout_sec
+
+        def _expire() -> None:
+            with self._widget_process_lock:
+                if (
+                    self._widget_runtime_backgrounded_at != backgrounded_at
+                    or not self._widget_runtime_is_backgrounded
+                ):
+                    return
+                self._widget_runtime_shutdown_timer = None
+                _debug_log(f"widget runtime warm timeout expired | timeout_sec={timeout}")
+                # RLock makes this re-entrant and prevents a foreground request
+                # from racing between the expiry check and process termination.
+                self.stop_widget_engine()
+
+        timer = threading.Timer(timeout, _expire)
+        timer.daemon = True
+        self._widget_runtime_shutdown_timer = timer
+        timer.start()
+
+    def _normalize_widget_runtime_processes_locked(self) -> list[subprocess.Popen]:
+        """Keep one live viewer per monitor, preserving the first (canonical) process."""
+        running: list[subprocess.Popen] = []
+        canonical_by_monitor: dict[int | None, subprocess.Popen] = {}
+        duplicates: list[subprocess.Popen] = []
+        for process in self._widget_runtime_processes:
+            if not process or process.poll() is not None:
+                continue
+            monitor_index = self._monitor_index_from_process(process)
+            # Only explicit ``--monitor N`` runtimes are comparable. Older
+            # launchers without that argument must not be collapsed together.
+            if monitor_index is not None and monitor_index in canonical_by_monitor:
+                duplicates.append(process)
+            else:
+                if monitor_index is not None:
+                    canonical_by_monitor[monitor_index] = process
+                running.append(process)
+        for process in duplicates:
+            _debug_log(
+                "widget runtime duplicate terminated | "
+                f"monitor={self._monitor_index_from_process(process)} pid={getattr(process, 'pid', None)}"
+            )
+            self._terminate_process(process, timeout_sec=2, force_tree=True)
+        self._widget_runtime_processes = running
+        self._widget_process = running[0] if running else None
+        self._extra_processes = running[1:]
+        return running
 
     def start_widget_engine_if_needed(
         self,
@@ -1466,6 +1534,7 @@ class BorderlessFullscreenPlayer:
         if not self._widget_runtime_controller_enabled():
             return False
         with self._widget_process_lock:
+            self._cancel_widget_runtime_shutdown_locked()
             runtime_targets = self._resolve_widget_runtime_monitor_targets(
                 target_monitor_index=target_monitor_index,
                 clone_to_all_monitors=clone_to_all_monitors,
@@ -1482,10 +1551,7 @@ class BorderlessFullscreenPlayer:
                 bool(clone_to_all_monitors),
                 target_monitor_index if isinstance(target_monitor_index, int) and target_monitor_index >= 0 else None,
             )
-            running_processes = [
-                process for process in self._widget_runtime_processes
-                if process and process.poll() is None
-            ]
+            running_processes = self._normalize_widget_runtime_processes_locked()
             _debug_log(
                 "widget runtime ensure begin | "
                 f"target_monitor_index={target_monitor_index} clone_to_all_monitors={clone_to_all_monitors} "
@@ -1809,6 +1875,7 @@ class BorderlessFullscreenPlayer:
 
     def stop_widget_engine(self) -> None:
         with self._widget_process_lock:
+            self._cancel_widget_runtime_shutdown_locked()
             self._widget_runtime_is_backgrounded = True
             processes = [
                 process for process in self._runtime_processes_snapshot()
@@ -1950,6 +2017,7 @@ class BorderlessFullscreenPlayer:
                 f"success_count={success_count} failed_count={len(failed_processes)}"
             )
             self._widget_runtime_is_backgrounded = True
+            self._schedule_widget_runtime_shutdown_locked()
             return True
 
     def has_visible_widget_runtime_content(self) -> bool:
@@ -2364,11 +2432,15 @@ class BorderlessFullscreenPlayer:
                 _debug_log("play_widget_blocking runtime-controller path active")
                 return self.wait_widget_duration(duration_sec)
             if not self._widget_legacy_process_fallback_enabled():
+                _debug_log(
+                    "play_widget_blocking runtime-controller update failed; "
+                    "legacy fallback disabled by WIDGET_LEGACY_PROCESS_FALLBACK"
+                )
                 self._last_interrupted = False
                 return False
             _debug_log(
                 "play_widget_blocking runtime-controller update failed; "
-                "falling back to legacy widget process launcher"
+                "falling back to legacy widget process launcher | reason=start_or_update_failed"
             )
 
         with self._widget_process_lock:

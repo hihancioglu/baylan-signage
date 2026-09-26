@@ -31,6 +31,83 @@ from logging.handlers import TimedRotatingFileHandler, WatchedFileHandler
 
 import socketio
 
+
+WIDGET_RUNTIME_MARKER = "--baylan-widget-runtime"
+
+
+def _widget_runtime_telemetry(psutil_module=None) -> dict[str, object] | None:
+    """Return best-effort RAM data for marked Baylan viewers and their WebView2 children."""
+    if platform.system().lower() != "windows":
+        return None
+    try:
+        psutil_module = psutil_module or importlib.import_module("psutil")
+        viewers = []
+        for process in psutil_module.process_iter(["pid", "cmdline"]):
+            command = [str(part) for part in (process.info.get("cmdline") or [])]
+            if WIDGET_RUNTIME_MARKER in command and "--runtime-ipc" in command:
+                viewers.append(process)
+
+        viewer_rss = 0
+        webview_rss = 0
+        webview_pids: set[int] = set()
+        for viewer in viewers:
+            viewer_rss += int(viewer.memory_info().rss)
+            for child in viewer.children(recursive=True):
+                if child.name().lower() != "msedgewebview2.exe" or child.pid in webview_pids:
+                    continue
+                webview_pids.add(child.pid)
+                webview_rss += int(child.memory_info().rss)
+        mb = 1024 * 1024
+        return {
+            "viewer_process_count": len(viewers),
+            "viewer_pids": sorted(int(process.pid) for process in viewers),
+            "webview2_process_count": len(webview_pids),
+            "viewer_ram_mb": round(viewer_rss / mb, 1),
+            "webview2_ram_mb": round(webview_rss / mb, 1),
+            "total_ram_mb": round((viewer_rss + webview_rss) / mb, 1),
+        }
+    except Exception as exc:
+        log_debug(f"widget runtime telemetry skipped | error={exc}")
+        return None
+
+
+def _cleanup_orphaned_widget_runtimes(psutil_module=None) -> int:
+    """Kill only marked viewers whose recorded agent parent no longer exists."""
+    if platform.system().lower() != "windows":
+        return 0
+    cleaned = 0
+    try:
+        psutil_module = psutil_module or importlib.import_module("psutil")
+        for process in psutil_module.process_iter(["pid", "cmdline"]):
+            command = [str(part) for part in (process.info.get("cmdline") or [])]
+            if WIDGET_RUNTIME_MARKER not in command or "--runtime-ipc" not in command:
+                continue
+            try:
+                parent_arg = command.index("--parent-pid")
+                parent_pid = int(command[parent_arg + 1])
+            except (ValueError, IndexError, TypeError):
+                continue
+            if parent_pid > 0 and psutil_module.pid_exists(parent_pid):
+                continue
+            children = process.children(recursive=True)
+            for target in reversed(children + [process]):
+                try:
+                    target.terminate()
+                except Exception:
+                    pass
+            _, alive = psutil_module.wait_procs(children + [process], timeout=2)
+            for target in alive:
+                try:
+                    target.kill()
+                except Exception:
+                    pass
+            cleaned += 1
+        if cleaned:
+            log_warning(f"orphan Baylan widget runtime cleanup | viewer_count={cleaned}")
+    except Exception as exc:
+        log_debug(f"orphan widget runtime cleanup skipped | error={exc}")
+    return cleaned
+
 if platform.system().lower().startswith("win"):
     import msvcrt
 else:
@@ -4782,6 +4859,7 @@ def main():
         return
 
     try:
+        _cleanup_orphaned_widget_runtimes()
         if RUNTIME_TMP_CLEANUP_ENABLED:
             cleanup_runtime_tmp_dir()
             _start_runtime_tmp_cleanup_worker()
@@ -4847,21 +4925,25 @@ def main():
 
                     try:
                         current_mac_address = refresh_connection_identity("heartbeat")
+                        heartbeat_payload = {
+                            "hostname": hostname,
+                            "mac_address": current_mac_address,
+                            "current_state": current_state.value,
+                            "state": current_state.value,
+                            "idle_seconds": round(idle_sec, 1),
+                            "os_name": platform.system(),
+                            "agent_version": CLIENT_VERSION,
+                            "updater_version": get_runtime_updater_version(),
+                            "content_name": playback.current_content_name(),
+                            **_get_cpu_temperature_payload(),
+                            **_get_update_status_payload(),
+                        }
+                        widget_runtime = _widget_runtime_telemetry()
+                        if widget_runtime is not None:
+                            heartbeat_payload["widget_runtime"] = widget_runtime
                         sio.emit(
                             "heartbeat",
-                            {
-                                "hostname": hostname,
-                                "mac_address": current_mac_address,
-                                "current_state": current_state.value,
-                                "state": current_state.value,
-                                "idle_seconds": round(idle_sec, 1),
-                                "os_name": platform.system(),
-                                "agent_version": CLIENT_VERSION,
-                                "updater_version": get_runtime_updater_version(),
-                                "content_name": playback.current_content_name(),
-                                **_get_cpu_temperature_payload(),
-                                **_get_update_status_payload(),
-                            },
+                            heartbeat_payload,
                         )
                         print(f"💓 heartbeat sent | state={current_state.value} idle={idle_sec:.1f}s")
                     except Exception as heartbeat_err:
