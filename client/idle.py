@@ -13,19 +13,35 @@ class LASTINPUTINFO(ctypes.Structure):
     ]
 
 
+def _get_last_input_info() -> LASTINPUTINFO:
+    """Read Windows' most recent input record."""
+    last_input_info = LASTINPUTINFO()
+    last_input_info.cbSize = ctypes.sizeof(LASTINPUTINFO)
+
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(last_input_info)):
+        raise OSError("GetLastInputInfo failed")
+    return last_input_info
+
+
+def get_last_input_tick() -> int:
+    """Return the raw 32-bit Windows last-input tick, or 0 when unsupported.
+
+    The counter wraps, so callers must use this value only as an event token and
+    compare it for equality. It must not be used to calculate elapsed time.
+    """
+    if not platform.system().lower().startswith("win"):
+        return 0
+
+    return int(_get_last_input_info().dwTime)
+
+
 def get_idle_seconds() -> float:
     """Return elapsed seconds since the last keyboard/mouse/touch interaction."""
     if not platform.system().lower().startswith("win"):
         return 0.0
 
-    user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
-
-    last_input_info = LASTINPUTINFO()
-    last_input_info.cbSize = ctypes.sizeof(LASTINPUTINFO)
-
-    if not user32.GetLastInputInfo(ctypes.byref(last_input_info)):
-        raise OSError("GetLastInputInfo failed")
+    last_input_info = _get_last_input_info()
 
     try:
         get_tick_count64 = kernel32.GetTickCount64

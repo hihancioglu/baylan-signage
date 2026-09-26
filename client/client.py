@@ -503,6 +503,7 @@ def _import_client_modules():
 
 _idle_module, _media_manager_module, _player_module, _state_machine_module = _import_client_modules()
 get_idle_seconds = _idle_module.get_idle_seconds
+get_last_input_tick = _idle_module.get_last_input_tick
 MediaManager = _media_manager_module.MediaManager
 BorderlessFullscreenPlayer = _player_module.BorderlessFullscreenPlayer
 ClientState = _state_machine_module.ClientState
@@ -1443,6 +1444,11 @@ current_state = ClientState.ACTIVE
 _last_observed_idle_sec: float | None = None
 _activity_drop_streak = 0
 _low_idle_streak = 0
+_idle_pending_input_tick: int | None = None
+_playback_input_baseline_tick: int | None = None
+_pending_user_activity = False
+_pending_user_activity_tick: int | None = None
+_pending_activity_wait_logged = False
 last_idle_switch_ts = 0.0
 last_state_change = 0.0
 emergency_active = False
@@ -4460,6 +4466,8 @@ def set_state(next_state: ClientState, reason: str, *, force: bool = False):
     global current_state
     global playing_started_at
     global last_state_change
+    global _idle_pending_input_tick, _playback_input_baseline_tick
+    global _pending_user_activity, _pending_user_activity_tick, _pending_activity_wait_logged
 
     if next_state == current_state:
         log_debug(f"set_state no-op | state={current_state.value} reason={reason}")
@@ -4475,8 +4483,30 @@ def set_state(next_state: ClientState, reason: str, *, force: bool = False):
 
     prev = current_state
     current_state = next_state
+    if next_state in {ClientState.ACTIVE, ClientState.EMERGENCY, ClientState.IDLE_PENDING}:
+        _playback_input_baseline_tick = None
+        _pending_user_activity = False
+        _pending_user_activity_tick = None
+        _pending_activity_wait_logged = False
+    if next_state == ClientState.IDLE_PENDING:
+        try:
+            tick = get_last_input_tick()
+            _idle_pending_input_tick = tick if tick > 0 else None
+        except Exception:
+            _idle_pending_input_tick = None
+    elif next_state != ClientState.PLAYING:
+        _idle_pending_input_tick = None
     if next_state == ClientState.PLAYING:
         playing_started_at = time.monotonic()
+        try:
+            tick = get_last_input_tick()
+            _playback_input_baseline_tick = tick if tick > 0 else None
+        except Exception:
+            _playback_input_baseline_tick = None
+        _idle_pending_input_tick = None
+        _pending_user_activity = False
+        _pending_user_activity_tick = None
+        _pending_activity_wait_logged = False
     log_state_transition(prev, next_state, reason)
     print(f"🔁 STATE {prev.value} -> {next_state.value} | {reason}")
     log_debug(f"state transition committed | from={prev.value} to={next_state.value} reason={reason}")
@@ -4687,6 +4717,8 @@ def on_call_request_cancel_result(data):
 
 def run_state_cycle():
     global _last_observed_idle_sec, _activity_drop_streak, _low_idle_streak, last_idle_switch_ts
+    global _idle_pending_input_tick, _playback_input_baseline_tick
+    global _pending_user_activity, _pending_user_activity_tick, _pending_activity_wait_logged
 
     def _playback_has_selected_content() -> bool:
         if playback.current_content_name():
@@ -4771,6 +4803,38 @@ def run_state_cycle():
         idle_background.show()
 
     idle_sec = get_idle_seconds()
+    current_input_tick = None
+    try:
+        raw_input_tick = get_last_input_tick()
+        if raw_input_tick > 0:
+            current_input_tick = raw_input_tick
+    except Exception as exc:
+        log_debug(f"last_input_tick unavailable | error={exc}")
+
+    input_changed = False
+    raw_input_available = current_input_tick is not None
+    if current_state == ClientState.IDLE_PENDING and raw_input_available:
+        if _idle_pending_input_tick is None:
+            _idle_pending_input_tick = current_input_tick
+        else:
+            input_changed = current_input_tick != _idle_pending_input_tick
+            if input_changed:
+                _idle_pending_input_tick = current_input_tick
+    elif current_state == ClientState.PLAYING and raw_input_available:
+        if _playback_input_baseline_tick is None:
+            _playback_input_baseline_tick = current_input_tick
+        else:
+            previous_input_tick = _playback_input_baseline_tick
+            input_changed = current_input_tick != previous_input_tick
+            if input_changed:
+                _pending_user_activity = True
+                _pending_user_activity_tick = current_input_tick
+                _playback_input_baseline_tick = current_input_tick
+                log_debug(
+                    "user_activity detected | source=last_input_tick "
+                    f"previous_tick={previous_input_tick} current_tick={current_input_tick} "
+                    "state=PLAYING pending=true"
+                )
     previous_idle_sec = _last_observed_idle_sec
     _last_observed_idle_sec = idle_sec
     activity_by_idle_drop = (
@@ -4831,13 +4895,17 @@ def run_state_cycle():
         activity_reason = "low_idle"
     else:
         activity_reason = "none"
-    user_activity_detected = (activity_reason != "none") and not ignore_idle
+    legacy_user_activity_detected = (activity_reason != "none") and not ignore_idle
+    user_activity_detected = input_changed if raw_input_available else legacy_user_activity_detected
     log_debug(
         f"state_cycle sample | state={current_state.value} idle_sec={idle_sec:.3f} "
         f"prev_idle={previous_idle_sec} activity_drop={activity_by_idle_drop} "
         f"drop_streak={_activity_drop_streak} drop_confirmed={activity_drop_confirmed} "
         f"low_idle_streak={_low_idle_streak} low_idle_confirmed={low_idle_confirmed} "
         f"user_activity={user_activity_detected} activity_reason={activity_reason} "
+        f"last_input_tick={current_input_tick} "
+        f"playback_input_baseline_tick={_playback_input_baseline_tick} "
+        f"input_changed={input_changed} pending_user_activity={_pending_user_activity} "
         f"widget_active={widget_active} ignore_idle={ignore_idle} "
         f"idle_mode={idle_mode_enabled} content_enabled={content_enabled} emergency={emergency_active}"
     )
@@ -4906,9 +4974,23 @@ def run_state_cycle():
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS
+    if current_state == ClientState.PLAYING and not raw_input_available and legacy_user_activity_detected:
+        _pending_user_activity = True
+        _pending_user_activity_tick = None
+    if (
+        current_state == ClientState.PLAYING
+        and _pending_user_activity
+        and played_for_sec < minimum_playing_before_return
+        and not _pending_activity_wait_logged
+    ):
+        log_debug(
+            "user_activity pending | "
+            f"played_for_sec={played_for_sec:.3f} minimum_return_sec={minimum_playing_before_return:.3f}"
+        )
+        _pending_activity_wait_logged = True
     erp_is_foreground = None
     foreground_title = ""
-    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and user_activity_detected:
+    if active_item_type == "widget" and WIDGET_RETURN_REQUIRES_ERP_FOREGROUND and _pending_user_activity:
         # Widget penceresi ön planda olduğunda dahi kullanıcı aktivitesi tespit edilirse
         # RETURNING'e geçip ERP'yi öne getirmeyi deniyoruz; aksi halde idle'dan çıkış
         # yalnızca widget hatası/bitişi ile mümkün olabiliyor.
@@ -4923,7 +5005,7 @@ def run_state_cycle():
     if (
         current_state == ClientState.PLAYING
         and played_for_sec >= minimum_playing_before_return
-        and user_activity_detected
+        and _pending_user_activity
     ):
         if active_item_type == "widget":
             if erp_is_foreground is None:
@@ -4934,12 +5016,12 @@ def run_state_cycle():
             if not foreground_title:
                 foreground_title = window_manager.foreground_window_title()
         log_debug(
-            "state_cycle PLAYING -> RETURNING trigger | "
+            "state_cycle PLAYING -> RETURNING | reason=pending_user_input "
             f"item_type={active_item_type or 'unknown'} played_for_sec={played_for_sec:.3f} "
-            f"idle_sec={idle_sec:.3f} activity_reason={activity_reason} "
+            f"idle_sec={idle_sec:.3f} activity_reason=pending_user_input "
             f"erp_is_foreground={erp_is_foreground} foreground_title={foreground_title!r}"
         )
-        set_state(ClientState.RETURNING, f"activity_detected idle={idle_sec:.1f}s", force=True)
+        set_state(ClientState.RETURNING, "pending_user_input", force=True)
 
     if current_state == ClientState.RETURNING:
         log_debug(
