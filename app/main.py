@@ -1101,7 +1101,7 @@ def _extract_widget_runtime(data) -> dict | None:
                 return None
             ram[field] = value
 
-        return {
+        normalized = {
             "viewer_process_count": counts["viewer_process_count"],
             "viewer_pids": list(pids),
             "webview2_process_count": counts["webview2_process_count"],
@@ -1109,6 +1109,14 @@ def _extract_widget_runtime(data) -> dict | None:
             "webview2_ram_mb": ram["webview2_ram_mb"],
             "total_ram_mb": ram["total_ram_mb"],
         }
+        # Optional for compatibility with clients released before logical
+        # runtime instances were reported separately from physical processes.
+        if "runtime_instance_count" in data:
+            value = data["runtime_instance_count"]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return None
+            normalized["runtime_instance_count"] = value
+        return normalized
     except Exception:
         # Telemetry is optional and must never interrupt a heartbeat.
         return None
