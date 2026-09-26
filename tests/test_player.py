@@ -1515,6 +1515,73 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(popen_mock.call_count, 1)
         self.assertEqual(len(started), 1)
 
+    def test_start_widget_engine_normalizes_duplicate_monitor_processes(self):
+        player = self._build_player()
+        canonical = unittest.mock.Mock(args=["widget_viewer", "--monitor", "1"], pid=10)
+        duplicate = unittest.mock.Mock(args=["widget_viewer", "--monitor", "1"], pid=11)
+        canonical.poll.return_value = duplicate.poll.return_value = None
+        player._widget_runtime_processes = [canonical, duplicate]
+        player._last_runtime_signature = (((1, None),), False, 1)
+
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player, "_resolve_widget_runtime_monitor_targets", return_value=[(1, None)]
+        ), patch.object(player, "_terminate_process") as terminate:
+            self.assertTrue(player.start_widget_engine_if_needed(target_monitor_index=1, clone_to_all_monitors=False))
+
+        self.assertEqual(player._widget_runtime_processes, [canonical])
+        terminate.assert_called_once_with(duplicate, timeout_sec=2, force_tree=True)
+
+    def test_background_then_foreground_cancels_warm_shutdown(self):
+        player = self._build_player()
+        process = unittest.mock.Mock(args=["widget_viewer", "--monitor", "0"], pid=10)
+        process.poll.return_value = None
+        process.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [process]
+        player._last_runtime_signature = (((0, None),), False, 0)
+        player._widget_runtime_warm_timeout_sec = 0.03
+
+        self.assertTrue(player.background_widget_engine())
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player, "_resolve_widget_runtime_monitor_targets", return_value=[(0, None)]
+        ), patch.object(player, "_terminate_process") as terminate:
+            self.assertTrue(player.start_widget_engine_if_needed(target_monitor_index=0, clone_to_all_monitors=False))
+            player._widget_runtime_is_backgrounded = False
+            time.sleep(0.06)
+        terminate.assert_not_called()
+        self.assertIsNone(player._widget_runtime_shutdown_timer)
+
+    def test_background_warm_timeout_stops_process_tree(self):
+        player = self._build_player()
+        process = unittest.mock.Mock(args=["widget_viewer", "--monitor", "0"], pid=10)
+        process.poll.return_value = None
+        process.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [process]
+        player._widget_runtime_warm_timeout_sec = 0.01
+
+        with patch.object(player, "_terminate_process") as terminate:
+            self.assertTrue(player.background_widget_engine())
+            time.sleep(0.05)
+
+        terminate.assert_called_once_with(process, timeout_sec=2, force_tree=True)
+        self.assertEqual(player._widget_runtime_processes, [])
+
+    def test_successful_runtime_update_never_spawns_legacy_fallback(self):
+        player = self._build_player()
+        player._python_widget_viewer_supported = True
+        with patch.object(player, "_build_widget_source", return_value="https://example.com/widget"), patch.object(
+            player, "_widget_runtime_controller_enabled", return_value=True
+        ), patch.object(
+            player, "update_widget_layout", return_value=True
+        ), patch.object(player, "wait_widget_duration", return_value=True), patch(
+            "client.player.os.name", "nt"
+        ), patch("subprocess.Popen") as popen:
+            result = player.play_widget_blocking(
+                "https://example.com/widget", 1, target_monitor_index=0
+            )
+
+        self.assertTrue(result)
+        popen.assert_not_called()
+
     def test_start_widget_engine_uses_engine_sentinel_source(self):
         player = self._build_player()
         process = unittest.mock.Mock()
