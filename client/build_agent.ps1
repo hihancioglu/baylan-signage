@@ -5,13 +5,38 @@ param(
     [string]$Name = "BaylanSignageAgent",
     [string]$RuntimeTmpDir = "$env:ProgramData\BaylanSignage\RuntimeTmp",
     [switch]$SkipInstallPyInstaller,
-    [switch]$ForceUpgradePyInstaller
+    [switch]$ForceUpgradePyInstaller,
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
+$projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+if (-not $SkipTests) {
+    Write-Host "[1/6] Running test suite..."
+
+    Push-Location $projectRoot
+    try {
+        & $Python -m unittest discover `
+            -s tests `
+            -p "test_*.py" `
+            -v
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Test suite failed with exit code $LASTEXITCODE. Build aborted."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    Write-Host "[tests] All tests passed."
+} else {
+    Write-Host "[1/6] Skipping tests..."
+}
 
 if (-not $SkipInstallPyInstaller) {
-    Write-Host "[1/5] Installing/upgrading pyinstaller..."
+    Write-Host "[2/6] Installing/upgrading pyinstaller..."
     & $Python -m pip install --upgrade pyinstaller
     $pipExitCode = $LASTEXITCODE
 
@@ -28,12 +53,12 @@ if (-not $SkipInstallPyInstaller) {
         }
     }
 } else {
-    Write-Host "[1/5] Skipping pyinstaller installation step..."
+    Write-Host "[2/6] Skipping pyinstaller installation step..."
 }
 
-Write-Host "[2/5] Building client executable..."
+Write-Host "[3/6] Building client executable..."
 $clientScriptDir = Split-Path -Parent $ClientScript
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$artifact = Join-Path $OutputDir "$Name.exe"
 
 if ([string]::IsNullOrWhiteSpace($RuntimeTmpDir)) {
     throw "Runtime tmp directory cannot be empty."
@@ -111,23 +136,27 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "[agent] pywebview bulunamadı, widget viewer backend'i devre dışı kalacak."
 }
 
+if (Test-Path $artifact) {
+    Write-Host "[build] Removing previous artifact: $artifact"
+    Remove-Item $artifact -Force
+}
+
 & $Python -m PyInstaller @clientPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
 }
 
-$artifact = Join-Path $OutputDir "$Name.exe"
 if (!(Test-Path $artifact)) {
     throw "Client artifact not found: $artifact"
 }
 
-Write-Host "[3/5] Viewer sidecar build adımı kaldırıldı (tek EXE mimarisi)."
+Write-Host "[4/6] Viewer sidecar build adımı kaldırıldı (tek EXE mimarisi)."
 
 $buildVersion = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $marker = "BAYLAN_CLIENT_BUILD:$buildVersion"
 
-Write-Host "[4/5] Embedding build marker..."
+Write-Host "[5/6] Embedding build marker..."
 $maxAttempts = 10
 $delaySeconds = 1
 $markerEmbedded = $false
@@ -151,5 +180,5 @@ if (-not $markerEmbedded) {
     throw "Unable to embed build marker into '$artifact'."
 }
 
-Write-Host "[5/5] Client build completed: $artifact"
+Write-Host "[6/6] Client build completed: $artifact"
 Write-Host "Embedded build marker: $buildVersion"
