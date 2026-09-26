@@ -2775,6 +2775,24 @@ class PlaybackController:
             {"local_path": p, "duration_sec": None, "media_type": None, "item_type": "media", "display_name": None}
             for p in self.media_manager.load_last_successful_playlist()
         ]
+        pathless_widgets = sum(
+            1
+            for entry in cached_entries
+            if str(entry.get("item_type") or "").strip().lower() == "widget"
+            and not str(entry.get("local_path") or "").strip()
+        )
+        print(
+            "📦 startup playlist restore | "
+            f"cached_entries={len(cached_entries)} pathless_widgets={pathless_widgets}"
+        )
+        try:
+            self._startup_config_grace_sec = max(0.0, float(os.getenv("STARTUP_CONFIG_GRACE_SEC", "5")))
+        except (TypeError, ValueError):
+            self._startup_config_grace_sec = 5.0
+        self._startup_started_at = time.monotonic()
+        self._initial_config_received = False
+        self._startup_fallback_deferred_logged = False
+        self._startup_fallback_enabled_logged = False
         self._fallback_media = _resolve_runtime_path(
             os.getenv("FALLBACK_MEDIA_PATH", "client/assets/digital-screen-preparing.svg")
         )
@@ -2871,6 +2889,20 @@ class PlaybackController:
         if playlist_entries:
             return playlist_entries
 
+        if not self._initial_config_received:
+            elapsed = time.monotonic() - self._startup_started_at
+            if elapsed < self._startup_config_grace_sec:
+                if not self._startup_fallback_deferred_logged:
+                    print(
+                        "⏳ startup fallback deferred | waiting_for_initial_config=true "
+                        f"elapsed={elapsed:.1f} grace={self._startup_config_grace_sec:g}"
+                    )
+                    self._startup_fallback_deferred_logged = True
+                return []
+            if not self._startup_fallback_enabled_logged:
+                print("▶️ startup fallback enabled | reason=config_grace_expired")
+                self._startup_fallback_enabled_logged = True
+
         if self._configured_fallback:
             return list(self._configured_fallback)
 
@@ -2881,6 +2913,17 @@ class PlaybackController:
             print(f"⚠️ fallback medya desteklenmiyor, oynatılmayacak: {self._fallback_media}")
             self._fallback_warning_emitted = True
         return []
+
+    def mark_initial_config_received(self):
+        with self._lock:
+            if self._initial_config_received:
+                return
+            grace_cancelled = time.monotonic() - self._startup_started_at < self._startup_config_grace_sec
+            self._initial_config_received = True
+        print(
+            "📥 initial config received | "
+            f"startup_grace_cancelled={str(grace_cancelled).lower()}"
+        )
 
     @staticmethod
     def _playlist_key(entries: list[dict], loop_mode: str) -> str:
@@ -3294,6 +3337,7 @@ class PlaybackController:
         return False
 
     def update_from_config(self, config: dict):
+        self.mark_initial_config_received()
         with self._lock:
             was_fallback_only_mode = self._fallback_only_mode
 

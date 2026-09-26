@@ -1861,6 +1861,72 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         fake_player.start_widget_engine_if_needed.assert_not_called()
 
+    def test_startup_restores_pathless_production_grid_without_fallback(self):
+        from client.client import PlaybackController
+        from client.media_manager import MediaManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            widget_payload = {
+                "name": "Üretim Durumu",
+                "widgets": [{"type": "iframe", "url": "https://example.com"}],
+            }
+            manager = MediaManager(cache_root=tmpdir)
+            manager._save_state({"last_successful_playlist_entries": [{
+                "local_path": "", "duration_sec": 30, "media_type": "widget",
+                "item_type": "widget", "display_name": "Production Grid",
+                "widget_requires_download": False, "widget_payload": widget_payload,
+                "widget_url": None, "columns": 1,
+            }]})
+
+            with patch.dict("os.environ", {
+                "MEDIA_CACHE_DIR": tmpdir,
+                "WIDGET_PREWARM_ON_STARTUP": "0",
+            }, clear=False):
+                controller = PlaybackController(_FakeGuiRuntime())
+
+            effective = controller._effective_playlist(list(controller._playlist_entries))
+
+            self.assertEqual(len(controller._playlist_entries), 1)
+            self.assertEqual(effective[0]["widget_payload"], widget_payload)
+            self.assertFalse(controller._transient_fallback_active)
+
+    def test_startup_defers_fallback_until_initial_config(self):
+        from client.client import PlaybackController
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict("os.environ", {
+            "MEDIA_CACHE_DIR": tmpdir,
+            "STARTUP_CONFIG_GRACE_SEC": "5",
+            "WIDGET_PREWARM_ON_STARTUP": "0",
+        }, clear=False):
+            controller = PlaybackController(_FakeGuiRuntime())
+        controller._startup_started_at = 100.0
+
+        with patch("client.client.time.monotonic", return_value=102.0):
+            self.assertEqual(controller._effective_playlist([]), [])
+
+        controller.mark_initial_config_received()
+        self.assertTrue(controller._initial_config_received)
+
+    def test_startup_enables_fallback_after_grace_expires(self):
+        from client.client import PlaybackController
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict("os.environ", {
+            "MEDIA_CACHE_DIR": tmpdir,
+            "STARTUP_CONFIG_GRACE_SEC": "5",
+            "WIDGET_PREWARM_ON_STARTUP": "0",
+        }, clear=False):
+            controller = PlaybackController(_FakeGuiRuntime())
+        controller._startup_started_at = 100.0
+        controller._fallback_media = Path(__file__).parents[1] / "client" / "assets" / "digital-screen-preparing.svg"
+        controller.player = unittest.mock.Mock()
+        controller.player.supports_media.return_value = True
+
+        with patch("client.client.time.monotonic", return_value=106.0):
+            effective = controller._effective_playlist([])
+
+        self.assertEqual(len(effective), 1)
+        self.assertEqual(effective[0]["local_path"], str(controller._fallback_media))
+
     def test_can_disable_widget_runtime_prewarm_via_env(self):
         from client.client import PlaybackController
 
