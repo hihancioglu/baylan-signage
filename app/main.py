@@ -74,6 +74,7 @@ SCREENSHOT_ROOT = Path(os.getenv("SCREENSHOT_ROOT", "data/screenshots")).resolve
 SCREENSHOT_ROOT.mkdir(parents=True, exist_ok=True)
 LATEST_SCREENSHOTS = {}  # hostname -> metadata
 LATEST_HEALTH_METRICS = {}  # hostname -> latest health metrics payload
+LATEST_WIDGET_RUNTIME = {}  # device identity -> latest normalized widget runtime payload
 
 connected = {}      # device identity (mac address when available, otherwise hostname) -> sid
 sid_to_host = {}    # sid -> hostname
@@ -1070,6 +1071,49 @@ def _extract_health_metrics(data: dict | None) -> dict | None:
     return metrics if has_any_value else None
 
 
+def _extract_widget_runtime(data) -> dict | None:
+    """Return a safe, allow-listed widget runtime payload, or ``None``."""
+    if not isinstance(data, dict):
+        return None
+
+    try:
+        counts = {}
+        for field in ("viewer_process_count", "webview2_process_count"):
+            value = data.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return None
+            counts[field] = value
+
+        pids = data.get("viewer_pids")
+        if not isinstance(pids, list) or any(
+            isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            for pid in pids
+        ):
+            return None
+
+        ram = {}
+        for field in ("viewer_ram_mb", "webview2_ram_mb", "total_ram_mb"):
+            value = data.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            value = float(value)
+            if not math.isfinite(value) or value < 0:
+                return None
+            ram[field] = value
+
+        return {
+            "viewer_process_count": counts["viewer_process_count"],
+            "viewer_pids": list(pids),
+            "webview2_process_count": counts["webview2_process_count"],
+            "viewer_ram_mb": ram["viewer_ram_mb"],
+            "webview2_ram_mb": ram["webview2_ram_mb"],
+            "total_ram_mb": ram["total_ram_mb"],
+        }
+    except Exception:
+        # Telemetry is optional and must never interrupt a heartbeat.
+        return None
+
+
 def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_name=None):
     media_by_relative_path = media_by_relative_path or {}
     media_by_stored_name = media_by_stored_name or {}
@@ -1102,6 +1146,7 @@ def _serialize_device(db, device, media_by_relative_path=None, media_by_stored_n
         "updater_version": device.updater_version,
         "cpu_temperature": device.cpu_temperature,
         "health_metrics": LATEST_HEALTH_METRICS.get(_device_identity(device.hostname, device.mac_address)) or LATEST_HEALTH_METRICS.get(device.hostname),
+        "widget_runtime": LATEST_WIDGET_RUNTIME.get(_device_identity(device.hostname, device.mac_address)) or LATEST_WIDGET_RUNTIME.get(device.hostname),
         "idle_mode_enabled": device.idle_mode_enabled,
         "content_enabled": device.content_enabled,
         "group_id": active_group[0] if active_group else None,
@@ -1676,6 +1721,8 @@ def handle_register(data):
 
 @socketio.on("heartbeat")
 def handle_heartbeat(data):
+    if not isinstance(data, dict):
+        return
     hostname = data.get("hostname")
     if not hostname:
         return
@@ -1700,6 +1747,9 @@ def handle_heartbeat(data):
             health_metrics = _extract_health_metrics(data)
             if health_metrics:
                 LATEST_HEALTH_METRICS[_device_identity(hostname, mac_address)] = health_metrics
+            widget_runtime = _extract_widget_runtime(data.get("widget_runtime"))
+            if widget_runtime:
+                LATEST_WIDGET_RUNTIME[_device_identity(hostname, mac_address)] = widget_runtime
             device.is_online = True
             db.commit()
     finally:
@@ -1716,6 +1766,8 @@ def handle_disconnect():
 
     connected.pop(_device_identity(hostname, mac_address), None)
     connected.pop(hostname, None)
+    LATEST_WIDGET_RUNTIME.pop(_device_identity(hostname, mac_address), None)
+    LATEST_WIDGET_RUNTIME.pop(hostname, None)
 
     db = db_session()
     try:
@@ -1952,6 +2004,8 @@ def delete_device(hostname):
 
         LATEST_HEALTH_METRICS.pop(identity, None)
         LATEST_HEALTH_METRICS.pop(device_hostname, None)
+        LATEST_WIDGET_RUNTIME.pop(identity, None)
+        LATEST_WIDGET_RUNTIME.pop(device_hostname, None)
         LATEST_SCREENSHOTS.pop(identity, None)
         LATEST_SCREENSHOTS.pop(device_hostname, None)
 
