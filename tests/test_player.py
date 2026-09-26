@@ -44,6 +44,33 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertIn("--background-color=0/0/0", cmd)
         self.assertIn("--force-window=immediate", cmd)
 
+    def test_default_mpv_video_command_enables_safe_hardware_decoding(self):
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "client.player.shutil.which",
+            side_effect=lambda executable: "/usr/bin/mpv" if executable == "mpv" else None,
+        ):
+            player = self._build_player()
+
+        self.assertIn("--hwdec=auto-safe", player._build_command("/tmp/example.mp4"))
+
+    def test_mpv_hwdec_env_override_is_used_by_default_video_command(self):
+        with patch.dict("os.environ", {"MPV_HWDEC": "no"}, clear=True), patch(
+            "client.player.shutil.which",
+            side_effect=lambda executable: "/usr/bin/mpv" if executable == "mpv" else None,
+        ):
+            player = self._build_player()
+
+        self.assertIn("--hwdec=no", player._build_command("/tmp/example.mp4"))
+
+    def test_custom_video_command_does_not_receive_hwdec_flag(self):
+        with patch.dict(
+            "os.environ",
+            {"PLAYER_VIDEO_COMMAND": "mpv --fs {media}", "MPV_HWDEC": "auto-safe"},
+            clear=True,
+        ):
+            player = self._build_player()
+
+        self.assertEqual(player._build_command("/tmp/example.mp4"), ["mpv", "--fs", "/tmp/example.mp4"])
 
     def test_split_command_text_windows_uses_commandlinetoargvw(self):
         player = self._build_player()
@@ -70,6 +97,21 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(cmd[-1], "/tmp/example.jpg")
         self.assertIn("--image-display-duration=5", cmd)
         self.assertEqual(cmd[0], "mpv")
+        self.assertFalse(any(part.startswith("--hwdec=") for part in cmd))
+
+    def test_alternate_mpv_video_command_uses_hwdec_and_resume_position(self):
+        with patch.dict("os.environ", {"MPV_HWDEC": "auto-safe"}, clear=True):
+            player = self._build_player()
+        with patch.object(player, "_resolve_executable", return_value=True):
+            command = player._build_alternate_command(
+                "/tmp/example.mp4",
+                image_duration_sec=None,
+                start_position_sec=125.3,
+                failed_command=["vlc", "/tmp/example.mp4"],
+            )
+
+        self.assertIn("--start=125.300", command)
+        self.assertIn("--hwdec=auto-safe", command)
 
     def test_play_blocking_retries_with_alternate_player_after_failure(self):
         player = self._build_player()
@@ -591,6 +633,31 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             popen.call_args.args[0][:4],
             ["mpv", "--screen=1", "--fs-screen=1", "--fs"],
         )
+
+    def test_launch_media_processes_preserves_hwdec_when_targeting_monitor(self):
+        with patch.dict("os.environ", {"MPV_HWDEC": "auto-safe"}, clear=True), patch(
+            "client.player.shutil.which",
+            side_effect=lambda executable: "/usr/bin/mpv" if executable == "mpv" else None,
+        ):
+            player = self._build_player()
+        command = player._build_command("/tmp/example.mp4")
+        fake_process = unittest.mock.Mock()
+
+        with patch("client.player.os.name", "nt"), patch.object(
+            player,
+            "_windows_connected_monitor_bounds",
+            return_value=[(0, 0, 1920, 1080), (1920, 0, 1920, 1080)],
+        ), patch("client.player.subprocess.Popen", return_value=fake_process) as popen:
+            player._launch_media_processes(
+                command,
+                target_monitor_index=1,
+                clone_to_all_monitors=False,
+            )
+
+        launched_command = popen.call_args.args[0]
+        self.assertIn("--screen=1", launched_command)
+        self.assertIn("--fs-screen=1", launched_command)
+        self.assertIn("--hwdec=auto-safe", launched_command)
 
     def test_launch_media_processes_uses_active_monitor_for_implicit_primary_target(self):
         player = self._build_player()

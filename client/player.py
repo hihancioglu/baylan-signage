@@ -100,7 +100,7 @@ class BorderlessFullscreenPlayer:
         "--fs --border=no --force-window=immediate --ontop --quiet "
         "--background-color=0/0/0 --osc=no --osd-level=0 --input-cursor=no"
     )
-    MPV_VIDEO_TEMPLATE = "{player} " + MPV_COMMON_FLAGS + " {media}"
+    MPV_VIDEO_TEMPLATE = "{player} " + MPV_COMMON_FLAGS + " {hwdec} {media}"
     MPV_IMAGE_TEMPLATE = (
         "{player} " + MPV_COMMON_FLAGS + " "
         "--image-display-duration={duration} {media}"
@@ -240,6 +240,7 @@ class BorderlessFullscreenPlayer:
     def __init__(self, keep_widget_runtime_warm: bool | None = None):
         self.image_duration_sec = int(os.getenv("IMAGE_DURATION_SEC", "8"))
         self.static_image_duration_sec = int(os.getenv("STATIC_IMAGE_DURATION_SEC", "86400"))
+        self.mpv_hwdec = str(os.getenv("MPV_HWDEC", "auto-safe") or "").strip()
         default_video_command, default_image_command = self._pick_default_player_commands()
 
         self.video_command = os.getenv(
@@ -931,7 +932,7 @@ class BorderlessFullscreenPlayer:
                 )
 
             return (
-                self.MPV_VIDEO_TEMPLATE.format(player=player_quoted, media="{media}"),
+                self._format_mpv_video_template(player=player_quoted),
                 self.MPV_IMAGE_TEMPLATE.format(
                     player=player_quoted,
                     duration="{duration}",
@@ -943,6 +944,14 @@ class BorderlessFullscreenPlayer:
         return (
             self.VLC_VIDEO_TEMPLATE.format(player="vlc", media="{media}"),
             self.VLC_IMAGE_TEMPLATE.format(player="vlc", duration="{duration}", media="{media}"),
+        )
+
+    def _format_mpv_video_template(self, player: str = "mpv") -> str:
+        hwdec = f"--hwdec={self.mpv_hwdec}" if self.mpv_hwdec else ""
+        return self.MPV_VIDEO_TEMPLATE.format(
+            player=player,
+            hwdec=hwdec,
+            media="{media}",
         )
 
     def _is_video(self, media_path: str) -> bool:
@@ -2557,10 +2566,18 @@ class BorderlessFullscreenPlayer:
                 alternate_template.format(player="vlc", media="{media}", duration=image_duration_sec or self.image_duration_sec)
             )
         elif "vlc" in failed_executable:
-            alternate_template = self.MPV_VIDEO_TEMPLATE if self._is_video(media_path) else self.MPV_IMAGE_TEMPLATE
-            alternate_command = self._split_command_text(
-                alternate_template.format(player="mpv", media="{media}", duration=image_duration_sec or self.image_duration_sec)
-            )
+            if self._is_video(media_path):
+                alternate_command = self._split_command_text(
+                    self._format_mpv_video_template(player="mpv")
+                )
+            else:
+                alternate_command = self._split_command_text(
+                    self.MPV_IMAGE_TEMPLATE.format(
+                        player="mpv",
+                        media="{media}",
+                        duration=image_duration_sec or self.image_duration_sec,
+                    )
+                )
         else:
             return None
 
@@ -2669,6 +2686,15 @@ class BorderlessFullscreenPlayer:
 
             self._stop_requested = False
             _debug_log(f"play_blocking command={command}")
+            if self._is_video(media_path) and self._is_mpv_command(command):
+                hwdec = next(
+                    (part.removeprefix("--hwdec=") for part in command if part.startswith("--hwdec=")),
+                    "unset",
+                )
+                _debug_log(
+                    "mpv playback | "
+                    f"hwdec={hwdec} path={media_path}"
+                )
             processes = self._launch_media_processes(
                 command,
                 target_monitor_index=target_monitor_index,
@@ -2713,6 +2739,15 @@ class BorderlessFullscreenPlayer:
                 "play_blocking alternate command | "
                 f"failed_returncode={process.returncode} alternate={alternate_command}"
             )
+            if self._is_video(media_path) and self._is_mpv_command(alternate_command):
+                hwdec = next(
+                    (part.removeprefix("--hwdec=") for part in alternate_command if part.startswith("--hwdec=")),
+                    "unset",
+                )
+                _debug_log(
+                    "mpv playback | "
+                    f"hwdec={hwdec} path={media_path}"
+                )
 
             if DEBUG_MODE_ENABLED:
                 alternate_command, mpv_debug_log_path = self._inject_mpv_debug_log(alternate_command, media_path)
