@@ -28,15 +28,37 @@ class _Kernel32GetTickCountOnly:
 
 
 class _User32Stub:
-    def __init__(self, dw_time):
+    def __init__(self, dw_time, succeeds=True):
         self.dw_time = dw_time
+        self.succeeds = succeeds
 
     def GetLastInputInfo(self, info_ptr):
         info_ptr._obj.dwTime = self.dw_time
-        return 1
+        return int(self.succeeds)
 
 
 class TestIdleSeconds(unittest.TestCase):
+    def test_returns_raw_last_input_tick(self):
+        windll = type("WinDll", (), {"user32": _User32Stub(12345)})()
+
+        with patch("client.idle.platform.system", return_value="Windows"), patch.object(
+            ctypes, "windll", windll, create=True
+        ):
+            self.assertEqual(idle.get_last_input_tick(), 12345)
+
+    def test_last_input_tick_raises_when_windows_call_fails(self):
+        windll = type("WinDll", (), {"user32": _User32Stub(12345, succeeds=False)})()
+
+        with patch("client.idle.platform.system", return_value="Windows"), patch.object(
+            ctypes, "windll", windll, create=True
+        ):
+            with self.assertRaisesRegex(OSError, "GetLastInputInfo failed"):
+                idle.get_last_input_tick()
+
+    def test_last_input_tick_is_zero_when_platform_is_unsupported(self):
+        with patch("client.idle.platform.system", return_value="Linux"):
+            self.assertEqual(idle.get_last_input_tick(), 0)
+
     def test_uses_gettickcount64_when_available(self):
         user32 = _User32Stub(0)
         kernel32 = type("Kernel32", (), {"GetTickCount64": _Kernel32GetTickCount64(5000)})()

@@ -21,6 +21,11 @@ class TestRunStateCycle(unittest.TestCase):
         self.orig_low_idle_streak = main._low_idle_streak
         self.orig_low_idle_activity_enabled = main.LOW_IDLE_ACTIVITY_ENABLED
         self.orig_connection_outage_active = main.connection_outage_active
+        self.orig_idle_pending_input_tick = main._idle_pending_input_tick
+        self.orig_playback_input_baseline_tick = main._playback_input_baseline_tick
+        self.orig_pending_user_activity = main._pending_user_activity
+        self.orig_pending_user_activity_tick = main._pending_user_activity_tick
+        self.orig_pending_activity_wait_logged = main._pending_activity_wait_logged
 
     def tearDown(self):
         main.current_state = self.orig_state
@@ -34,6 +39,11 @@ class TestRunStateCycle(unittest.TestCase):
         main._low_idle_streak = self.orig_low_idle_streak
         main.LOW_IDLE_ACTIVITY_ENABLED = self.orig_low_idle_activity_enabled
         main.connection_outage_active = self.orig_connection_outage_active
+        main._idle_pending_input_tick = self.orig_idle_pending_input_tick
+        main._playback_input_baseline_tick = self.orig_playback_input_baseline_tick
+        main._pending_user_activity = self.orig_pending_user_activity
+        main._pending_user_activity_tick = self.orig_pending_user_activity_tick
+        main._pending_activity_wait_logged = self.orig_pending_activity_wait_logged
 
     def _configure_common(self):
         main.idle_mode_enabled = True
@@ -45,6 +55,158 @@ class TestRunStateCycle(unittest.TestCase):
         main._low_idle_streak = 0
         main.LOW_IDLE_ACTIVITY_ENABLED = True
         main.connection_outage_active = False
+        main._idle_pending_input_tick = None
+        main._playback_input_baseline_tick = None
+        main._pending_user_activity = False
+        main._pending_user_activity_tick = None
+        main._pending_activity_wait_logged = False
+
+    def _playing_playback(self, item_type="media"):
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "content"
+        fake_playback._active_item = {"item_type": item_type}
+        return fake_playback
+
+    def test_single_raw_input_event_returns_without_streak_confirmation(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._playback_input_baseline_tick = 100
+        fake_playback = self._playing_playback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=200), patch.object(
+            main.time, "monotonic", return_value=10.0
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+        self.assertEqual(main._activity_drop_streak, 0)
+
+    def test_widget_input_during_grace_remains_pending_until_grace_ends(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        main._playback_input_baseline_tick = 100
+        fake_playback = self._playing_playback("widget")
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=200), patch.object(
+            main.time, "monotonic", return_value=100.5
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        self.assertTrue(main._pending_user_activity)
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+        return_mock.assert_not_called()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=61.1
+        ), patch.object(main, "get_last_input_tick", return_value=200), patch.object(
+            main.time, "monotonic", return_value=101.6
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
+    def test_media_input_during_minimum_play_remains_pending(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        main._playback_input_baseline_tick = 100
+        fake_playback = self._playing_playback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=200), patch.object(
+            main.time, "monotonic", return_value=101.0
+        ):
+            main.run_state_cycle()
+
+        self.assertTrue(main._pending_user_activity)
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=64.1
+        ), patch.object(main, "get_last_input_tick", return_value=200), patch.object(
+            main.time, "monotonic", return_value=105.1
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
+    def test_unchanged_raw_input_does_not_mark_activity(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._playback_input_baseline_tick = 100
+        fake_playback = self._playing_playback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=100), patch.object(
+            main.time, "monotonic", return_value=10.0
+        ):
+            main.run_state_cycle()
+
+        self.assertFalse(main._pending_user_activity)
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+
+    def test_new_playing_session_resets_stale_pending_input_and_baseline(self):
+        self._configure_common()
+        main.current_state = main.ClientState.IDLE_PENDING
+        main._pending_user_activity = True
+        main._pending_user_activity_tick = 200
+        fake_playback = self._playing_playback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=300), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        self.assertEqual(main.current_state, main.ClientState.PLAYING)
+        self.assertFalse(main._pending_user_activity)
+        self.assertIsNone(main._pending_user_activity_tick)
+        self.assertEqual(main._playback_input_baseline_tick, 300)
+
+    def test_idle_pending_single_raw_input_returns_active(self):
+        self._configure_common()
+        main.current_state = main.ClientState.IDLE_PENDING
+        main._idle_pending_input_tick = 100
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = ""
+        fake_playback._active_item = None
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=60.0
+        ), patch.object(main, "get_last_input_tick", return_value=200):
+            main.run_state_cycle()
+
+        fake_playback.stop.assert_called_once_with(stop_widget_runtime=False)
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
+
+    def test_last_input_tick_failure_uses_legacy_activity_fallback(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        main._last_observed_idle_sec = 60.0
+        main._activity_drop_streak = main.ACTIVITY_DROP_CONFIRM_COUNT - 1
+        fake_playback = self._playing_playback()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", Mock()), patch.object(
+            main, "get_idle_seconds", return_value=0.0
+        ), patch.object(main, "get_last_input_tick", side_effect=OSError("unavailable")), patch.object(
+            main.time, "monotonic", return_value=10.0
+        ), patch.object(main, "return_to_erp_window") as return_mock:
+            main.run_state_cycle()
+
+        return_mock.assert_called_once()
+        self.assertEqual(main.current_state, main.ClientState.ACTIVE)
 
     def test_idle_pending_waits_for_selected_content_before_playing_state(self):
         self._configure_common()
