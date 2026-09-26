@@ -19,6 +19,7 @@ class TestWidgetRuntimeServer(unittest.TestCase):
         hostname = "SIGNAGE-WIDGET-RUNTIME"
         mac_address = "AA:BB:CC:DD:EE:FF"
         runtime = {
+            "runtime_instance_count": 1,
             "viewer_process_count": 1,
             "viewer_pids": [1111],
             "webview2_process_count": 7,
@@ -48,6 +49,7 @@ class TestWidgetRuntimeServer(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             device = next(row for row in response.get_json() if row["hostname"] == hostname)
             self.assertEqual(device["widget_runtime"]["viewer_process_count"], 1)
+            self.assertEqual(device["widget_runtime"]["runtime_instance_count"], 1)
             self.assertEqual(device["widget_runtime"]["webview2_process_count"], 7)
             self.assertEqual(device["widget_runtime"]["total_ram_mb"], 340.7)
             self.assertNotIn("ignored", device["widget_runtime"])
@@ -103,6 +105,21 @@ class TestWidgetRuntimeServer(unittest.TestCase):
         }
 
         self.assertIsNone(self.main._extract_widget_runtime(payload))
+
+    def test_widget_runtime_normalizer_accepts_legacy_payload_without_instance_count(self):
+        payload = {
+            "viewer_process_count": 2,
+            "viewer_pids": [1111, 2222],
+            "webview2_process_count": 6,
+            "viewer_ram_mb": 50.0,
+            "webview2_ram_mb": 250.0,
+            "total_ram_mb": 300.0,
+        }
+
+        normalized = self.main._extract_widget_runtime(payload)
+
+        self.assertIsNotNone(normalized)
+        self.assertNotIn("runtime_instance_count", normalized)
 
 
 if __name__ == "__main__":

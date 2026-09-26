@@ -1147,14 +1147,17 @@ function normalizeWidgetRuntime(value){
   if(countFields.some(field => !Number.isInteger(value[field]) || value[field] < 0)) return null;
   if(!Array.isArray(value.viewer_pids) || value.viewer_pids.some(pid => !Number.isInteger(pid) || pid <= 0)) return null;
   if(ramFields.some(field => typeof value[field] !== 'number' || !Number.isFinite(value[field]) || value[field] < 0)) return null;
-  return value;
+  const runtimeInstanceCount = value.runtime_instance_count ?? value.viewer_process_count;
+  if(!Number.isInteger(runtimeInstanceCount) || runtimeInstanceCount < 0) return null;
+  return {...value, runtime_instance_count: runtimeInstanceCount};
 }
 
 function buildWidgetRuntimeTooltip(runtime){
   return [
-    `Viewer process: ${runtime.viewer_process_count}`,
-    `Viewer PID: ${runtime.viewer_pids.length ? runtime.viewer_pids.join(', ') : '-'}`,
-    `WebView2 process: ${runtime.webview2_process_count}`,
+    `Runtime instance: ${runtime.runtime_instance_count}`,
+    `Viewer processes: ${runtime.viewer_process_count}`,
+    `Viewer PIDs: ${runtime.viewer_pids.length ? runtime.viewer_pids.join(', ') : '-'}`,
+    `WebView2 processes: ${runtime.webview2_process_count}`,
     `Viewer RAM: ${runtime.viewer_ram_mb.toFixed(1)} MB`,
     `WebView2 RAM: ${runtime.webview2_ram_mb.toFixed(1)} MB`,
     `Toplam RAM: ${runtime.total_ram_mb.toFixed(1)} MB`,
@@ -1165,7 +1168,7 @@ function renderWidgetRuntimeBadge(device){
   if(!device?.is_online) return '<span class="text-secondary">-</span>';
   const runtime = normalizeWidgetRuntime(device.widget_runtime);
   if(!runtime) return '<span class="text-secondary">-</span>';
-  const badgeClass = runtime.viewer_process_count > 1 ? 'text-bg-warning' : 'text-bg-secondary';
+  const badgeClass = runtime.runtime_instance_count > 1 ? 'text-bg-warning' : 'text-bg-secondary';
   const tooltip = buildWidgetRuntimeTooltip(runtime);
   const roundedTotalRam = Math.round(runtime.total_ram_mb);
   return `<span class="badge ${badgeClass}" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-container="body" data-bs-title="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}">WV ${runtime.webview2_process_count} · ${roundedTotalRam} MB</span>`;

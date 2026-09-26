@@ -35,6 +35,42 @@ import socketio
 WIDGET_RUNTIME_MARKER = "--baylan-widget-runtime"
 
 
+def _extract_cli_option(cmdline, name):
+    """Return a CLI option value from either ``--name value`` or ``--name=value``."""
+    try:
+        option = str(name)
+        command = [str(part) for part in (cmdline or [])]
+        for index, part in enumerate(command):
+            if part == option:
+                if index + 1 < len(command) and not command[index + 1].startswith("--"):
+                    return command[index + 1]
+                return None
+            prefix = option + "="
+            if part.startswith(prefix):
+                return part[len(prefix):] or None
+    except Exception:
+        pass
+    return None
+
+
+def _runtime_cli_identity(cmdline):
+    """Parse the stable runtime identity fields without trusting malformed input."""
+    def integer_option(name, minimum=0):
+        try:
+            value = int(_extract_cli_option(cmdline, name))
+            return value if value >= minimum else None
+        except (TypeError, ValueError):
+            return None
+
+    bounds = _extract_cli_option(cmdline, "--monitor-bounds")
+    try:
+        bounds_parts = tuple(int(part.strip()) for part in bounds.split(","))
+        bounds = ",".join(str(part) for part in bounds_parts) if len(bounds_parts) == 4 else None
+    except (AttributeError, TypeError, ValueError):
+        bounds = None
+    return integer_option("--parent-pid", 1), integer_option("--monitor"), bounds
+
+
 def _widget_runtime_telemetry(psutil_module=None) -> dict[str, object] | None:
     """Return best-effort RAM data for marked Baylan viewers and their WebView2 children."""
     if platform.system().lower() != "windows":
@@ -42,10 +78,45 @@ def _widget_runtime_telemetry(psutil_module=None) -> dict[str, object] | None:
     try:
         psutil_module = psutil_module or importlib.import_module("psutil")
         viewers = []
+        identities = {}
         for process in psutil_module.process_iter(["pid", "cmdline"]):
             command = [str(part) for part in (process.info.get("cmdline") or [])]
             if WIDGET_RUNTIME_MARKER in command and "--runtime-ipc" in command:
                 viewers.append(process)
+                identities[int(process.pid)] = _runtime_cli_identity(command)
+
+        # A onefile executable has a bootloader and Python child with identical
+        # runtime arguments.  Partition matching identities by real ancestry so
+        # two independent (duplicate) trees with the same arguments stay distinct.
+        viewer_by_pid = {int(process.pid): process for process in viewers}
+        parent_by_pid = {}
+        for pid, process in viewer_by_pid.items():
+            try:
+                parent_by_pid[pid] = int(process.ppid())
+            except Exception:
+                parent_by_pid[pid] = None
+
+        def identities_compatible(left, right):
+            left_parent, left_monitor, left_bounds = identities[left]
+            right_parent, right_monitor, right_bounds = identities[right]
+            if left_parent is not None and right_parent is not None and left_parent != right_parent:
+                return False
+            if left_monitor is not None and right_monitor is not None and left_monitor != right_monitor:
+                return False
+            if left_bounds is not None and right_bounds is not None and left_bounds != right_bounds:
+                return False
+            return True
+
+        roots = {}
+        for pid in viewer_by_pid:
+            root = pid
+            seen = {pid}
+            parent = parent_by_pid.get(pid)
+            while parent in viewer_by_pid and parent not in seen and identities_compatible(pid, parent):
+                root = parent
+                seen.add(parent)
+                parent = parent_by_pid.get(parent)
+            roots[pid] = root
 
         viewer_rss = 0
         webview_rss = 0
@@ -59,6 +130,7 @@ def _widget_runtime_telemetry(psutil_module=None) -> dict[str, object] | None:
                 webview_rss += int(child.memory_info().rss)
         mb = 1024 * 1024
         return {
+            "runtime_instance_count": len(set(roots.values())),
             "viewer_process_count": len(viewers),
             "viewer_pids": sorted(int(process.pid) for process in viewers),
             "webview2_process_count": len(webview_pids),
