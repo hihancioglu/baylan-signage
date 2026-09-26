@@ -110,6 +110,7 @@
                         <th data-device-col="mac_address"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('mac_address')">MAC</button></th>
                         <th data-device-col="agent_version"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('agent_version')">Versiyon</button></th>
                         <th data-device-col="device_status"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('device_status')">Durum</button></th>
+                        <th data-device-col="widget_runtime">WebView</th>
                         <th data-device-col="state_text"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('state_text')">State</button></th>
                         <th data-device-col="content_text"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('content_text')">İçerik</button></th>
                         <th data-device-col="group"><button type="button" class="btn btn-link btn-sm text-decoration-none p-0 fw-semibold" onclick="sortDevices('group')">Grup</button></th>
@@ -669,6 +670,7 @@ const DEVICE_COLUMNS = [
   { key: 'mac_address', label: 'MAC' },
   { key: 'agent_version', label: 'Versiyon' },
   { key: 'device_status', label: 'Durum' },
+  { key: 'widget_runtime', label: 'WebView' },
   { key: 'state_text', label: 'State' },
   { key: 'content_text', label: 'İçerik' },
   { key: 'group', label: 'Grup' },
@@ -1023,7 +1025,7 @@ function renderDevicesTable(){
     const stateText = getDeviceStateText(d);
     const contentText = getDeviceContentText(d);
 
-    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm${aliasIsDirty ? ' border-warning' : ''}" id="device-alias-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="alias" placeholder="Alias" value="${escapeHtml(aliasValue)}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm${inventoryIsDirty ? ' border-warning' : ''}" id="device-inventory-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="inventory_id" placeholder="INV001, INV002, INV003" title="Birden fazla Inventory ID için virgül kullanın." aria-label="Inventory ID'ler" value="${escapeHtml(inventoryValue)}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions">${renderDeviceActions(d, safeDeviceKey, safeHostname, safeMac)}</td>`;
+    tr.innerHTML = `<td data-device-col="alias"><input class="form-control form-control-sm${aliasIsDirty ? ' border-warning' : ''}" id="device-alias-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="alias" placeholder="Alias" value="${escapeHtml(aliasValue)}" /></td><td data-device-col="inventory_id"><input class="form-control form-control-sm${inventoryIsDirty ? ' border-warning' : ''}" id="device-inventory-${safeDeviceKey}" data-device-key="${escapeHtml(deviceKey)}" data-device-edit-field="inventory_id" placeholder="INV001, INV002, INV003" title="Birden fazla Inventory ID için virgül kullanın." aria-label="Inventory ID'ler" value="${escapeHtml(inventoryValue)}" /></td><td data-device-col="hostname">${escapeHtml(d.hostname||'')}</td><td data-device-col="mac_address"><code>${escapeHtml(d.mac_address||'-')}</code></td><td data-device-col="agent_version">${escapeHtml(d.agent_version||'-')}</td><td data-device-col="device_status">${renderDeviceStatusBadge(d)}</td><td data-device-col="widget_runtime">${renderWidgetRuntimeBadge(d)}</td><td data-device-col="state_text">${escapeHtml(stateText)}</td><td data-device-col="content_text">${escapeHtml(contentText)}</td><td data-device-col="group">${escapeHtml(d.group||'-')}</td><td data-device-col="actions">${renderDeviceActions(d, safeDeviceKey, safeHostname, safeMac)}</td>`;
     body.appendChild(tr);
   });
   body.querySelectorAll('input[data-device-edit-field]').forEach(input => {
@@ -1136,6 +1138,37 @@ function renderHealthBadge(value, metrics){
     return `<span class="badge text-bg-success"${titleAttr}>OK</span>`;
   }
   return '<span class="text-secondary">-</span>';
+}
+
+function normalizeWidgetRuntime(value){
+  if(!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const countFields = ['viewer_process_count', 'webview2_process_count'];
+  const ramFields = ['viewer_ram_mb', 'webview2_ram_mb', 'total_ram_mb'];
+  if(countFields.some(field => !Number.isInteger(value[field]) || value[field] < 0)) return null;
+  if(!Array.isArray(value.viewer_pids) || value.viewer_pids.some(pid => !Number.isInteger(pid) || pid <= 0)) return null;
+  if(ramFields.some(field => typeof value[field] !== 'number' || !Number.isFinite(value[field]) || value[field] < 0)) return null;
+  return value;
+}
+
+function buildWidgetRuntimeTooltip(runtime){
+  return [
+    `Viewer process: ${runtime.viewer_process_count}`,
+    `Viewer PID: ${runtime.viewer_pids.length ? runtime.viewer_pids.join(', ') : '-'}`,
+    `WebView2 process: ${runtime.webview2_process_count}`,
+    `Viewer RAM: ${runtime.viewer_ram_mb.toFixed(1)} MB`,
+    `WebView2 RAM: ${runtime.webview2_ram_mb.toFixed(1)} MB`,
+    `Toplam RAM: ${runtime.total_ram_mb.toFixed(1)} MB`,
+  ].join(' | ');
+}
+
+function renderWidgetRuntimeBadge(device){
+  if(!device?.is_online) return '<span class="text-secondary">-</span>';
+  const runtime = normalizeWidgetRuntime(device.widget_runtime);
+  if(!runtime) return '<span class="text-secondary">-</span>';
+  const badgeClass = runtime.viewer_process_count > 1 ? 'text-bg-warning' : 'text-bg-secondary';
+  const tooltip = buildWidgetRuntimeTooltip(runtime);
+  const roundedTotalRam = Math.round(runtime.total_ram_mb);
+  return `<span class="badge ${badgeClass}" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-container="body" data-bs-title="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}">WV ${runtime.webview2_process_count} · ${roundedTotalRam} MB</span>`;
 }
 
 function renderDeviceStatusBadge(device){
