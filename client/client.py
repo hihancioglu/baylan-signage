@@ -549,7 +549,7 @@ def _prewarm_all_monitors_enabled() -> bool:
 def _is_widget_viewer_process(argv: list[str] | None = None) -> bool:
     args = argv if argv is not None else sys.argv[1:]
     normalized = {str(arg).strip().lower() for arg in args if isinstance(arg, str)}
-    return "--widget" in normalized or "--runtime-ipc" in normalized
+    return bool({"--widget", "--runtime-ipc", WIDGET_RUNTIME_MARKER} & normalized)
 
 
 IS_WIDGET_VIEWER_PROCESS = _is_widget_viewer_process()
@@ -684,12 +684,16 @@ _last_update_statuses: dict[str, str] = {
     "client_updater": "",
 }
 _health_lock = threading.Lock()
-_health_high_cpu_seconds = 0
+_health_high_cpu_seconds = 0.0
 _health_started_at = time.monotonic()
-_last_health_payload: dict[str, str] = {"health": "OK"}
+_health_last_sample_at: float | None = None
+_last_health_payload: dict[str, object] = {"health": "OK"}
 _health_bootstrap_last_logged_remaining_sec: int | None = None
 _health_bootstrap_completed_logged = False
+_health_sampler_thread: threading.Thread | None = None
+_health_sampler_stop_event = threading.Event()
 HEALTH_IGNORE_UPTIME_SEC = max(0, int(os.getenv("HEALTH_IGNORE_UPTIME_SEC", "120")))
+HEALTH_SAMPLE_INTERVAL_SEC = max(2.0, float(os.getenv("HEALTH_SAMPLE_INTERVAL_SEC", "10")))
 HEALTH_CPU_WARNING_THRESHOLD = float(os.getenv("HEALTH_CPU_WARNING_THRESHOLD", "70"))
 HEALTH_CPU_HIGH_THRESHOLD = float(os.getenv("HEALTH_CPU_HIGH_THRESHOLD", "85"))
 HEALTH_CPU_RISK_THRESHOLD = float(os.getenv("HEALTH_CPU_RISK_THRESHOLD", "90"))
@@ -995,49 +999,64 @@ def _read_cpu_temperature() -> str | None:
 
 
 def _get_cpu_temperature_payload() -> dict[str, object]:
+    """Return the latest health snapshot without performing any measurements."""
+
+    started_at = time.monotonic()
+    with _health_lock:
+        payload = dict(_last_health_payload)
+    log_debug(f"health snapshot read | elapsed_ms={(time.monotonic() - started_at) * 1000:.1f}")
+    return payload
+
+
+def _sample_health_metrics() -> dict[str, object]:
+    """Measure and cache health metrics. This must only run on the sampler thread."""
+
     global _health_high_cpu_seconds
+    global _health_last_sample_at
     global _health_bootstrap_last_logged_remaining_sec, _health_bootstrap_completed_logged
 
-    uptime_sec = time.monotonic() - _health_started_at
-    if uptime_sec < HEALTH_IGNORE_UPTIME_SEC:
-        remaining_sec = max(0, int(HEALTH_IGNORE_UPTIME_SEC - uptime_sec))
-        should_log_bootstrap = (
-            _health_bootstrap_last_logged_remaining_sec is None
-            or remaining_sec // 10 != _health_bootstrap_last_logged_remaining_sec // 10
-        )
-        if should_log_bootstrap:
-            _health_bootstrap_last_logged_remaining_sec = remaining_sec
-            log_debug(
-                "health bootstrap window active | "
-                f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
-                f"remaining={remaining_sec}s returning_last_payload={dict(_last_health_payload)}"
-            )
-        return dict(_last_health_payload)
-    if not _health_bootstrap_completed_logged:
-        _health_bootstrap_completed_logged = True
-        log_debug(
-            "health bootstrap window completed | "
-            f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
-            "health metrics will now be measured on each heartbeat"
-        )
-
-    try:
-        psutil_module = importlib.import_module("psutil")
-    except Exception:
-        log_warning("⚠️ health check için psutil yüklenemedi, son sağlık durumu korunuyor.")
-        return dict(_last_health_payload)
-
-    cpu = float(psutil_module.cpu_percent(interval=1))
+    psutil_module = importlib.import_module("psutil")
+    cpu = float(psutil_module.cpu_percent(interval=None))
     mem = float(psutil_module.virtual_memory().percent)
-    delay_start = time.time()
-    time.sleep(1)
-    delay = time.time() - delay_start
+    delay_start = time.monotonic()
+    if _health_sampler_stop_event.wait(1.0):
+        return _get_cpu_temperature_payload()
+    delay = time.monotonic() - delay_start
+    sampled_at = time.monotonic()
 
     with _health_lock:
+        elapsed_since_previous_sample = (
+            max(0.0, sampled_at - _health_last_sample_at) if _health_last_sample_at is not None else 0.0
+        )
+        _health_last_sample_at = sampled_at
+
+        uptime_sec = sampled_at - _health_started_at
+        if uptime_sec < HEALTH_IGNORE_UPTIME_SEC:
+            remaining_sec = max(0, int(HEALTH_IGNORE_UPTIME_SEC - uptime_sec))
+            should_log_bootstrap = (
+                _health_bootstrap_last_logged_remaining_sec is None
+                or remaining_sec // 10 != _health_bootstrap_last_logged_remaining_sec // 10
+            )
+            if should_log_bootstrap:
+                _health_bootstrap_last_logged_remaining_sec = remaining_sec
+                log_debug(
+                    "health bootstrap window active | "
+                    f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
+                    f"remaining={remaining_sec}s returning_last_payload={dict(_last_health_payload)}"
+                )
+            return dict(_last_health_payload)
+        if not _health_bootstrap_completed_logged:
+            _health_bootstrap_completed_logged = True
+            log_debug(
+                "health bootstrap window completed | "
+                f"uptime={uptime_sec:.1f}s ignore_window={HEALTH_IGNORE_UPTIME_SEC}s "
+                "background health metrics are now active"
+            )
+
         if cpu > HEALTH_CPU_HIGH_THRESHOLD:
-            _health_high_cpu_seconds += 1
+            _health_high_cpu_seconds += elapsed_since_previous_sample
         else:
-            _health_high_cpu_seconds = 0
+            _health_high_cpu_seconds = 0.0
 
         score = 0
         if cpu > HEALTH_CPU_HIGH_THRESHOLD:
@@ -1072,13 +1091,64 @@ def _get_cpu_temperature_payload() -> dict[str, object]:
         _last_health_payload["sustained_high_cpu_seconds"] = int(_health_high_cpu_seconds)
         _last_health_payload["sustained_high_cpu"] = bool(_health_high_cpu_seconds > HEALTH_CPU_SUSTAINED_SECONDS)
         log_debug(
-            "health metrics measured | "
+            "health sample | "
             f"health={_last_health_payload['health']} cpu={_last_health_payload['cpu_load_percent']} "
             f"mem={_last_health_payload['memory_pressure_percent']} "
             f"delay={_last_health_payload['responsiveness_delay_seconds']} "
             f"high_cpu_sec={_last_health_payload['sustained_high_cpu_seconds']}"
         )
         return dict(_last_health_payload)
+
+
+def _health_sampler_loop() -> None:
+    log_debug(f"health sampler started | interval_sec={HEALTH_SAMPLE_INTERVAL_SEC:g}")
+    primed = False
+    try:
+        while not _health_sampler_stop_event.is_set():
+            cycle_started = time.monotonic()
+            try:
+                if not primed:
+                    psutil_module = importlib.import_module("psutil")
+                    psutil_module.cpu_percent(interval=None)
+                    primed = True
+                else:
+                    _sample_health_metrics()
+            except Exception as exc:
+                log_warning(f"⚠️ health sampler sample failed, last snapshot preserved: {exc}")
+
+            elapsed = time.monotonic() - cycle_started
+            if _health_sampler_stop_event.wait(max(0.0, HEALTH_SAMPLE_INTERVAL_SEC - elapsed)):
+                break
+    finally:
+        log_debug("health sampler stopped")
+
+
+def _start_health_sampler() -> None:
+    global _health_sampler_thread
+    if IS_WIDGET_VIEWER_PROCESS:
+        return
+    with _health_lock:
+        if _health_sampler_thread is not None and _health_sampler_thread.is_alive():
+            return
+        _health_sampler_stop_event.clear()
+        _health_sampler_thread = threading.Thread(
+            target=_health_sampler_loop,
+            name="health-sampler",
+            daemon=True,
+        )
+        _health_sampler_thread.start()
+
+
+def _stop_health_sampler() -> None:
+    global _health_sampler_thread
+    _health_sampler_stop_event.set()
+    with _health_lock:
+        thread = _health_sampler_thread
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout=1.0)
+    with _health_lock:
+        if _health_sampler_thread is thread and (thread is None or not thread.is_alive()):
+            _health_sampler_thread = None
 
 
 def flush_and_shutdown_logging():
@@ -5058,6 +5128,7 @@ def main():
 
     try:
         _cleanup_orphaned_widget_runtimes()
+        _start_health_sampler()
         if RUNTIME_TMP_CLEANUP_ENABLED:
             cleanup_runtime_tmp_dir()
             _start_runtime_tmp_cleanup_worker()
@@ -5190,10 +5261,12 @@ def main():
         if update_shutdown_requested:
             # Updater waits for this PID to end before swapping the executable.
             # os._exit guarantees immediate process exit even if background threads are still alive.
+            _stop_health_sampler()
             release_instance_lock()
             flush_and_shutdown_logging()
             os._exit(0)
     finally:
+        _stop_health_sampler()
         release_instance_lock()
 
 
