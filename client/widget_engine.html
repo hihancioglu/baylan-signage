@@ -173,6 +173,19 @@
       }
     }
 
+    function emitMediaRuntimeEvent(type, detail) {
+      try {
+        const api = window.pywebview && window.pywebview.api;
+        if (!api) return;
+        const sender = api.media_event || api.mediaEvent;
+        if (typeof sender !== "function") return;
+        const result = sender.call(api, String(type || ""), detail || {});
+        if (result && typeof result.catch === "function") result.catch(() => {});
+      } catch (_err) {
+        // Runtime events are best-effort when the page is opened outside pywebview.
+      }
+    }
+
     function parseConfig() {
       const params = new URLSearchParams(window.location.search);
       const configB64 = params.get("config_b64");
@@ -680,6 +693,7 @@
       }
 
       const video = document.createElement("video");
+      const mediaSessionId = String(w.media_session_id || "");
       video.src = String(w.url || "");
       video.autoplay = w.autoplay !== false;
       video.muted = w.muted !== false;
@@ -694,6 +708,12 @@
       let recoveryCount = 0;
       let lastProgressAt = Date.now();
       let lastKnownTime = 0;
+      let lastRuntimeProgressAt = 0;
+      const runtimeDetail = (extra) => Object.assign({
+        session_id: mediaSessionId,
+        current_time: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+        duration: Number.isFinite(video.duration) ? video.duration : null,
+      }, extra || {});
       debugLog("video widget init", {
         widgetIndex,
         url: video.src,
@@ -707,6 +727,11 @@
         lastProgressAt = Date.now();
         if (Number.isFinite(video.currentTime) && video.currentTime >= 0) {
           lastKnownTime = video.currentTime;
+        }
+        const now = Date.now();
+        if (now - lastRuntimeProgressAt >= 5000) {
+          lastRuntimeProgressAt = now;
+          emitMediaRuntimeEvent("media_progress", runtimeDetail());
         }
       };
 
@@ -778,6 +803,9 @@
       video.addEventListener("stalled", recoverFromStall);
       video.addEventListener("error", recoverFromStall);
       video.addEventListener("error", () => {
+        emitMediaRuntimeEvent("media_error", runtimeDetail({
+          error_code: video.error ? video.error.code : null,
+        }));
         debugLog("video error", {
           widgetIndex,
           url: video.currentSrc || video.src,
@@ -786,10 +814,14 @@
           readyState: video.readyState,
         });
       });
-      video.addEventListener("playing", () => debugLog("video playing", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("playing", () => {
+        emitMediaRuntimeEvent("media_playing", runtimeDetail());
+        debugLog("video playing", { widgetIndex, url: video.currentSrc || video.src });
+      });
       video.addEventListener("pause", () => debugLog("video pause", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("canplay", () => debugLog("video canplay", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("loadedmetadata", () => {
+        emitMediaRuntimeEvent("media_loadedmetadata", runtimeDetail());
         debugLog("video loadedmetadata", {
           widgetIndex,
           url: video.currentSrc || video.src,
@@ -797,21 +829,41 @@
         });
       });
       video.addEventListener("loadstart", () => debugLog("video loadstart", { widgetIndex, url: video.currentSrc || video.src }));
-      video.addEventListener("loadeddata", () => debugLog("video loadeddata", { widgetIndex, url: video.currentSrc || video.src }));
+      video.addEventListener("loadeddata", () => {
+        emitMediaRuntimeEvent("media_loaded", runtimeDetail());
+        debugLog("video loadeddata", { widgetIndex, url: video.currentSrc || video.src });
+      });
       video.addEventListener("suspend", () => debugLog("video suspend", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("stalled", () => debugLog("video stalled", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("waiting", () => debugLog("video waiting", { widgetIndex, url: video.currentSrc || video.src }));
-      video.addEventListener("ended", () => window.clearInterval(stallMonitor), { once: true });
+      video.addEventListener("ended", () => {
+        window.clearInterval(stallMonitor);
+        emitMediaRuntimeEvent("media_ended", runtimeDetail());
+      }, { once: true });
       video.addEventListener("emptied", () => window.clearInterval(stallMonitor), { once: true });
 
+      const startPositionSec = Number(w.start_position_sec || 0);
+      let startPositionApplied = false;
       const requestPlayback = () => {
+        if (!startPositionApplied && Number.isFinite(startPositionSec) && startPositionSec > 0 && video.readyState >= 1) {
+          try {
+            video.currentTime = startPositionSec;
+            startPositionApplied = true;
+          } catch (_err) {
+            // A later loadedmetadata/canplay event will retry the seek.
+          }
+        }
         try {
           const maybePromise = video.play();
           if (maybePromise && typeof maybePromise.catch === "function") {
-            maybePromise.catch(() => {});
+              maybePromise.catch((error) => emitMediaRuntimeEvent("media_play_rejected", runtimeDetail({
+                error: String(error && error.message ? error.message : error || "play rejected"),
+              })));
           }
-        } catch (_err) {
-          // noop
+        } catch (error) {
+          emitMediaRuntimeEvent("media_play_rejected", runtimeDetail({
+            error: String(error && error.message ? error.message : error || "play rejected"),
+          }));
         }
       };
       video.addEventListener("loadedmetadata", requestPlayback);
@@ -820,18 +872,12 @@
         requestPlayback();
       }
 
-      const startPositionSec = Number(w.start_position_sec || 0);
-      if (Number.isFinite(startPositionSec) && startPositionSec > 0) {
-        const seekToStart = () => {
-          try {
-            video.currentTime = startPositionSec;
-          } catch (_err) {
-            // noop
-          }
-        };
-        video.addEventListener("loadedmetadata", seekToStart, { once: true });
-      }
       wrapper.appendChild(video);
+      wrapper.__cleanup = () => {
+        window.clearInterval(stallMonitor);
+        try { video.pause(); } catch (_err) {}
+        try { video.removeAttribute("src"); video.load(); } catch (_err) {}
+      };
       return wrapper;
     }
 
@@ -953,6 +999,7 @@
         }
       });
     }
+    window.__baylanCleanupMedia = () => cleanupMediaElements(document.getElementById("widgets"));
 
     function loadWidgets(config) {
       const container = document.getElementById("widgets");

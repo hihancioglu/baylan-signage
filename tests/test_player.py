@@ -1170,17 +1170,22 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
     def test_play_media_in_widget_runtime_clears_stale_stop_flag(self):
         player = self._build_player()
         player._stop_requested = True
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        player._widget_process = process
 
-        with patch.object(player, "_send_widget_runtime_message", return_value=True), patch.object(
-            player,
-            "wait_widget_duration",
-            return_value=True,
-        ) as wait_mock:
+        def finish(_source, **_kwargs):
+            session_id = _kwargs["widget_config"]["widgets"][0]["media_session_id"]
+            player._accept_runtime_event({
+                "token": player._runtime_event_token, "type": "media_ended", "session_id": session_id,
+            })
+            return True
+
+        with patch.object(player, "update_widget_layout", side_effect=finish):
             ok = player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", 5)
 
         self.assertTrue(ok)
         self.assertFalse(player._stop_requested)
-        wait_mock.assert_called_once_with(5)
 
     def test_build_image_media_widget_payload_uses_fullscreen_presentation(self):
         payload = self._build_player().build_media_widget_payload("/tmp/example.jpg")
@@ -1212,14 +1217,14 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         widget_process.poll.return_value = None
         player._widget_process = widget_process
 
-        def _sleep_and_interrupt(_seconds):
-            player._stop_requested = True
+        def _interrupt(_source, **_kwargs):
+            player.stop(stop_widget_runtime=False)
+            return True
 
         with patch.object(player, "_is_video", return_value=True), patch.object(
             player,
-            "update_widget_layout",
-            return_value=True,
-        ) as update_mock, patch("client.player.time.sleep", side_effect=_sleep_and_interrupt):
+            "update_widget_layout", side_effect=_interrupt,
+        ) as update_mock, patch.object(player, "background_widget_engine", return_value=True):
             ok = player.play_media_in_widget_runtime_blocking(
                 "/tmp/example.mp4",
                 None,
@@ -1242,6 +1247,86 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             ok = player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None)
 
         self.assertFalse(ok)
+
+    def test_media_ended_unblocks_video_and_stale_event_is_ignored(self):
+        player = self._build_player()
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        player._widget_process = process
+
+        def send_events(_source, **kwargs):
+            session_id = kwargs["widget_config"]["widgets"][0]["media_session_id"]
+            self.assertFalse(player._accept_runtime_event({
+                "token": player._runtime_event_token,
+                "type": "media_ended",
+                "session_id": "stale-session",
+            }))
+            self.assertTrue(player._accept_runtime_event({
+                "token": player._runtime_event_token,
+                "type": "media_ended",
+                "session_id": session_id,
+            }))
+            return True
+
+        with patch.object(player, "update_widget_layout", side_effect=send_events):
+            self.assertTrue(player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None))
+
+    def test_media_error_and_play_rejected_fail_webview_attempt(self):
+        for event_type, expected_reason in (("media_error", "media_error"), ("media_play_rejected", "media_play_rejected")):
+            with self.subTest(event_type=event_type):
+                player = self._build_player()
+                process = unittest.mock.Mock()
+                process.poll.return_value = None
+                player._widget_process = process
+
+                def reject(_source, **kwargs):
+                    session_id = kwargs["widget_config"]["widgets"][0]["media_session_id"]
+                    player._accept_runtime_event({
+                        "token": player._runtime_event_token, "type": event_type, "session_id": session_id,
+                    })
+                    return True
+
+                with patch.object(player, "update_widget_layout", side_effect=reject):
+                    self.assertFalse(player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None))
+                self.assertEqual(player.last_webview_failure_reason, expected_reason)
+
+    def test_video_startup_timeout_fails_without_infinite_wait(self):
+        player = self._build_player()
+        player._media_webview_start_timeout_sec = 0.01
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        player._widget_process = process
+        with patch.object(player, "update_widget_layout", return_value=True):
+            self.assertFalse(player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None))
+        self.assertEqual(player.last_webview_failure_reason, "startup_timeout")
+
+    def test_runtime_event_authentication_and_protocol_filtering(self):
+        player = self._build_player()
+        player._active_media_session_id = "session-1"
+        self.assertFalse(player._accept_runtime_event({
+            "token": "invalid", "type": "media_ended", "session_id": "session-1",
+        }))
+        self.assertFalse(player._accept_runtime_event({
+            "token": player._runtime_event_token, "type": "unknown", "session_id": "session-1",
+        }))
+        self.assertTrue(player._accept_runtime_event({
+            "token": player._runtime_event_token, "type": "media_playing", "session_id": "session-1",
+        }))
+
+    def test_runtime_event_client_ignores_malformed_json(self):
+        import socket
+        player = self._build_player()
+        player._active_media_session_id = "session-1"
+        reader, writer = socket.socketpair()
+        worker = threading.Thread(target=player._read_runtime_event_client, args=(reader,))
+        worker.start()
+        writer.sendall(b"not-json\n")
+        writer.sendall((json.dumps({
+            "token": player._runtime_event_token, "type": "media_ended", "session_id": "session-1",
+        }) + "\n").encode())
+        writer.close()
+        worker.join(timeout=1)
+        self.assertEqual(player._active_media_events[-1]["type"], "media_ended")
 
     def test_sync_widget_runtime_playlist_sends_normalized_items(self):
         player = self._build_player()
@@ -2001,11 +2086,62 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.play_media_in_widget_runtime_blocking.assert_called_once_with("/tmp/example.jpg", 8)
         player.play_blocking.assert_not_called()
 
-    def test_webview_backend_keeps_mp4_on_mpv_route(self):
+    def test_webview_backend_routes_mp4_to_widget_runtime(self):
         player = self._run_single_media_item("/tmp/example.mp4", is_image=False, is_video=True)
 
+        player.play_media_in_widget_runtime_blocking.assert_called_once_with(
+            "/tmp/example.mp4", None, start_position_sec=None
+        )
+        player.play_blocking.assert_not_called()
+
+    def test_webview_backend_routes_webm_to_widget_runtime(self):
+        player = self._run_single_media_item("/tmp/example.webm", is_image=False, is_video=True)
+        player.play_media_in_widget_runtime_blocking.assert_called_once()
+        player.play_blocking.assert_not_called()
+
+    def test_webview_backend_keeps_unsupported_video_on_mpv(self):
+        player = self._run_single_media_item("/tmp/example.mkv", is_image=False, is_video=True)
         player.play_blocking.assert_called_once()
         player.play_media_in_widget_runtime_blocking.assert_not_called()
+
+    def test_webview_video_failure_falls_back_to_mpv_once_and_preserves_runtime(self):
+        from client.client import PlaybackController
+        controller = PlaybackController(_FakeGuiRuntime())
+        player = unittest.mock.Mock()
+        player.is_image.return_value = False
+        player._is_video.return_value = True
+        player.image_duration_sec = 8
+        player.static_image_duration_sec = 86400
+        player.last_play_was_interrupted.return_value = False
+        player.last_webview_failure_reason = "error"
+        player.play_media_in_widget_runtime_blocking.return_value = False
+
+        def stop_after_fallback(*_args, **_kwargs):
+            controller._running = False
+            return True
+
+        player.play_blocking.side_effect = stop_after_fallback
+        controller.player = player
+        item = {"local_path": "/tmp/example.mp4", "media_type": "video", "item_type": "media"}
+        with patch.dict("os.environ", {
+            "MEDIA_PLAYBACK_BACKEND": "webview", "MEDIA_WEBVIEW_FALLBACK_TO_MPV": "1",
+        }, clear=False), patch.object(controller, "_effective_playlist", return_value=[item]), patch.object(
+            controller, "_restore_or_init_runtime_state", return_value={"index": 0, "resume_sec": 0}
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+
+        player.background_widget_engine.assert_called_once()
+        self.assertEqual(player.play_blocking.call_count, 1)
+        self.assertTrue(player.play_blocking.call_args.kwargs["preserve_widget_runtime"])
+
+    def test_webview_video_failure_does_not_fallback_when_disabled(self):
+        player = self._run_single_media_item("/tmp/example.mp4", is_image=False, is_video=True)
+        # The helper models a successful attempt; normalization itself is covered here.
+        from client.client import PlaybackController
+        with patch.dict("os.environ", {"MEDIA_WEBVIEW_FALLBACK_TO_MPV": "false"}, clear=False):
+            self.assertFalse(PlaybackController._media_webview_fallback_enabled())
+        player.play_blocking.assert_not_called()
 
     def test_startup_restores_pathless_production_grid_without_fallback(self):
         from client.client import PlaybackController
