@@ -2432,6 +2432,66 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.player.start_widget_engine_if_needed.assert_not_called()
         controller.player.stop_widget_engine.assert_called_once()
 
+    def test_webview_mp4_playlist_keeps_primary_runtime_warm(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller._reconcile_primary_widget_runtime(
+                enabled=True,
+                normalized_items=[{"local_path": "/tmp/video.mp4", "item_type": "media"}],
+            )
+
+        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.stop_widget_engine.assert_not_called()
+
+    def test_webview_jpg_playlist_keeps_primary_runtime_warm(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller._reconcile_primary_widget_runtime(
+                enabled=True,
+                normalized_items=[{"local_path": "/tmp/image.jpg", "item_type": "media"}],
+            )
+
+        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.stop_widget_engine.assert_not_called()
+
+    def test_mpv_media_playlist_does_not_require_primary_webview_runtime(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=False):
+            controller._reconcile_primary_widget_runtime(
+                enabled=True,
+                normalized_items=[{"local_path": "/tmp/video.mp4", "item_type": "media"}],
+            )
+
+        controller.player.start_widget_engine_if_needed.assert_not_called()
+        controller.player.stop_widget_engine.assert_called_once()
+
+    def test_active_webview_video_config_refresh_neither_stops_nor_backgrounds_runtime(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+        controller._active_item = {
+            "local_path": "/tmp/video.mp4",
+            "media_type": "video",
+            "item_type": "media",
+        }
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller._reconcile_primary_widget_runtime(
+                enabled=True,
+                normalized_items=[{"local_path": "/tmp/video.mp4", "item_type": "media"}],
+            )
+
+        controller.player.stop_widget_engine.assert_not_called()
+        controller.player.background_widget_engine.assert_not_called()
+
     def test_disables_mpv_playlist_when_image_has_custom_duration(self):
         controller = self._build_controller()
         entries = [
