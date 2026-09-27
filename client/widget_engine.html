@@ -8,6 +8,19 @@
     html, body { margin: 0; width: 100%; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
     #widgets { display: grid; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 12px; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
     #widgets.production-grid-layout { display: flex; padding: 0; gap: 0; }
+    #widgets.fullscreen-media-layout {
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      gap: 0;
+      display: block;
+      background: #000;
+    }
+    #widgets.fullscreen-media-layout .media-widget {
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+    }
     .production-grid-stage { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 4px; margin: auto; }
     .production-grid-stage > .widget { flex: 0 0 auto; margin: 0; border-radius: 0; }
     .widget { min-width: 0; min-height: 0; border: 0; border-radius: 8px; overflow: hidden; background: #111; }
@@ -185,6 +198,9 @@
 
       const widgets = Array.isArray(input.widgets) ? input.widgets.filter((w) => w && typeof w === "object") : [];
       const normalized = { widgets };
+      if (String(input.presentation_mode || "").toLowerCase() === "fullscreen_media") {
+        normalized.presentation_mode = "fullscreen_media";
+      }
       const parsedRows = Number(input.rows);
       if (Number.isFinite(parsedRows) && parsedRows > 0) {
         normalized.rows = parsedRows;
@@ -209,6 +225,10 @@
       container.style.setProperty("--cols", String(cols));
       const allProductionAutoFit = widgetCount > 0 && config.widgets.every(isProductionAutoFitWidget);
       container.classList.toggle("production-grid-layout", allProductionAutoFit);
+      container.classList.toggle(
+        "fullscreen-media-layout",
+        config.presentation_mode === "fullscreen_media"
+      );
       container.classList.toggle(
         "production-grid-single-fit",
         singleCardFit
