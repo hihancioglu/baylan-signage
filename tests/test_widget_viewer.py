@@ -180,11 +180,13 @@ class TestWidgetViewer(unittest.TestCase):
             )
 
         class _ImmediateThread:
-            def __init__(self, target=None, args=(), daemon=False):
+            def __init__(self, target=None, args=(), daemon=False, **_kwargs):
                 self._target = target
                 self._args = args
 
             def start(self):
+                if self._target is widget_viewer._poll_media_runtime_events:
+                    return
                 if self._target:
                     self._target(*self._args)
 
@@ -220,12 +222,14 @@ class TestWidgetViewer(unittest.TestCase):
         class _TestThread:
             instances = []
 
-            def __init__(self, target=None, args=(), daemon=False):
+            def __init__(self, target=None, args=(), daemon=False, **_kwargs):
                 self.target = target
                 self.args = args
                 self.__class__.instances.append(self)
 
             def start(self):
+                if self.target is widget_viewer._poll_media_runtime_events:
+                    return
                 if not ready_before_messages:
                     self.target(*self.args)
 
@@ -307,7 +311,7 @@ class TestWidgetViewer(unittest.TestCase):
         ])
 
         webview.create_window.assert_called_once()
-        self.assertEqual(len(thread_type.instances), 1)
+        self.assertEqual(len(thread_type.instances), 2)
 
     def test_widget_engine_bridge_sends_authenticated_newline_json(self):
         connection = unittest.mock.MagicMock()
@@ -321,6 +325,24 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(payload["type"], "media_ended")
         self.assertEqual(payload["monitor_index"], 2)
         self.assertEqual(payload["session_id"], "abc")
+
+    def test_widget_engine_bridge_logs_tcp_success_without_progress_spam(self):
+        connection = unittest.mock.MagicMock()
+        connection.__enter__.return_value = connection
+        bridge = widget_viewer._WidgetEngineBridge(4321, "secret", 0)
+        with patch("client.widget_viewer.socket.create_connection", return_value=connection), patch(
+            "client.widget_viewer._debug_log"
+        ) as debug_log:
+            self.assertTrue(bridge.media_event("media_playing", {"session_id": "abc"}))
+        self.assertIn("runtime media tcp sent | type=media_playing session=abc monitor=0", debug_log.call_args.args[0])
+
+    def test_widget_engine_bridge_tcp_failure_does_not_escape(self):
+        bridge = widget_viewer._WidgetEngineBridge(4321, "secret", 0)
+        with patch("client.widget_viewer.socket.create_connection", side_effect=OSError("offline")), patch(
+            "client.widget_viewer._debug_log"
+        ) as debug_log:
+            self.assertFalse(bridge.media_event("media_playing", {"session_id": "abc"}))
+        self.assertIn("runtime media tcp failed | type=media_playing session=abc error=offline", debug_log.call_args.args[0])
 
     def test_widget_engine_bridge_ignores_unknown_event(self):
         bridge = widget_viewer._WidgetEngineBridge(4321, "secret")
@@ -421,35 +443,46 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn('"fullscreen-media-layout"', engine)
         self.assertIn('config.presentation_mode === "fullscreen_media"', engine)
 
-    def test_widget_engine_queues_media_events_until_pywebview_bridge_ready(self):
+    def test_widget_engine_uses_bounded_durable_media_outbox(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
-        self.assertIn("const pendingMediaRuntimeEvents = [];", engine)
-        self.assertIn("const MAX_PENDING_MEDIA_RUNTIME_EVENTS = 32;", engine)
-        self.assertIn('window.addEventListener("pywebviewready"', engine)
-        self.assertIn('debugLog("pywebview bridge ready")', engine)
-        self.assertIn("flushPendingMediaRuntimeEvents();", engine)
-        self.assertIn('if (normalizedType === "media_progress") return;', engine)
-        self.assertIn("pendingMediaRuntimeEvents.push({ type: normalizedType, detail: normalizedDetail });", engine)
+        self.assertIn("const mediaRuntimeOutbox = [];", engine)
+        self.assertIn("const MAX_MEDIA_RUNTIME_OUTBOX = 64;", engine)
+        self.assertIn("mediaRuntimeOutbox.findIndex", engine)
+        self.assertIn("mediaRuntimeOutbox.push({ type, detail });", engine)
+        self.assertIn("window.__baylanDrainMediaRuntimeEvents = function(maxItems)", engine)
+        self.assertIn("return mediaRuntimeOutbox.splice(0, limit);", engine)
 
-    def test_widget_engine_flush_preserves_media_lifecycle_order_and_direct_proxy_calls(self):
+    def test_widget_engine_drain_preserves_fifo_without_pywebview_push(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
-        sender = engine.split("function sendMediaRuntimeEvent", 1)[1].split(
-            "function flushPendingMediaRuntimeEvents", 1
-        )[0]
-        flush = engine.split("function flushPendingMediaRuntimeEvents", 1)[1].split(
-            "function emitMediaRuntimeEvent", 1
+        emitter = engine.split("function emitMediaRuntimeEvent", 1)[1].split(
+            "window.__baylanDrainMediaRuntimeEvents", 1
         )[0]
 
-        self.assertIn('api.media_event(String(type || ""), detail || {})', sender)
-        self.assertIn('api.mediaEvent(String(type || ""), detail || {})', sender)
-        self.assertNotIn("sender.call", engine)
-        self.assertIn("pendingMediaRuntimeEvents[0]", flush)
-        self.assertIn("pendingMediaRuntimeEvents.shift()", flush)
+        self.assertIn("queueMediaRuntimeEvent(normalizedType, normalizedDetail)", emitter)
+        self.assertNotIn("api.media_event", engine)
+        self.assertIn("mediaRuntimeOutbox.splice(0, limit)", engine)
         for event_type in (
             "media_loadedmetadata", "media_playing", "media_error", "media_play_rejected", "media_ended"
         ):
             self.assertIn(f'emitMediaRuntimeEvent("{event_type}"', engine)
+
+    def test_media_runtime_poller_drains_events_through_bridge(self):
+        window = unittest.mock.Mock()
+        window.evaluate_js.side_effect = [[
+            {"type": "media_loadedmetadata", "detail": {"session_id": "s1"}},
+            {"type": "media_playing", "detail": {"session_id": "s1"}},
+        ]]
+        bridge = unittest.mock.Mock()
+        stop = unittest.mock.Mock()
+        stop.wait.side_effect = [False, True]
+
+        widget_viewer._poll_media_runtime_events(window, bridge, stop)
+
+        self.assertEqual(bridge.media_event.call_args_list, [
+            unittest.mock.call("media_loadedmetadata", {"session_id": "s1"}),
+            unittest.mock.call("media_playing", {"session_id": "s1"}),
+        ])
 
     def test_widget_engine_has_media_delivery_diagnostics_without_progress_spam(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
