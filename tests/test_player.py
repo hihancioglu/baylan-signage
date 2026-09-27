@@ -3956,5 +3956,135 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         self.assertFalse(controller._clone_to_all_monitors)
 
 
+class TestUnifiedMultiMonitorWebViewRuntime(unittest.TestCase):
+    def test_one_runtime_owner_survives_100_mixed_transitions(self):
+        from client.client import MultiMonitorPlayback
+
+        media_manager = unittest.mock.Mock()
+        player = unittest.mock.Mock()
+        player.play_media_in_widget_runtime_blocking.return_value = True
+        player.play_widget_blocking.return_value = True
+        playback = MultiMonitorPlayback(media_manager)
+        entries = []
+        for index in range(100):
+            if index % 2:
+                entries.append({
+                    "item_type": "widget",
+                    "widget_url": "https://example.com/production-grid",
+                    "duration_sec": 1,
+                })
+            else:
+                entries.append({
+                    "item_type": "media",
+                    "local_path": f"/tmp/item-{index}.mp4" if index % 4 == 0 else f"/tmp/item-{index}.jpg",
+                    "duration_sec": 1,
+                })
+        playback._monitor_states[1] = {
+            "enabled": True,
+            "entries": entries,
+            "loop_mode": "sequential",
+            "target_monitor_index": 0,
+        }
+        playback._running_monitors[1] = True
+        transition_count = 0
+
+        def finish_transition(*_args, **_kwargs):
+            nonlocal transition_count
+            transition_count += 1
+            if transition_count == 100:
+                playback._running_monitors[1] = False
+            return True
+
+        player.play_media_in_widget_runtime_blocking.side_effect = finish_transition
+        player.play_widget_blocking.side_effect = finish_transition
+        with patch.dict(os.environ, {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False), patch(
+            "client.client.BorderlessFullscreenPlayer", return_value=player
+        ) as player_cls, patch("client.client.time.sleep", return_value=None):
+            playback._run(1)
+
+        self.assertEqual(transition_count, 100)
+        self.assertEqual(player_cls.call_count, 1)
+        self.assertIs(playback._players[1], playback._widget_players[1])
+        player.play_blocking.assert_not_called()
+
+    def test_two_monitors_have_at_most_two_distinct_runtime_owners(self):
+        from client.client import MultiMonitorPlayback
+
+        players = [unittest.mock.Mock(), unittest.mock.Mock()]
+        playback = MultiMonitorPlayback(unittest.mock.Mock())
+        with patch.dict(os.environ, {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False), patch(
+            "client.client.BorderlessFullscreenPlayer", side_effect=players
+        ) as player_cls:
+            first = playback._player_for_monitor(1)
+            second = playback._player_for_monitor(2)
+            self.assertIs(first, playback._player_for_monitor(1))
+            self.assertIs(second, playback._player_for_monitor(2))
+
+        self.assertEqual(player_cls.call_count, 2)
+        self.assertEqual(len({id(value) for value in playback._players.values()}), 2)
+
+    def test_clone_events_only_primary_monitor_is_authoritative(self):
+        player = BorderlessFullscreenPlayer.__new__(BorderlessFullscreenPlayer)
+        player._runtime_event_token = "token"
+        player._runtime_event_condition = threading.Condition()
+        player._active_media_session_id = "session"
+        player._active_media_monitor_indexes = {0, 1}
+        player._authoritative_media_monitor_index = 0
+        player._active_media_events = __import__("collections").deque()
+
+        self.assertTrue(player._accept_runtime_event({
+            "token": "token", "type": "media_ended", "session_id": "session", "monitor_index": 1,
+        }))
+        self.assertTrue(player._accept_runtime_event({
+            "token": "token", "type": "media_ended", "session_id": "session", "monitor_index": 0,
+        }))
+        self.assertFalse(player._accept_runtime_event({
+            "token": "token", "type": "media_ended", "session_id": "stale", "monitor_index": 0,
+        }))
+        self.assertEqual([event["monitor_index"] for event in player._active_media_events], [1, 0])
+
+    def test_webview_fallback_keeps_owner_for_following_widget(self):
+        from client.client import MultiMonitorPlayback
+
+        player = unittest.mock.Mock()
+        player.play_media_in_widget_runtime_blocking.return_value = False
+        player.last_play_was_interrupted.return_value = False
+        player.play_blocking.return_value = True
+        playback = MultiMonitorPlayback(unittest.mock.Mock())
+        playback._monitor_states[1] = {
+            "enabled": True,
+            "entries": [
+                {"item_type": "media", "local_path": "/tmp/a.mp4", "duration_sec": 1},
+                {"item_type": "widget", "widget_url": "https://example.com/grid", "duration_sec": 1},
+            ],
+            "loop_mode": "sequential",
+            "target_monitor_index": 0,
+        }
+        playback._running_monitors[1] = True
+
+        def finish_widget(*_args, **_kwargs):
+            playback._running_monitors[1] = False
+            return True
+
+        player.play_widget_blocking.side_effect = finish_widget
+        with patch.dict(os.environ, {
+            "MEDIA_PLAYBACK_BACKEND": "webview", "MEDIA_WEBVIEW_FALLBACK_TO_MPV": "1",
+        }, clear=False), patch("client.client.BorderlessFullscreenPlayer", return_value=player) as player_cls, patch(
+            "client.client.time.sleep", return_value=None
+        ):
+            playback._run(1)
+
+        self.assertEqual(player_cls.call_count, 1)
+        player.play_blocking.assert_called_once_with(
+            "/tmp/a.mp4",
+            image_duration_sec=1,
+            target_monitor_index=0,
+            clone_to_all_monitors=False,
+            preserve_widget_runtime=True,
+        )
+        player.play_widget_blocking.assert_called_once()
+        self.assertIs(playback._players[1], playback._widget_players[1])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2284,6 +2284,33 @@ class MultiMonitorPlayback:
         self._lock = threading.Lock()
 
     @staticmethod
+    def _media_playback_backend() -> str:
+        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "mpv") or "").strip().lower()
+        return backend if backend in {"mpv", "webview"} else "mpv"
+
+    @staticmethod
+    def _is_webview_media(media_path: str) -> bool:
+        return Path(urlparse(str(media_path or "")).path).suffix.lower() in {
+            ".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm",
+        }
+
+    def _player_for_monitor(self, monitor_no: int) -> BorderlessFullscreenPlayer:
+        """Return the single WebView owner for a monitor; preserve MPV's split path."""
+        with self._lock:
+            if self._media_playback_backend() == "webview":
+                player = self._players.get(monitor_no) or self._widget_players.get(monitor_no)
+                if player is None:
+                    player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                self._players[monitor_no] = player
+                self._widget_players[monitor_no] = player
+                return player
+            player = self._players.get(monitor_no)
+            if player is None:
+                player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                self._players[monitor_no] = player
+            return player
+
+    @staticmethod
     def _use_windows_display_ids() -> bool:
         # Varsayılanı kapalı tutuyoruz: paneldeki monitor_no değeri
         # doğrudan 1-bazlı sıralı monitör index'i olarak yorumlanır.
@@ -2377,6 +2404,22 @@ class MultiMonitorPlayback:
         return False
 
     def _reconcile_widget_players_for_states(self, monitor_states: dict[int, dict]) -> None:
+        if self._media_playback_backend() == "webview":
+            for monitor_no, state in monitor_states.items():
+                if not state.get("enabled") or not state.get("entries"):
+                    continue
+                player = self._player_for_monitor(monitor_no)
+                target = state.get("target_monitor_index")
+                if isinstance(target, int) and target >= 0:
+                    try:
+                        player.start_widget_engine_if_needed(
+                            target_monitor_index=target,
+                            clone_to_all_monitors=False,
+                        )
+                        self._background_widget_player_runtime(player)
+                    except Exception:
+                        pass
+            return
         desired_targets: dict[int, int] = {}
         monitor_nos_without_widgets: set[int] = set()
         for monitor_no, state in monitor_states.items():
@@ -2596,14 +2639,17 @@ class MultiMonitorPlayback:
                 | set(self._widget_players.keys())
                 | set(self._running_monitors.keys())
             )
+            stopped_players: set[int] = set()
             for monitor_no in monitor_numbers:
                 self._running_monitors[monitor_no] = False
                 player = self._players.get(monitor_no)
-                if player:
+                if player and id(player) not in stopped_players:
                     player.stop()
+                    stopped_players.add(id(player))
                 widget_player = self._widget_players.get(monitor_no)
-                if widget_player:
+                if widget_player and id(widget_player) not in stopped_players:
                     widget_player.stop(stop_widget_runtime=False)
+                    stopped_players.add(id(widget_player))
                 worker = self._workers.get(monitor_no)
                 if worker and worker.is_alive():
                     workers.append(worker)
@@ -2614,7 +2660,11 @@ class MultiMonitorPlayback:
         with self._lock:
             players = list(self._players.values()) + list(self._widget_players.values())
             widget_players = list(self._widget_players.values())
+        seen_players: set[int] = set()
         for player in players:
+            if id(player) in seen_players:
+                continue
+            seen_players.add(id(player))
             if player in widget_players:
                 player.stop(stop_widget_runtime=False)
             else:
@@ -2649,6 +2699,18 @@ class MultiMonitorPlayback:
                     f"monitor_no={monitor_no} reason=runtime_not_backgrounded"
                 )
 
+    def close_runtime_event_listeners(self):
+        with self._lock:
+            players = list(self._players.values()) + list(self._widget_players.values())
+        seen_players: set[int] = set()
+        for player in players:
+            if id(player) in seen_players:
+                continue
+            seen_players.add(id(player))
+            closer = getattr(player, "close_runtime_event_listener", None)
+            if callable(closer):
+                closer()
+
     def _ensure_worker(self, monitor_no: int):
         widget_player_to_prewarm: BorderlessFullscreenPlayer | None = None
         widget_target_monitor_index: int | None = None
@@ -2663,10 +2725,12 @@ class MultiMonitorPlayback:
                 for entry in entries
                 if isinstance(entry, dict)
             )
-            if has_widget_entry:
+            if has_widget_entry or self._media_playback_backend() == "webview":
                 player = self._widget_players.get(monitor_no)
                 if player is None:
                     player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                    if self._media_playback_backend() == "webview":
+                        self._players[monitor_no] = player
                     self._widget_players[monitor_no] = player
                 widget_player_to_prewarm = player
                 target_monitor_index = monitor_state.get("target_monitor_index")
@@ -2753,13 +2817,16 @@ class MultiMonitorPlayback:
 
             item_type = str(item.get("item_type") or "media").strip().lower()
             if item_type == "widget":
-                with self._lock:
-                    player = self._widget_players.get(monitor_no)
-                    if player is None:
-                        player = self._widget_player_fallback
+                if self._media_playback_backend() == "webview":
+                    player = self._player_for_monitor(monitor_no)
+                else:
+                    with self._lock:
+                        player = self._widget_players.get(monitor_no)
                         if player is None:
-                            player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
-                        self._widget_players[monitor_no] = player
+                            player = self._widget_player_fallback
+                            if player is None:
+                                player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
+                            self._widget_players[monitor_no] = player
                 if monitor_no >= 2 and not self._secondary_monitor_widgets_enabled():
                     log_debug(
                         "monitor_widget_launch skipped | "
@@ -2813,11 +2880,7 @@ class MultiMonitorPlayback:
                     )
                     time.sleep(1.0)
             else:
-                with self._lock:
-                    player = self._players.get(monitor_no)
-                    if player is None:
-                        player = BorderlessFullscreenPlayer(keep_widget_runtime_warm=True)
-                        self._players[monitor_no] = player
+                player = self._player_for_monitor(monitor_no)
                 if not media_path:
                     time.sleep(0.2)
                     continue
@@ -2831,12 +2894,34 @@ class MultiMonitorPlayback:
                     f"monitor_no={monitor_no} target_monitor_index={target_monitor_index} "
                     f"path={media_path} media_duration_sec={media_duration_sec}"
                 )
-                player.play_blocking(
-                    media_path,
-                    image_duration_sec=media_duration_sec,
-                    target_monitor_index=target_monitor_index,
-                    clone_to_all_monitors=False,
-                )
+                if self._media_playback_backend() == "webview" and self._is_webview_media(media_path):
+                    log_debug(
+                        "media backend=webview | "
+                        f"monitor={target_monitor_index} path={media_path}"
+                    )
+                    ok = player.play_media_in_widget_runtime_blocking(
+                        media_path,
+                        media_duration_sec,
+                        target_monitor_index=target_monitor_index,
+                        clone_to_all_monitors=False,
+                    )
+                    if not ok and not player.last_play_was_interrupted() and PlaybackController._media_webview_fallback_enabled():
+                        log_debug(f"fallback to mpv | monitor={target_monitor_index} path={media_path}")
+                        player.background_widget_engine()
+                        player.play_blocking(
+                            media_path,
+                            image_duration_sec=media_duration_sec,
+                            target_monitor_index=target_monitor_index,
+                            clone_to_all_monitors=False,
+                            preserve_widget_runtime=True,
+                        )
+                else:
+                    player.play_blocking(
+                        media_path,
+                        image_duration_sec=media_duration_sec,
+                        target_monitor_index=target_monitor_index,
+                        clone_to_all_monitors=False,
+                    )
 
 
 class PlaybackController:
@@ -3595,6 +3680,10 @@ class PlaybackController:
             self.multi_monitor_playback.background_widget_viewers()
         except Exception:
             pass
+
+    def close_runtime_event_listeners(self):
+        self.multi_monitor_playback.close_runtime_event_listeners()
+        self.player.close_runtime_event_listener()
         try:
             self.player.background_widget_engine()
         except Exception:
@@ -3829,12 +3918,20 @@ class PlaybackController:
                         ok = self.player.play_media_in_widget_runtime_blocking(
                             media_path,
                             webview_image_duration_sec,
+                            **({
+                                "target_monitor_index": self._primary_target_monitor_index(),
+                                "clone_to_all_monitors": self._clone_to_all_monitors,
+                            } if self._primary_target_monitor_index() is not None or self._clone_to_all_monitors else {}),
                         )
                     elif requested_media_backend == "webview" and is_video_media and self._is_webview_video(media_path):
                         ok = self.player.play_media_in_widget_runtime_blocking(
                             media_path,
                             media_duration_sec,
                             start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                            **({
+                                "target_monitor_index": self._primary_target_monitor_index(),
+                                "clone_to_all_monitors": self._clone_to_all_monitors,
+                            } if self._primary_target_monitor_index() is not None or self._clone_to_all_monitors else {}),
                         )
                         if not ok and not self.player.last_play_was_interrupted() and self._media_webview_fallback_enabled():
                             failure_reason = getattr(self.player, "last_webview_failure_reason", None)
@@ -3864,6 +3961,8 @@ class PlaybackController:
                                 media_path,
                                 media_duration_sec,
                                 start_position_sec=effective_resume_sec if effective_resume_sec > 0 and is_video_media else None,
+                                target_monitor_index=self._primary_target_monitor_index(),
+                                clone_to_all_monitors=True,
                             )
                         else:
                             ok = self.player.play_blocking(
@@ -5304,6 +5403,7 @@ def main():
 
         idle_background.hide()
         playback.stop(stop_widget_runtime=True)
+        playback.close_runtime_event_listeners()
         try:
             sio.disconnect()
         except Exception:
