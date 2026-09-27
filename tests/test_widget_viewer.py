@@ -495,12 +495,13 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(result, "https://example.com")
 
     def test_build_engine_url_propagates_debug_for_runtime_sentinel(self):
+        engine_path = Path("/tmp/widget_engine.html")
         with patch.object(widget_viewer, "DEBUG_MODE_ENABLED", True), patch.object(
-            widget_viewer, "_resolve_runtime_resource", return_value=Path("/tmp/widget_engine.html")
+            widget_viewer, "_resolve_runtime_resource", return_value=engine_path
         ):
             result = widget_viewer._build_engine_url(widget_viewer.WIDGET_ENGINE_SENTINEL)
 
-        self.assertEqual(result, "file:///tmp/widget_engine.html?debug=1")
+        self.assertEqual(result, f"{engine_path.resolve().as_uri()}?debug=1")
 
     def test_build_engine_url_wraps_source_when_layout_exists(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
