@@ -381,6 +381,35 @@ class TestWidgetViewer(unittest.TestCase):
         window.toggle_fullscreen.assert_called_once()
         self.assertTrue(any("fresh" in call.args[0] for call in window.evaluate_js.call_args_list))
 
+    def test_fullscreen_media_applies_layout_before_show(self):
+        _, window, _, _ = self._run_runtime_messages([{
+            "type": "layout_update",
+            "payload": {
+                "signature": "media",
+                "config": {"presentation_mode": "fullscreen_media", "widgets": [{"type": "video"}]},
+            },
+        }])
+
+        show_index = window.method_calls.index(unittest.mock.call.show())
+        layout_indexes = [
+            index for index, call in enumerate(window.method_calls)
+            if call == unittest.mock.call.evaluate_js(unittest.mock.ANY)
+        ]
+        self.assertLess(layout_indexes[-1], show_index)
+
+    def test_ordinary_layout_still_shows_before_apply(self):
+        _, window, _, _ = self._run_runtime_messages([{
+            "type": "layout_update",
+            "payload": {"signature": "dashboard", "config": {"widgets": [{"type": "iframe"}]}},
+        }])
+
+        show_index = window.method_calls.index(unittest.mock.call.show())
+        layout_indexes = [
+            index for index, call in enumerate(window.method_calls)
+            if call == unittest.mock.call.evaluate_js(unittest.mock.ANY)
+        ]
+        self.assertLess(show_index, layout_indexes[-1])
+
     def test_runtime_flush_preserves_playlist_then_layout_order(self):
         _, window, _, _ = self._run_runtime_messages([
             {"type": "playlist_sync", "payload": {"items": []}},
@@ -571,7 +600,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("api.media_event", engine)
         self.assertIn("mediaRuntimeOutbox.splice(0, limit)", engine)
         for event_type in (
-            "media_loadedmetadata", "media_playing", "media_error", "media_play_rejected", "media_ended"
+            "media_loadedmetadata", "media_playing", "media_first_frame", "media_error", "media_play_rejected", "media_ended"
         ):
             self.assertIn(f'emitMediaRuntimeEvent("{event_type}"', engine)
 

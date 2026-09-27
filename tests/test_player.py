@@ -1335,7 +1335,7 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             "token": player._runtime_event_token, "type": "media_playing", "session_id": "session-1",
         }))
 
-    def test_video_playing_event_marks_webview_media_ready(self):
+    def test_video_playing_starts_video_but_first_frame_marks_it_ready(self):
         player = self._build_player()
         player._active_media_session_id = "video-session"
         player._active_media_type = "video"
@@ -1345,7 +1345,45 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             "type": "media_playing",
             "session_id": "video-session",
         }))
+        self.assertFalse(player.webview_media_ready())
+        self.assertTrue(player._accept_runtime_event({
+            "token": player._runtime_event_token,
+            "type": "media_first_frame",
+            "session_id": "video-session",
+        }))
         self.assertTrue(player.webview_media_ready())
+
+    def test_first_frame_rejects_stale_session_and_wrong_monitor(self):
+        player = self._build_player()
+        player._active_media_session_id = "current-session"
+        player._active_media_type = "video"
+        player._active_media_monitor_indexes = {0}
+        player._authoritative_media_monitor_index = 0
+
+        for session_id, monitor_index in (("stale-session", 0), ("current-session", 1)):
+            with self.subTest(session_id=session_id, monitor_index=monitor_index):
+                self.assertFalse(player._accept_runtime_event({
+                    "token": player._runtime_event_token,
+                    "type": "media_first_frame",
+                    "session_id": session_id,
+                    "monitor_index": monitor_index,
+                }))
+                self.assertFalse(player.webview_media_ready())
+
+    def test_first_frame_invokes_ready_callback_immediately(self):
+        player = self._build_player()
+        player._active_media_session_id = "video-session"
+        player._active_media_type = "video"
+        callback = unittest.mock.Mock()
+        player.set_webview_media_ready_callback(callback)
+
+        self.assertTrue(player._accept_runtime_event({
+            "token": player._runtime_event_token,
+            "type": "media_first_frame",
+            "session_id": "video-session",
+        }))
+
+        callback.assert_called_once_with("media_first_frame", "video-session", None)
 
     def test_image_loaded_event_marks_webview_media_ready(self):
         player = self._build_player()
@@ -2339,6 +2377,45 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         controller.player.start_widget_engine_if_needed.assert_called_once()
         controller.player.stop_widget_engine.assert_not_called()
+
+    def test_disabled_fallback_mp4_prewarms_and_refresh_keeps_primary_runtime(self):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.media_manager = unittest.mock.Mock()
+        fallback_entry = {"local_path": "/tmp/fallback.mp4", "item_type": "media", "media_type": "video"}
+        controller.media_manager.sync_playlist_entries.return_value = [fallback_entry]
+        controller.multi_monitor_playback = unittest.mock.Mock()
+        controller.multi_monitor_playback.has_active_playlist.return_value = False
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+        config = {
+            "enabled": False,
+            "videos": [],
+            "fallback_media": "/tmp/fallback.mp4",
+            "monitor_playlists": {},
+        }
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller.update_from_config(config)
+            controller.update_from_config(config)
+
+        self.assertEqual(controller.player.start_widget_engine_if_needed.call_count, 2)
+        controller.player.stop_widget_engine.assert_not_called()
+        controller.player.update_widget_layout.assert_not_called()
+
+    def test_controller_first_frame_posts_hide_through_shared_overlay(self):
+        from client.client import IdleBackgroundOverlay, PlaybackController
+
+        gui = unittest.mock.Mock()
+        overlay = IdleBackgroundOverlay(gui)
+        overlay._visible = True
+        controller = PlaybackController(gui, idle_background=overlay)
+
+        controller._on_webview_media_ready("media_first_frame", "session", 0)
+
+        gui.post.assert_called_once_with("idle_overlay_hide")
+        self.assertIs(controller._background_overlay, overlay)
 
     def test_update_from_config_does_not_background_primary_widget_when_already_visible(self):
         from client.client import PlaybackController

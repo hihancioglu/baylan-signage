@@ -2171,6 +2171,15 @@ class GuiRuntime:
             else:
                 _hide_monitor_debug_overlays()
 
+            # The idle window is a protective curtain while the on-top WebView
+            # is promoted and paints its first frame. Keep it above that window
+            # until the readiness callback queues its destruction.
+            if idle_window is not None and idle_window.winfo_exists():
+                try:
+                    idle_window.attributes("-topmost", True)
+                    idle_window.lift()
+                except tk.TclError:
+                    pass
             if work_order_window is not None and work_order_window.winfo_exists():
                 try:
                     work_order_window.attributes("-topmost", True)
@@ -2227,11 +2236,14 @@ class IdleBackgroundOverlay:
         self._gui_runtime.post("idle_overlay_show")
         self._visible = True
 
-    def hide(self):
+    def hide(self, reason: str | None = None):
         if not self._visible:
             log_debug("idle_overlay hide skipped | reason=already_hidden")
             return
-        log_debug("idle_overlay hide posted")
+        if reason:
+            log_debug(f"idle_overlay hide | reason={reason}")
+        else:
+            log_debug("idle_overlay hide posted")
         self._gui_runtime.post("idle_overlay_hide")
         self._visible = False
 
@@ -2929,7 +2941,7 @@ class PlaybackController:
     WEBVIEW_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     WEBVIEW_VIDEO_EXTENSIONS = BorderlessFullscreenPlayer.WEBVIEW_VIDEO_EXTENSIONS
 
-    def __init__(self, gui_runtime: GuiRuntime):
+    def __init__(self, gui_runtime: GuiRuntime, idle_background: IdleBackgroundOverlay | None = None):
         self.media_manager = MediaManager(
             cache_root=str(_resolve_windows_writable_path(os.getenv("MEDIA_CACHE_DIR"), "cache"))
         )
@@ -2977,7 +2989,8 @@ class PlaybackController:
         self._active_item = None
         self._playback_state_lock = threading.Lock()
         self._playback_state = self._sanitize_playback_state(self.media_manager.load_playback_state())
-        self._background_overlay = IdleBackgroundOverlay(gui_runtime)
+        self._background_overlay = idle_background or IdleBackgroundOverlay(gui_runtime)
+        self.player.set_webview_media_ready_callback(self._on_webview_media_ready)
         self._active_widget_signature: str | None = None
         self._prewarmed_widget_signature: str | None = None
         # Klon modu devre dışı: her monitör bağımsız playlist ile yönetilir.
@@ -2991,6 +3004,10 @@ class PlaybackController:
             and not _is_widget_viewer_process()
         ):
             self.multi_monitor_playback.prewarm_widget_runtimes_on_startup()
+
+    def _on_webview_media_ready(self, event_type: str, _session_id: str, _monitor_index: int | None) -> None:
+        if event_type == "media_first_frame":
+            self._background_overlay.hide(reason="webview_first_frame")
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
@@ -3486,15 +3503,19 @@ class PlaybackController:
         )
         return self._is_webview_media(media_path)
 
-    def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
-        requires_runtime = bool(
-            enabled and self._entries_require_primary_webview_runtime(normalized_items)
-        )
+    def _reconcile_primary_widget_runtime(
+        self,
+        *,
+        enabled: bool,
+        normalized_items: list[dict],
+        source: str = "playlist",
+    ) -> None:
+        requires_runtime = self._entries_require_primary_webview_runtime(normalized_items)
         active_webview_visible = self._primary_has_visible_webview_content()
         if active_webview_visible:
             log_debug(
                 "primary_widget_runtime_reconcile | action=keep reason=active_webview_content "
-                f"enabled={enabled} item_count={len(normalized_items)} "
+                f"source={source} enabled={enabled} item_count={len(normalized_items)} "
                 f"requires_runtime={requires_runtime} active_webview_visible=True"
             )
             return
@@ -3530,11 +3551,14 @@ class PlaybackController:
                 prewarm_ok = False
             log_debug(
                 "primary_widget_runtime_reconcile | "
-                f"action=ensure enabled={enabled} item_count={len(normalized_items)} "
+                f"action=ensure source={source} enabled={enabled} item_count={len(normalized_items)} "
                 f"requires_runtime=True active_webview_visible={active_webview_visible} "
                 f"ok={prewarm_ok} visible={visible_content} "
                 f"secondary_visible={secondary_visible} "
                 f"backgrounded={backgrounded if prewarm_ok else False}"
+            )
+            log_debug(
+                f"primary webview prewarm | source={source} items={len(normalized_items)} ok={prewarm_ok}"
             )
             return
 
@@ -3542,7 +3566,7 @@ class PlaybackController:
             self.player.stop_widget_engine()
             log_debug(
                 "primary_widget_runtime_reconcile | action=stop "
-                f"enabled={enabled} item_count={len(normalized_items)} "
+                f"source={source} enabled={enabled} item_count={len(normalized_items)} "
                 "requires_runtime=False active_webview_visible=False ok=True"
             )
         except Exception:
@@ -3644,11 +3668,6 @@ class PlaybackController:
             elif item:
                 normalized_items.append(self._normalize_item({"path": item, "media_type": None, "duration_sec": None}))
 
-        self._reconcile_primary_widget_runtime(
-            enabled=enabled,
-            normalized_items=normalized_items,
-        )
-
         first_items = [
             f"{idx + 1}:{self._item_label(item)}[{item.get('item_type')}]"
             for idx, item in enumerate(normalized_items[:5])
@@ -3680,6 +3699,25 @@ class PlaybackController:
                 self._version = playlist_version
                 self._sync_in_progress = False
                 self._sync_percent = 100
+
+            if self._fallback_only_mode:
+                effective_runtime_entries = list(fallback_playlist)
+                runtime_source = "fallback"
+            elif normalized_items:
+                effective_runtime_entries = list(normalized_items)
+                runtime_source = "playlist"
+            elif self._playlist_entries:
+                effective_runtime_entries = list(self._playlist_entries)
+                runtime_source = "cache"
+            else:
+                effective_runtime_entries = list(fallback_playlist)
+                runtime_source = "fallback"
+
+        self._reconcile_primary_widget_runtime(
+            enabled=enabled,
+            normalized_items=effective_runtime_entries,
+            source=runtime_source,
+        )
 
         if self._fallback_only_mode:
             return
@@ -4132,8 +4170,8 @@ if IS_WIDGET_VIEWER_PROCESS:
     call_request_overlay = None
 else:
     gui_runtime = GuiRuntime()
-    playback = PlaybackController(gui_runtime)
     idle_background = IdleBackgroundOverlay(gui_runtime)
+    playback = PlaybackController(gui_runtime, idle_background=idle_background)
     work_order_alert_overlay = WorkOrderAlertOverlay(gui_runtime)
     call_request_overlay = CallRequestOverlay(gui_runtime)
 processed_command_ids = set()
