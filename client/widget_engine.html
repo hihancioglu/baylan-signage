@@ -769,6 +769,24 @@
         }
       };
 
+      let firstFrameSent = false;
+      let firstFrameScheduled = false;
+      const signalFirstFrame = () => {
+        if (firstFrameSent || firstFrameScheduled) return;
+        firstFrameScheduled = true;
+        const emitFirstFrame = () => {
+          if (firstFrameSent) return;
+          firstFrameSent = true;
+          emitMediaRuntimeEvent("media_first_frame", runtimeDetail());
+          debugLog("video first frame", { widgetIndex, url: video.currentSrc || video.src });
+        };
+        if (typeof video.requestVideoFrameCallback === "function") {
+          video.requestVideoFrameCallback(emitFirstFrame);
+          return;
+        }
+        requestAnimationFrame(() => requestAnimationFrame(emitFirstFrame));
+      };
+
       const recoverFromStall = () => {
         if (video.ended || video.paused) return;
         if (recoveryCount >= Math.max(0, maxRecoveries)) return;
@@ -851,6 +869,7 @@
       video.addEventListener("playing", () => {
         emitMediaRuntimeEvent("media_playing", runtimeDetail());
         debugLog("video playing", { widgetIndex, url: video.currentSrc || video.src });
+        signalFirstFrame();
       });
       video.addEventListener("pause", () => debugLog("video pause", { widgetIndex, url: video.currentSrc || video.src }));
       video.addEventListener("canplay", () => debugLog("video canplay", { widgetIndex, url: video.currentSrc || video.src }));

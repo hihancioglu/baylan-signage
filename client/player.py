@@ -90,7 +90,7 @@ class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     WEBVIEW_VIDEO_EXTENSIONS = {".mp4", ".webm"}
     RUNTIME_MEDIA_EVENTS = {
-        "media_loaded", "media_loadedmetadata", "media_playing", "media_progress",
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_progress",
         "media_ended", "media_error", "media_play_rejected",
     }
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
@@ -298,6 +298,7 @@ class BorderlessFullscreenPlayer:
         self._active_media_events: deque[dict] = deque()
         self._active_media_type: str | None = None
         self._webview_media_ready = False
+        self._webview_media_ready_callback = None
         self._last_webview_failure_reason: str | None = None
         try:
             self._media_webview_start_timeout_sec = max(
@@ -396,6 +397,7 @@ class BorderlessFullscreenPlayer:
             monitor_index = int(raw_monitor_index) if raw_monitor_index is not None else None
         except (TypeError, ValueError):
             monitor_index = None
+        ready_callback = None
         with self._runtime_event_condition:
             if not session_id:
                 return reject("missing_session")
@@ -413,12 +415,15 @@ class BorderlessFullscreenPlayer:
             is_authoritative = authoritative is None or monitor_index == authoritative
             media_type = getattr(self, "_active_media_type", None)
             ready_event = (
-                (media_type == "video" and event_type == "media_playing")
+                (media_type == "video" and event_type == "media_first_frame")
                 or (media_type == "image" and event_type == "media_loaded")
             )
             if is_authoritative and ready_event and not getattr(self, "_webview_media_ready", False):
                 self._webview_media_ready = True
                 _debug_log(f"webview media ready | type={media_type} session={session_id}")
+                if event_type == "media_first_frame":
+                    _debug_log(f"media first frame | session={session_id} monitor={monitor_index}")
+                ready_callback = self._webview_media_ready_callback
             self._active_media_events.append(dict(
                 event,
                 type=event_type,
@@ -426,11 +431,20 @@ class BorderlessFullscreenPlayer:
                 monitor_index=monitor_index,
             ))
             self._runtime_event_condition.notify_all()
+        if callable(ready_callback):
+            try:
+                ready_callback(event_type, session_id, monitor_index)
+            except Exception as exc:
+                _debug_log(f"webview media ready callback failed | error={exc}")
         if critical:
             _debug_log(
                 f"runtime media event accepted | type={event_type} session={session_id} monitor={monitor_index}"
             )
         return True
+
+    def set_webview_media_ready_callback(self, callback) -> None:
+        """Register a non-GUI callback invoked when authoritative media is ready."""
+        self._webview_media_ready_callback = callback
 
     def webview_media_ready(self) -> bool:
         """Return whether the active fullscreen WebView media has rendered."""

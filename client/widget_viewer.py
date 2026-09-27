@@ -143,7 +143,7 @@ def _debug_log(message: str) -> None:
 
 class _WidgetEngineBridge:
     SUPPORTED_MEDIA_EVENTS = {
-        "media_loaded", "media_loadedmetadata", "media_playing", "media_progress",
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_progress",
         "media_ended", "media_error", "media_play_rejected",
     }
 
@@ -1022,11 +1022,15 @@ def _start_with_pywebview(
                 except Exception:
                     pass
 
+            presentation_mode = str(payload.get("presentation_mode") or "").strip().lower() \
+                if isinstance(payload, dict) else ""
+            fullscreen_media = message_type == "layout_update" and presentation_mode == "fullscreen_media"
+
             # A hidden WebView2 surface can defer iframe painting/timers until a
             # later external input event. Reveal the runtime before injecting the
             # active layout so multi-widget dashboards start loading while the
             # compositor is already visible.
-            if message_type == "layout_update":
+            if message_type == "layout_update" and not fullscreen_media:
                 _show_runtime_window_once()
 
             try:
@@ -1039,6 +1043,9 @@ def _start_with_pywebview(
                 js = _build_runtime_update_script(payload, signature=signature)
                 _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
                 window.evaluate_js(js)
+                if fullscreen_media:
+                    _debug_log("fullscreen media foreground | phase=layout_applied_then_show")
+                    _show_runtime_window_once()
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
