@@ -916,8 +916,12 @@ def _start_with_pywebview(
 
     if runtime_ipc:
         _debug_log(f"pywebview runtime ipc enabled | start_hidden={start_hidden}")
+        webview_ready = threading.Event()
+        pending_runtime_messages: list[dict] = []
+        pending_lock = threading.Lock()
         shown_once = not start_hidden
         fullscreen_applied = False
+        runtime_control_checked = False
 
         def _enter_fullscreen_once() -> None:
             nonlocal fullscreen_applied
@@ -930,40 +934,8 @@ def _start_with_pywebview(
             except Exception as exc:
                 _debug_log(f"pywebview fullscreen promotion failed | error={exc}")
 
-        def dispatch(message: dict) -> None:
-            nonlocal shown_once
-            _debug_log(f"pywebview dispatch message={message.get('type')}")
-            if message.get("type") == "stop":
-                try:
-                    webview.destroy_window()
-                except Exception:
-                    pass
-                return
-            if message.get("type") == "background":
-                try:
-                    window.evaluate_js(
-                        "if(typeof window.__baylanCleanupMedia==='function'){window.__baylanCleanupMedia();}"
-                    )
-                except Exception as exc:
-                    _debug_log(f"pywebview background media cleanup failed | error={exc}")
-                try:
-                    window.hide()
-                except Exception as exc:
-                    _debug_log(f"pywebview background transition failed | error={exc}")
-                    try:
-                        window.hide()
-                    except Exception:
-                        pass
-                if os.name == "nt":
-                    # Minimizing keeps a taskbar presence on Windows, which is
-                    # undesirable for Active Mode transitions. Keep the window
-                    # hidden in background so it can be shown again on next idle.
-                    try:
-                        window.hide()
-                    except Exception:
-                        pass
-                shown_once = False
-                return
+        def _apply_runtime_message(message: dict) -> None:
+            nonlocal shown_once, runtime_control_checked
             message_type = str(message.get("type") or "").strip().lower()
             raw_payload = message.get("payload")
             signature = None
@@ -996,14 +968,87 @@ def _start_with_pywebview(
             if message_type == "layout_update":
                 _show_runtime_window_once()
 
-            js = _build_runtime_update_script(payload, signature=signature)
             try:
+                if not runtime_control_checked:
+                    runtime_control_ready = window.evaluate_js(
+                        'typeof window.__baylanApplyRuntimeConfig === "function"'
+                    )
+                    runtime_control_checked = True
+                    _debug_log(f"pywebview runtime control ready | available={bool(runtime_control_ready)}")
+                js = _build_runtime_update_script(payload, signature=signature)
                 _debug_log(f"pywebview evaluate_js | message_type={message_type} signature={signature}")
                 window.evaluate_js(js)
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
             _show_runtime_window_once()
+
+        def dispatch(message: dict) -> None:
+            nonlocal shown_once
+            message_type = str(message.get("type") or "").strip().lower()
+            _debug_log(f"pywebview dispatch message={message_type}")
+            if message_type == "stop":
+                try:
+                    webview.destroy_window()
+                except Exception:
+                    pass
+                return
+            if message_type == "background":
+                try:
+                    window.evaluate_js(
+                        "if(typeof window.__baylanCleanupMedia==='function'){window.__baylanCleanupMedia();}"
+                    )
+                except Exception as exc:
+                    _debug_log(f"pywebview background media cleanup failed | error={exc}")
+                try:
+                    window.hide()
+                except Exception as exc:
+                    _debug_log(f"pywebview background transition failed | error={exc}")
+                    try:
+                        window.hide()
+                    except Exception:
+                        pass
+                if os.name == "nt":
+                    # Minimizing keeps a taskbar presence on Windows, which is
+                    # undesirable for Active Mode transitions. Keep the window
+                    # hidden in background so it can be shown again on next idle.
+                    try:
+                        window.hide()
+                    except Exception:
+                        pass
+                shown_once = False
+                return
+            if message_type not in {"layout_update", "playlist_sync"}:
+                return
+
+            with pending_lock:
+                if not webview_ready.is_set():
+                    # Only the newest value of each semantic message type is
+                    # useful at startup. Reinsert it at the tail so the order of
+                    # the final playlist/layout updates is retained.
+                    pending_runtime_messages[:] = [
+                        pending for pending in pending_runtime_messages
+                        if str(pending.get("type") or "").strip().lower() != message_type
+                    ]
+                    pending_runtime_messages.append(message)
+                    _debug_log(
+                        f"pywebview runtime message queued | type={message_type} reason=document_not_ready"
+                    )
+                    return
+                _apply_runtime_message(message)
+
+        def on_loaded(*_args) -> None:
+            with pending_lock:
+                webview_ready.set()
+                _debug_log("pywebview document ready")
+                queued_messages = list(pending_runtime_messages)
+                pending_runtime_messages.clear()
+                for message in queued_messages:
+                    message_type = str(message.get("type") or "").strip().lower()
+                    _debug_log(f"pywebview queued message flush | type={message_type}")
+                    _apply_runtime_message(message)
+
+        window.events.loaded += on_loaded
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 

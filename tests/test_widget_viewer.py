@@ -9,6 +9,19 @@ from pathlib import Path
 from client import widget_viewer
 
 
+class _LoadedEvent:
+    def __init__(self):
+        self.handlers = []
+
+    def __iadd__(self, handler):
+        self.handlers.append(handler)
+        return self
+
+    def fire(self):
+        for handler in list(self.handlers):
+            handler()
+
+
 class TestWidgetViewer(unittest.TestCase):
     def setUp(self):
         widget_viewer._DPI_AWARENESS_MODE = None
@@ -149,6 +162,8 @@ class TestWidgetViewer(unittest.TestCase):
 
     def test_start_with_pywebview_background_hides_window_and_promotes_fullscreen_on_foreground(self):
         fake_window = unittest.mock.Mock()
+        loaded_event = _LoadedEvent()
+        fake_window.events.loaded = loaded_event
         fake_webview = unittest.mock.Mock()
         fake_webview.create_window.return_value = fake_window
 
@@ -176,7 +191,7 @@ class TestWidgetViewer(unittest.TestCase):
         with patch.dict("sys.modules", {"webview": fake_webview}), patch(
             "client.widget_viewer._runtime_message_reader", side_effect=_fake_runtime_reader
         ), patch("client.widget_viewer.threading.Thread", _ImmediateThread), patch(
-            "client.widget_viewer._start_with_fallback"
+            "client.widget_viewer._start_with_fallback", side_effect=lambda _webview: loaded_event.fire()
         ), patch("client.widget_viewer.os.name", "nt"):
             widget_viewer._start_with_pywebview("https://example.com", runtime_ipc=True, monitor_bounds=(0, 0, 1920, 1080))
 
@@ -193,6 +208,106 @@ class TestWidgetViewer(unittest.TestCase):
             if call == unittest.mock.call.evaluate_js(unittest.mock.ANY)
         ]
         self.assertLess(show_index, layout_calls[-1])
+
+    def _run_runtime_messages(self, messages, *, fire_loaded=True, ready_before_messages=False):
+        loaded_event = _LoadedEvent()
+        fake_window = unittest.mock.Mock()
+        fake_window.events.loaded = loaded_event
+        fake_window.evaluate_js.return_value = True
+        fake_webview = unittest.mock.Mock()
+        fake_webview.create_window.return_value = fake_window
+
+        class _TestThread:
+            instances = []
+
+            def __init__(self, target=None, args=(), daemon=False):
+                self.target = target
+                self.args = args
+                self.__class__.instances.append(self)
+
+            def start(self):
+                if not ready_before_messages:
+                    self.target(*self.args)
+
+        def runtime_reader(dispatch):
+            for message in messages:
+                dispatch(message)
+
+        def start_webview(_webview):
+            if fire_loaded:
+                loaded_event.fire()
+            if ready_before_messages:
+                _TestThread.instances[0].target(*_TestThread.instances[0].args)
+
+        with patch.dict("sys.modules", {"webview": fake_webview}), patch(
+            "client.widget_viewer._runtime_message_reader", side_effect=runtime_reader
+        ), patch("client.widget_viewer.threading.Thread", _TestThread), patch(
+            "client.widget_viewer._start_with_fallback", side_effect=start_webview
+        ):
+            widget_viewer._start_with_pywebview(
+                "https://example.com", runtime_ipc=True, start_hidden=True
+            )
+
+        return fake_webview, fake_window, loaded_event, _TestThread
+
+    def test_runtime_layout_waits_for_document_ready(self):
+        _, window, loaded_event, _ = self._run_runtime_messages(
+            [{"type": "layout_update", "payload": {"signature": "a", "config": {"widgets": []}}}],
+            fire_loaded=False,
+        )
+
+        window.evaluate_js.assert_not_called()
+        self.assertEqual(len(loaded_event.handlers), 1)
+
+    def test_runtime_loaded_event_flushes_queued_layout(self):
+        _, window, loaded_event, _ = self._run_runtime_messages(
+            [{"type": "layout_update", "payload": {"signature": "a", "config": {"widgets": []}}}],
+            fire_loaded=False,
+        )
+
+        loaded_event.fire()
+
+        self.assertTrue(any("__baylanApplyRuntimeConfig" in call.args[0] for call in window.evaluate_js.call_args_list))
+
+    def test_runtime_flush_preserves_playlist_then_layout_order(self):
+        _, window, _, _ = self._run_runtime_messages([
+            {"type": "playlist_sync", "payload": {"items": []}},
+            {"type": "layout_update", "payload": {"signature": "active", "config": {"widgets": []}}},
+        ])
+
+        scripts = [
+            call.args[0] for call in window.evaluate_js.call_args_list
+            if "(function(payload,signature)" in call.args[0]
+        ]
+        self.assertEqual(len(scripts), 2)
+        self.assertIn("__playlist_sync", scripts[0])
+        self.assertIn("active", scripts[1])
+
+    def test_runtime_message_evaluates_immediately_when_document_ready(self):
+        _, window, _, _ = self._run_runtime_messages(
+            [{"type": "layout_update", "payload": {"signature": "ready", "config": {"widgets": []}}}],
+            ready_before_messages=True,
+        )
+
+        self.assertTrue(any("ready" in call.args[0] for call in window.evaluate_js.call_args_list))
+
+    def test_runtime_stop_does_not_wait_for_document_ready(self):
+        webview, window, _, _ = self._run_runtime_messages(
+            [{"type": "stop"}], fire_loaded=False
+        )
+
+        webview.destroy_window.assert_called_once_with()
+        window.evaluate_js.assert_not_called()
+
+    def test_runtime_queue_does_not_spawn_duplicate_runtime(self):
+        webview, _, _, thread_type = self._run_runtime_messages([
+            {"type": "playlist_sync", "payload": {"items": [1]}},
+            {"type": "playlist_sync", "payload": {"items": [2]}},
+            {"type": "layout_update", "payload": {"signature": "latest", "config": {"widgets": []}}},
+        ])
+
+        webview.create_window.assert_called_once()
+        self.assertEqual(len(thread_type.instances), 1)
 
     def test_widget_engine_bridge_sends_authenticated_newline_json(self):
         connection = unittest.mock.MagicMock()
