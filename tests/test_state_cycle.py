@@ -345,6 +345,42 @@ class TestRunStateCycle(unittest.TestCase):
 
         fake_idle_background.hide.assert_called_once()
 
+    def test_webview_media_ready_hides_overlay_before_safety_timeout(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        fake_playback = self._playing_playback()
+        fake_playback._active_item["local_path"] = "/tmp/video.mp4"
+        fake_playback.webview_media_ready.return_value = True
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(
+            main, "idle_background", fake_idle_background
+        ), patch.object(main, "get_idle_seconds", return_value=80.0), patch.object(
+            main.time, "monotonic", return_value=100.2
+        ):
+            main.run_state_cycle()
+
+        fake_idle_background.hide.assert_called_once()
+
+    def test_media_without_ready_event_keeps_overlay_until_safety_timeout(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        fake_playback = self._playing_playback()
+        fake_playback._active_item["local_path"] = "/tmp/video.mp4"
+        fake_playback.webview_media_ready.return_value = False
+        fake_idle_background = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(
+            main, "idle_background", fake_idle_background
+        ), patch.object(main, "get_idle_seconds", return_value=80.0), patch.object(
+            main.time, "monotonic", return_value=100.2
+        ):
+            main.run_state_cycle()
+
+        fake_idle_background.hide.assert_not_called()
+
     def test_playing_widget_returns_when_erp_not_foreground_and_activity_detected(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING

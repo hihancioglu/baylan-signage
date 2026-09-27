@@ -2285,8 +2285,8 @@ class MultiMonitorPlayback:
 
     @staticmethod
     def _media_playback_backend() -> str:
-        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "mpv") or "").strip().lower()
-        return backend if backend in {"mpv", "webview"} else "mpv"
+        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "webview") or "").strip().lower()
+        return backend if backend in {"mpv", "webview"} else "webview"
 
     @staticmethod
     def _is_webview_media(media_path: str) -> bool:
@@ -2412,11 +2412,12 @@ class MultiMonitorPlayback:
                 target = state.get("target_monitor_index")
                 if isinstance(target, int) and target >= 0:
                     try:
-                        player.start_widget_engine_if_needed(
+                        prewarm_ok = bool(player.start_widget_engine_if_needed(
                             target_monitor_index=target,
                             clone_to_all_monitors=False,
-                        )
-                        self._background_widget_player_runtime(player)
+                        ))
+                        if prewarm_ok and not self._player_has_visible_widget_content(player):
+                            self._background_widget_player_runtime(player)
                     except Exception:
                         pass
             return
@@ -3501,8 +3502,22 @@ class PlaybackController:
 
     @staticmethod
     def _media_playback_backend() -> str:
-        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "mpv") or "").strip().lower()
-        return backend if backend in {"mpv", "webview"} else "mpv"
+        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "webview") or "").strip().lower()
+        return backend if backend in {"mpv", "webview"} else "webview"
+
+    def webview_media_ready(self) -> bool:
+        """Expose readiness only for primary fullscreen media using WebView."""
+        if self._media_playback_backend() != "webview":
+            return False
+        with self._lock:
+            active_item = dict(self._active_item) if isinstance(self._active_item, dict) else {}
+        if str(active_item.get("item_type") or "media").strip().lower() == "widget":
+            return False
+        media_path = str(active_item.get("local_path") or "").strip()
+        if not (self._is_webview_image(media_path) or self._is_webview_video(media_path)):
+            return False
+        readiness = getattr(self.player, "webview_media_ready", None)
+        return readiness() is True if callable(readiness) else False
 
     @classmethod
     def _is_webview_image(cls, media_path: str) -> bool:
@@ -5192,7 +5207,12 @@ def run_state_cycle():
             f"content={content_name or '<unnamed-content>'} "
             f"played_for_sec={played_for_sec:.3f} type={active_item_type}"
         )
-        if played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+        readiness = getattr(playback, "webview_media_ready", None)
+        webview_ready = readiness() is True if callable(readiness) else False
+        if webview_ready:
+            log_debug("idle_overlay hide | reason=webview_media_ready")
+            idle_background.hide()
+        elif played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS

@@ -1313,6 +1313,52 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             "token": player._runtime_event_token, "type": "media_playing", "session_id": "session-1",
         }))
 
+    def test_video_playing_event_marks_webview_media_ready(self):
+        player = self._build_player()
+        player._active_media_session_id = "video-session"
+        player._active_media_type = "video"
+
+        self.assertTrue(player._accept_runtime_event({
+            "token": player._runtime_event_token,
+            "type": "media_playing",
+            "session_id": "video-session",
+        }))
+        self.assertTrue(player.webview_media_ready())
+
+    def test_image_loaded_event_marks_webview_media_ready(self):
+        player = self._build_player()
+        player._active_media_session_id = "image-session"
+        player._active_media_type = "image"
+
+        self.assertTrue(player._accept_runtime_event({
+            "token": player._runtime_event_token,
+            "type": "media_loaded",
+            "session_id": "image-session",
+        }))
+        self.assertTrue(player.webview_media_ready())
+
+    def test_stale_session_event_does_not_mark_webview_media_ready(self):
+        player = self._build_player()
+        player._active_media_session_id = "current-session"
+        player._active_media_type = "video"
+
+        self.assertFalse(player._accept_runtime_event({
+            "token": player._runtime_event_token,
+            "type": "media_playing",
+            "session_id": "stale-session",
+        }))
+        self.assertFalse(player.webview_media_ready())
+
+    def test_stop_clears_webview_media_readiness(self):
+        player = self._build_player()
+        player._active_media_session_id = "video-session"
+        player._active_media_type = "video"
+        player._webview_media_ready = True
+
+        player.stop(stop_widget_runtime=False)
+
+        self.assertFalse(player.webview_media_ready())
+
     def test_runtime_event_client_ignores_malformed_json(self):
         import socket
         player = self._build_player()
@@ -2020,6 +2066,13 @@ class _FakeGuiRuntime:
 
 
 class TestPlaybackControllerMpvGate(unittest.TestCase):
+    def setUp(self):
+        # Legacy MPV regression cases opt into their backend; WebView cases
+        # override this explicitly and default-resolution cases clear the env.
+        self.backend_patcher = patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=False)
+        self.backend_patcher.start()
+        self.addCleanup(self.backend_patcher.stop)
+
     def _build_controller(self):
         from client.client import PlaybackController
 
@@ -2036,17 +2089,31 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         fake_player.start_widget_engine_if_needed.assert_not_called()
 
-    def test_media_backend_defaults_to_mpv(self):
+    def test_media_backend_defaults_to_webview(self):
         from client.client import PlaybackController
 
         with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(PlaybackController._media_playback_backend(), "webview")
+
+    def test_explicit_mpv_media_backend_is_preserved(self):
+        from client.client import PlaybackController
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=True):
             self.assertEqual(PlaybackController._media_playback_backend(), "mpv")
 
-    def test_invalid_media_backend_normalizes_to_mpv(self):
+    def test_invalid_media_backend_normalizes_to_webview(self):
         from client.client import PlaybackController
 
         with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "foo"}, clear=True):
-            self.assertEqual(PlaybackController._media_playback_backend(), "mpv")
+            self.assertEqual(PlaybackController._media_playback_backend(), "webview")
+
+    def test_multi_monitor_backend_defaults_and_invalid_values_to_webview(self):
+        from client.client import MultiMonitorPlayback
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(MultiMonitorPlayback._media_playback_backend(), "webview")
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "invalid"}, clear=True):
+            self.assertEqual(MultiMonitorPlayback._media_playback_backend(), "webview")
 
     def _run_single_media_item(self, media_path, *, is_image, is_video, duration_sec=None):
         from client.client import PlaybackController
@@ -2689,7 +2756,9 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         player.play_blocking.side_effect = _single_playback
 
-        with patch.object(controller, "_can_use_mpv_playlist_mode", return_value=True), patch.object(
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=False), patch.object(
+            controller, "_can_use_mpv_playlist_mode", return_value=True
+        ), patch.object(
             controller,
             "_effective_playlist",
             return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}],
@@ -2716,7 +2785,9 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         player.last_play_was_interrupted.return_value = False
         controller.player = player
 
-        with patch.object(controller, "_effective_playlist", return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}]), patch.object(
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=False), patch.object(
+            controller, "_effective_playlist", return_value=[{"local_path": "/tmp/a.mp4", "duration_sec": None, "media_type": "video"}]
+        ), patch.object(
             controller,
             "_restore_or_init_runtime_state",
             return_value={"index": 0, "resume_sec": 0},
@@ -3551,7 +3622,9 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         monitor3_player = unittest.mock.Mock()
         created_players = [monitor2_player, monitor3_player]
 
-        with patch("client.client.os.name", "posix"), patch(
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "mpv"}, clear=False), patch(
+            "client.client.os.name", "posix"
+        ), patch(
             "client.client.BorderlessFullscreenPlayer",
             side_effect=created_players,
         ) as player_cls:

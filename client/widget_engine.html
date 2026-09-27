@@ -686,8 +686,12 @@
 
       if (mediaType === "image") {
         const image = document.createElement("img");
-        image.src = String(w.url || "");
+        const mediaSessionId = String(w.media_session_id || "");
         image.alt = "Signage image";
+        image.addEventListener("load", () => {
+          emitMediaRuntimeEvent("media_loaded", { session_id: mediaSessionId });
+        }, { once: true });
+        image.src = String(w.url || "");
         wrapper.appendChild(image);
         return wrapper;
       }
