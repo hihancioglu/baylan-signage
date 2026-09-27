@@ -264,6 +264,16 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("Math.min(1", optimizer)
         self.assertNotIn("object-fit: cover", optimizer)
 
+    def test_widget_engine_supports_fullscreen_media_layout(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        fullscreen_css = engine.split("#widgets.fullscreen-media-layout {", 1)[1].split("}", 1)[0]
+        self.assertIn("padding: 0;", fullscreen_css)
+        self.assertIn("gap: 0;", fullscreen_css)
+        self.assertIn("object-fit:contain", engine)
+        self.assertIn('"fullscreen-media-layout"', engine)
+        self.assertIn('config.presentation_mode === "fullscreen_media"', engine)
+
     def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 

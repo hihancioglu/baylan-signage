@@ -1201,6 +1201,9 @@ class BorderlessFullscreenPlayer:
             if isinstance(rows, int) and rows > 0:
                 payload["rows"] = rows
 
+            if str(widget_config.get("presentation_mode") or "").strip().lower() == "fullscreen_media":
+                payload["presentation_mode"] = "fullscreen_media"
+
         normalized_fallback = self._normalize_widget_source(fallback_source)
         if "widgets" not in payload and normalized_fallback:
             payload["widgets"] = [{"type": "iframe", "url": normalized_fallback}]
@@ -1291,12 +1294,16 @@ class BorderlessFullscreenPlayer:
                 "type": "video",
                 "url": normalized_media,
                 "autoplay": True,
+                "muted": False,
                 "controls": False,
+                "loop": False,
+                "preload": "auto",
             }
             if isinstance(start_position_sec, (int, float)) and start_position_sec > 0:
                 media_widget["start_position_sec"] = float(start_position_sec)
 
         return {
+            "presentation_mode": "fullscreen_media",
             "widgets": [media_widget],
             "columns": 1,
             "rows": 1,

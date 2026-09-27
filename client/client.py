@@ -2840,6 +2840,8 @@ class MultiMonitorPlayback:
 
 
 class PlaybackController:
+    WEBVIEW_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
     def __init__(self, gui_runtime: GuiRuntime):
         self.media_manager = MediaManager(
             cache_root=str(_resolve_windows_writable_path(os.getenv("MEDIA_CACHE_DIR"), "cache"))
@@ -3412,6 +3414,15 @@ class PlaybackController:
     def _can_use_mpv_playlist_mode(self, playlist_entries: list[dict]) -> bool:
         return False
 
+    @staticmethod
+    def _media_playback_backend() -> str:
+        backend = str(os.getenv("MEDIA_PLAYBACK_BACKEND", "mpv") or "").strip().lower()
+        return backend if backend in {"mpv", "webview"} else "mpv"
+
+    @classmethod
+    def _is_webview_image(cls, media_path: str) -> bool:
+        return Path(urlparse(str(media_path or "")).path).suffix.lower() in cls.WEBVIEW_IMAGE_EXTENSIONS
+
     def update_from_config(self, config: dict):
         self.mark_initial_config_received()
         with self._lock:
@@ -3798,7 +3809,32 @@ class PlaybackController:
                             resume_sec = effective_resume_sec
 
                     log_debug(f"media playback start | path={media_path} resume_sec={resume_sec} media_duration_sec={media_duration_sec}")
-                    if is_video_media and media_duration_sec is None:
+                    requested_media_backend = self._media_playback_backend()
+                    if requested_media_backend == "webview" and is_video_media:
+                        log_debug(
+                            "media backend phase1 | requested=webview type=video effective=mpv "
+                            "reason=video_reverse_ipc_not_enabled"
+                        )
+
+                    if requested_media_backend == "webview" and self._is_webview_image(media_path):
+                        webview_image_duration_sec = (
+                            duration_sec
+                            if isinstance(duration_sec, int) and duration_sec > 0
+                            else self.player.image_duration_sec
+                        )
+                        ok = self.player.play_media_in_widget_runtime_blocking(
+                            media_path,
+                            webview_image_duration_sec,
+                        )
+                    elif requested_media_backend == "webview" and is_video_media:
+                        ok = self.player.play_blocking(
+                            media_path,
+                            image_duration_sec=media_duration_sec,
+                            start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                            target_monitor_index=self._primary_target_monitor_index(),
+                            clone_to_all_monitors=self._clone_to_all_monitors,
+                        )
+                    elif is_video_media and media_duration_sec is None:
                         ok = self.player.play_blocking(
                             media_path,
                             start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,

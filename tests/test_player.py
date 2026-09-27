@@ -1182,6 +1182,29 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertFalse(player._stop_requested)
         wait_mock.assert_called_once_with(5)
 
+    def test_build_image_media_widget_payload_uses_fullscreen_presentation(self):
+        payload = self._build_player().build_media_widget_payload("/tmp/example.jpg")
+
+        self.assertEqual(payload["presentation_mode"], "fullscreen_media")
+        self.assertEqual(payload["widgets"][0]["type"], "image")
+
+    def test_build_video_media_widget_payload_is_ready_for_unmuted_playback(self):
+        payload = self._build_player().build_media_widget_payload("/tmp/example.mp4")
+
+        self.assertEqual(payload["presentation_mode"], "fullscreen_media")
+        self.assertEqual(
+            payload["widgets"][0],
+            {
+                "type": "video",
+                "url": Path("/tmp/example.mp4").resolve().as_uri(),
+                "autoplay": True,
+                "muted": False,
+                "controls": False,
+                "loop": False,
+                "preload": "auto",
+            },
+        )
+
 
     def test_play_media_in_widget_runtime_video_without_duration_waits_until_interrupted(self):
         player = self._build_player()
@@ -1927,6 +1950,62 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             PlaybackController(_FakeGuiRuntime())
 
         fake_player.start_widget_engine_if_needed.assert_not_called()
+
+    def test_media_backend_defaults_to_mpv(self):
+        from client.client import PlaybackController
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(PlaybackController._media_playback_backend(), "mpv")
+
+    def test_invalid_media_backend_normalizes_to_mpv(self):
+        from client.client import PlaybackController
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "foo"}, clear=True):
+            self.assertEqual(PlaybackController._media_playback_backend(), "mpv")
+
+    def _run_single_media_item(self, media_path, *, is_image, is_video, duration_sec=None):
+        from client.client import PlaybackController
+
+        controller = PlaybackController(_FakeGuiRuntime())
+        controller.player = unittest.mock.Mock()
+        controller.player.is_image.return_value = is_image
+        controller.player._is_video.return_value = is_video
+        controller.player.image_duration_sec = 8
+        controller.player.static_image_duration_sec = 86400
+        controller.player.last_play_was_interrupted.return_value = False
+
+        def _stop_after_playback(*_args, **_kwargs):
+            controller._running = False
+            return True
+
+        controller.player.play_blocking.side_effect = _stop_after_playback
+        controller.player.play_media_in_widget_runtime_blocking.side_effect = _stop_after_playback
+        item = {
+            "local_path": media_path,
+            "duration_sec": duration_sec,
+            "media_type": "image" if is_image else "video",
+            "item_type": "media",
+        }
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False), patch.object(
+            controller, "_effective_playlist", return_value=[item]
+        ), patch.object(
+            controller, "_restore_or_init_runtime_state", return_value={"index": 0, "resume_sec": 0}
+        ), patch.object(controller, "_persist_playback_state", return_value=None), patch("time.sleep", return_value=None):
+            controller._running = True
+            controller._run()
+        return controller.player
+
+    def test_webview_backend_routes_jpg_to_widget_runtime(self):
+        player = self._run_single_media_item("/tmp/example.jpg", is_image=True, is_video=False)
+
+        player.play_media_in_widget_runtime_blocking.assert_called_once_with("/tmp/example.jpg", 8)
+        player.play_blocking.assert_not_called()
+
+    def test_webview_backend_keeps_mp4_on_mpv_route(self):
+        player = self._run_single_media_item("/tmp/example.mp4", is_image=False, is_video=True)
+
+        player.play_blocking.assert_called_once()
+        player.play_media_in_widget_runtime_blocking.assert_not_called()
 
     def test_startup_restores_pathless_production_grid_without_fallback(self):
         from client.client import PlaybackController
