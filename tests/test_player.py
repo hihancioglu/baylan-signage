@@ -1300,6 +1300,28 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
             self.assertFalse(player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None))
         self.assertEqual(player.last_webview_failure_reason, "startup_timeout")
 
+    def test_video_playing_prevents_startup_timeout_until_normal_completion(self):
+        player = self._build_player()
+        player._media_webview_start_timeout_sec = 0.01
+        process = unittest.mock.Mock()
+        process.poll.return_value = None
+        player._widget_process = process
+
+        def send_playing_then_ended(_source, **kwargs):
+            session_id = kwargs["widget_config"]["widgets"][0]["media_session_id"]
+            for event_type in ("media_playing", "media_ended"):
+                self.assertTrue(player._accept_runtime_event({
+                    "token": player._runtime_event_token,
+                    "type": event_type,
+                    "session_id": session_id,
+                }))
+            return True
+
+        with patch.object(player, "update_widget_layout", side_effect=send_playing_then_ended):
+            self.assertTrue(player.play_media_in_widget_runtime_blocking("/tmp/example.mp4", None))
+
+        self.assertIsNone(player.last_webview_failure_reason)
+
     def test_runtime_event_authentication_and_protocol_filtering(self):
         player = self._build_player()
         player._active_media_session_id = "session-1"

@@ -3519,6 +3519,17 @@ class PlaybackController:
         readiness = getattr(self.player, "webview_media_ready", None)
         return readiness() is True if callable(readiness) else False
 
+    def webview_media_active(self) -> bool:
+        """Return whether overlay removal must wait for WebView media readiness."""
+        if self._media_playback_backend() != "webview":
+            return False
+        with self._lock:
+            active_item = dict(self._active_item) if isinstance(self._active_item, dict) else {}
+        if str(active_item.get("item_type") or "media").strip().lower() == "widget":
+            return False
+        media_path = str(active_item.get("local_path") or "").strip()
+        return self._is_webview_image(media_path) or self._is_webview_video(media_path)
+
     @classmethod
     def _is_webview_image(cls, media_path: str) -> bool:
         return Path(urlparse(str(media_path or "")).path).suffix.lower() in cls.WEBVIEW_IMAGE_EXTENSIONS
@@ -5209,10 +5220,12 @@ def run_state_cycle():
         )
         readiness = getattr(playback, "webview_media_ready", None)
         webview_ready = readiness() is True if callable(readiness) else False
+        active_checker = getattr(playback, "webview_media_active", None)
+        webview_media_active = active_checker() is True if callable(active_checker) else False
         if webview_ready:
             log_debug("idle_overlay hide | reason=webview_media_ready")
             idle_background.hide()
-        elif played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+        elif not webview_media_active and played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS

@@ -173,18 +173,68 @@
       }
     }
 
-    function emitMediaRuntimeEvent(type, detail) {
+    const pendingMediaRuntimeEvents = [];
+    const MAX_PENDING_MEDIA_RUNTIME_EVENTS = 32;
+    let pywebviewBridgeReady = false;
+
+    function mediaRuntimeSession(detail) {
+      return String((detail && (detail.session_id || detail.media_session_id)) || "");
+    }
+
+    function logMediaRuntimeDelivery(action, type, detail) {
+      if (type === "media_progress") return;
+      debugLog(`media runtime event ${action} | type=${type} session=${mediaRuntimeSession(detail)}`);
+    }
+
+    function sendMediaRuntimeEvent(type, detail) {
+      const api = window.pywebview && window.pywebview.api;
+      if (!api) return false;
       try {
-        const api = window.pywebview && window.pywebview.api;
-        if (!api) return;
-        const sender = api.media_event || api.mediaEvent;
-        if (typeof sender !== "function") return;
-        const result = sender.call(api, String(type || ""), detail || {});
+        let result;
+        if (typeof api.media_event === "function") {
+          result = api.media_event(String(type || ""), detail || {});
+        } else if (typeof api.mediaEvent === "function") {
+          result = api.mediaEvent(String(type || ""), detail || {});
+        } else {
+          return false;
+        }
         if (result && typeof result.catch === "function") result.catch(() => {});
+        return true;
       } catch (_err) {
-        // Runtime events are best-effort when the page is opened outside pywebview.
+        return false;
       }
     }
+
+    function flushPendingMediaRuntimeEvents() {
+      while (pendingMediaRuntimeEvents.length > 0) {
+        const pending = pendingMediaRuntimeEvents[0];
+        if (!sendMediaRuntimeEvent(pending.type, pending.detail)) return;
+        pendingMediaRuntimeEvents.shift();
+        logMediaRuntimeDelivery("flushed", pending.type, pending.detail);
+      }
+    }
+
+    function emitMediaRuntimeEvent(type, detail) {
+      const normalizedType = String(type || "");
+      const normalizedDetail = detail || {};
+      if (sendMediaRuntimeEvent(normalizedType, normalizedDetail)) {
+        logMediaRuntimeDelivery("sent", normalizedType, normalizedDetail);
+        return;
+      }
+      // Progress is periodic and is not needed to recover startup/completion state.
+      if (normalizedType === "media_progress") return;
+      if (pendingMediaRuntimeEvents.length >= MAX_PENDING_MEDIA_RUNTIME_EVENTS) {
+        pendingMediaRuntimeEvents.shift();
+      }
+      pendingMediaRuntimeEvents.push({ type: normalizedType, detail: normalizedDetail });
+      logMediaRuntimeDelivery("queued", normalizedType, normalizedDetail);
+    }
+
+    window.addEventListener("pywebviewready", () => {
+      pywebviewBridgeReady = true;
+      debugLog("pywebview bridge ready");
+      flushPendingMediaRuntimeEvents();
+    });
 
     function parseConfig() {
       const params = new URLSearchParams(window.location.search);

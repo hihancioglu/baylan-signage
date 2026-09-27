@@ -421,6 +421,44 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertIn('"fullscreen-media-layout"', engine)
         self.assertIn('config.presentation_mode === "fullscreen_media"', engine)
 
+    def test_widget_engine_queues_media_events_until_pywebview_bridge_ready(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn("const pendingMediaRuntimeEvents = [];", engine)
+        self.assertIn("const MAX_PENDING_MEDIA_RUNTIME_EVENTS = 32;", engine)
+        self.assertIn('window.addEventListener("pywebviewready"', engine)
+        self.assertIn('debugLog("pywebview bridge ready")', engine)
+        self.assertIn("flushPendingMediaRuntimeEvents();", engine)
+        self.assertIn('if (normalizedType === "media_progress") return;', engine)
+        self.assertIn("pendingMediaRuntimeEvents.push({ type: normalizedType, detail: normalizedDetail });", engine)
+
+    def test_widget_engine_flush_preserves_media_lifecycle_order_and_direct_proxy_calls(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        sender = engine.split("function sendMediaRuntimeEvent", 1)[1].split(
+            "function flushPendingMediaRuntimeEvents", 1
+        )[0]
+        flush = engine.split("function flushPendingMediaRuntimeEvents", 1)[1].split(
+            "function emitMediaRuntimeEvent", 1
+        )[0]
+
+        self.assertIn('api.media_event(String(type || ""), detail || {})', sender)
+        self.assertIn('api.mediaEvent(String(type || ""), detail || {})', sender)
+        self.assertNotIn("sender.call", engine)
+        self.assertIn("pendingMediaRuntimeEvents[0]", flush)
+        self.assertIn("pendingMediaRuntimeEvents.shift()", flush)
+        for event_type in (
+            "media_loadedmetadata", "media_playing", "media_error", "media_play_rejected", "media_ended"
+        ):
+            self.assertIn(f'emitMediaRuntimeEvent("{event_type}"', engine)
+
+    def test_widget_engine_has_media_delivery_diagnostics_without_progress_spam(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+
+        self.assertIn('if (type === "media_progress") return;', engine)
+        self.assertIn("media runtime event ${action} | type=${type} session=${mediaRuntimeSession(detail)}", engine)
+        for message in ("widget engine ready", "video widget init", "video loadstart", "video loadedmetadata", "video canplay", "video playing"):
+            self.assertIn(message, engine)
+
     def test_widget_engine_uses_controlled_iframe_recovery(self):
         engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
 
@@ -455,6 +493,14 @@ class TestWidgetViewer(unittest.TestCase):
             result = widget_viewer._build_engine_url("https://example.com")
 
         self.assertEqual(result, "https://example.com")
+
+    def test_build_engine_url_propagates_debug_for_runtime_sentinel(self):
+        with patch.object(widget_viewer, "DEBUG_MODE_ENABLED", True), patch.object(
+            widget_viewer, "_resolve_runtime_resource", return_value=Path("/tmp/widget_engine.html")
+        ):
+            result = widget_viewer._build_engine_url(widget_viewer.WIDGET_ENGINE_SENTINEL)
+
+        self.assertEqual(result, "file:///tmp/widget_engine.html?debug=1")
 
     def test_build_engine_url_wraps_source_when_layout_exists(self):
         with patch.dict("os.environ", {"WIDGET_SINGLE_ENGINE": "1"}, clear=False):
