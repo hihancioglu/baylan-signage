@@ -296,6 +296,8 @@ class BorderlessFullscreenPlayer:
         self._active_media_monitor_indexes: set[int | None] = set()
         self._authoritative_media_monitor_index: int | None = None
         self._active_media_events: deque[dict] = deque()
+        self._active_media_type: str | None = None
+        self._webview_media_ready = False
         self._last_webview_failure_reason: str | None = None
         try:
             self._media_webview_start_timeout_sec = max(
@@ -350,6 +352,8 @@ class BorderlessFullscreenPlayer:
             self._active_media_monitor_indexes.clear()
             self._authoritative_media_monitor_index = None
             self._active_media_events.clear()
+            self._active_media_type = None
+            self._webview_media_ready = False
             self._runtime_event_condition.notify_all()
 
     def _read_runtime_event_client(self, client: socket.socket) -> None:
@@ -389,6 +393,16 @@ class BorderlessFullscreenPlayer:
                 monitor_index = self._authoritative_media_monitor_index
             if self._active_media_monitor_indexes and monitor_index not in self._active_media_monitor_indexes:
                 return False
+            authoritative = self._authoritative_media_monitor_index
+            is_authoritative = authoritative is None or monitor_index == authoritative
+            media_type = getattr(self, "_active_media_type", None)
+            ready_event = (
+                (media_type == "video" and event_type == "media_playing")
+                or (media_type == "image" and event_type == "media_loaded")
+            )
+            if is_authoritative and ready_event and not getattr(self, "_webview_media_ready", False):
+                self._webview_media_ready = True
+                _debug_log(f"webview media ready | type={media_type} session={session_id}")
             self._active_media_events.append(dict(
                 event,
                 type=event_type,
@@ -397,6 +411,19 @@ class BorderlessFullscreenPlayer:
             ))
             self._runtime_event_condition.notify_all()
         return True
+
+    def webview_media_ready(self) -> bool:
+        """Return whether the active fullscreen WebView media has rendered."""
+        with self._runtime_event_condition:
+            return bool(self._active_media_session_id and self._webview_media_ready)
+
+    def _clear_active_media_session_locked(self) -> None:
+        self._active_media_session_id = None
+        self._active_media_monitor_indexes.clear()
+        self._authoritative_media_monitor_index = None
+        self._active_media_events.clear()
+        self._active_media_type = None
+        self._webview_media_ready = False
 
     @property
     def last_webview_failure_reason(self) -> str | None:
@@ -1407,6 +1434,8 @@ class BorderlessFullscreenPlayer:
                 "type": "image",
                 "url": normalized_media,
             }
+            if media_session_id:
+                media_widget["media_session_id"] = str(media_session_id)
         else:
             media_widget = {
                 "type": "video",
@@ -1438,29 +1467,30 @@ class BorderlessFullscreenPlayer:
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
         is_video = self._is_video(media_path)
-        session_id = uuid.uuid4().hex if is_video else None
+        session_id = uuid.uuid4().hex
         payload = self.build_media_widget_payload(
             media_path, start_position_sec=start_position_sec, media_session_id=session_id
         )
         signature = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        if is_video:
-            runtime_targets = self._resolve_widget_runtime_monitor_targets(
-                target_monitor_index=target_monitor_index,
-                clone_to_all_monitors=clone_to_all_monitors,
-            )
-            target_indexes = {target[0] for target in runtime_targets}
-            authoritative_index = (
-                target_monitor_index
-                if isinstance(target_monitor_index, int) and target_monitor_index >= 0
-                else next((index for index, _bounds in runtime_targets if index is not None), None)
-            )
-            with self._runtime_event_condition:
-                self._active_media_session_id = session_id
-                self._active_media_monitor_indexes = target_indexes
-                self._authoritative_media_monitor_index = authoritative_index
-                self._active_media_events.clear()
+        runtime_targets = self._resolve_widget_runtime_monitor_targets(
+            target_monitor_index=target_monitor_index,
+            clone_to_all_monitors=clone_to_all_monitors,
+        )
+        target_indexes = {target[0] for target in runtime_targets}
+        authoritative_index = (
+            target_monitor_index
+            if isinstance(target_monitor_index, int) and target_monitor_index >= 0
+            else next((index for index, _bounds in runtime_targets if index is not None), None)
+        )
+        with self._runtime_event_condition:
+            self._active_media_session_id = session_id
+            self._active_media_monitor_indexes = target_indexes
+            self._authoritative_media_monitor_index = authoritative_index
+            self._active_media_events.clear()
+            self._active_media_type = "video" if is_video else "image"
+            self._webview_media_ready = False
         self._last_webview_failure_reason = None
         self._stop_requested = False
         if not self.update_widget_layout(
@@ -1472,13 +1502,9 @@ class BorderlessFullscreenPlayer:
         ):
             self._last_interrupted = False
             self._last_webview_failure_reason = "layout_update_failed"
-            if is_video:
-                with self._runtime_event_condition:
-                    if self._active_media_session_id == session_id:
-                        self._active_media_session_id = None
-                        self._active_media_monitor_indexes.clear()
-                        self._authoritative_media_monitor_index = None
-                        self._active_media_events.clear()
+            with self._runtime_event_condition:
+                if self._active_media_session_id == session_id:
+                    self._clear_active_media_session_locked()
             return False
 
         if is_video:
@@ -1525,15 +1551,17 @@ class BorderlessFullscreenPlayer:
             finally:
                 with self._runtime_event_condition:
                     if self._active_media_session_id == session_id:
-                        self._active_media_session_id = None
-                        self._active_media_monitor_indexes.clear()
-                        self._authoritative_media_monitor_index = None
-                        self._active_media_events.clear()
+                        self._clear_active_media_session_locked()
 
-        if not isinstance(duration_sec, int) or duration_sec <= 0:
-            self._last_interrupted = False
-            return False
-        return self.wait_widget_duration(duration_sec)
+        try:
+            if not isinstance(duration_sec, int) or duration_sec <= 0:
+                self._last_interrupted = False
+                return False
+            return self.wait_widget_duration(duration_sec)
+        finally:
+            with self._runtime_event_condition:
+                if self._active_media_session_id == session_id:
+                    self._clear_active_media_session_locked()
 
     def _single_url_widget_source(self, widget_config: dict | None) -> str | None:
         if not isinstance(widget_config, dict):
@@ -3110,10 +3138,7 @@ class BorderlessFullscreenPlayer:
         )
         self._stop_requested = True
         with self._runtime_event_condition:
-            self._active_media_session_id = None
-            self._active_media_monitor_indexes.clear()
-            self._authoritative_media_monitor_index = None
-            self._active_media_events.clear()
+            self._clear_active_media_session_locked()
             self._runtime_event_condition.notify_all()
 
         if stop_widget_runtime is None:
