@@ -639,7 +639,11 @@ def _start_with_fallback(webview_module) -> None:
 
 def _build_engine_url(widget_url: str | None = None, widget_config: dict | None = None) -> str:
     single_engine_enabled = os.getenv("WIDGET_SINGLE_ENGINE", "0").strip().lower() in {"1", "true", "yes"}
-    source = _normalize_url(widget_url) if str(widget_url or "").strip() else ""
+    raw_source = str(widget_url or "").strip()
+    if raw_source == WIDGET_ENGINE_SENTINEL:
+        engine_uri = _resolve_runtime_resource("widget_engine.html").resolve().as_uri()
+        return f"{engine_uri}?debug=1" if DEBUG_MODE_ENABLED else engine_uri
+    source = _normalize_url(raw_source) if raw_source else ""
     has_layout_config = isinstance(widget_config, dict) and isinstance(widget_config.get("widgets"), list)
     if not single_engine_enabled:
         _debug_log(f"_build_engine_url single_engine_disabled source={source}")
@@ -1078,7 +1082,7 @@ def main() -> int:
     )
 
     try:
-        widget_url = _build_engine_url(_normalize_url(sys.argv[1]))
+        widget_url = _build_engine_url(sys.argv[1])
         if widget_url.lower().startswith("file://"):
             parsed_widget_url = urlsplit(widget_url)
             decoded_widget_path = unquote(parsed_widget_url.path or "")

@@ -585,6 +585,60 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
         fake_idle_background.hide.assert_not_called()
 
+    def test_webview_media_keeps_overlay_past_hold_until_ready(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "video"
+        fake_playback._active_item = {"item_type": "media", "local_path": "/tmp/video.mp4"}
+        fake_playback.webview_media_active.return_value = True
+        fake_playback.webview_media_ready.return_value = False
+        overlay = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", overlay), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        overlay.hide.assert_not_called()
+
+    def test_webview_media_hides_overlay_immediately_when_ready(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 100.0
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "video"
+        fake_playback._active_item = {"item_type": "media", "local_path": "/tmp/video.mp4"}
+        fake_playback.webview_media_active.return_value = True
+        fake_playback.webview_media_ready.return_value = True
+        overlay = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", overlay), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.1):
+            main.run_state_cycle()
+
+        overlay.hide.assert_called_once()
+
+    def test_mpv_media_keeps_existing_overlay_hold_behavior(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        fake_playback = Mock()
+        fake_playback.current_content_name.return_value = "video"
+        fake_playback._active_item = {"item_type": "media", "local_path": "/tmp/video.mp4"}
+        fake_playback.webview_media_active.return_value = False
+        fake_playback.webview_media_ready.return_value = False
+        overlay = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", overlay), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        overlay.hide.assert_called_once()
+
     def test_prewarm_all_monitors_disabled_by_default(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(main._prewarm_all_monitors_enabled())
