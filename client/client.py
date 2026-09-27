@@ -2927,6 +2927,7 @@ class MultiMonitorPlayback:
 
 class PlaybackController:
     WEBVIEW_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    WEBVIEW_VIDEO_EXTENSIONS = BorderlessFullscreenPlayer.WEBVIEW_VIDEO_EXTENSIONS
 
     def __init__(self, gui_runtime: GuiRuntime):
         self.media_manager = MediaManager(
@@ -3433,6 +3434,17 @@ class PlaybackController:
             if isinstance(entry, dict)
         )
 
+    def _entries_require_primary_webview_runtime(self, entries: list[dict]) -> bool:
+        if self._entries_have_widget(entries):
+            return True
+        if self._media_playback_backend() != "webview":
+            return False
+        return any(
+            self._is_webview_media(str(entry.get("local_path") or entry.get("path") or ""))
+            for entry in entries
+            if isinstance(entry, dict)
+        )
+
     @staticmethod
     def _player_has_visible_widget_content(player: BorderlessFullscreenPlayer | None) -> bool:
         runtime_visible_checker = getattr(player, "has_visible_widget_runtime_content", None)
@@ -3444,22 +3456,29 @@ class PlaybackController:
                 pass
         return False
 
-    def _primary_has_visible_widget_content(self) -> bool:
+    def _primary_has_visible_webview_content(self) -> bool:
         if self._player_has_visible_widget_content(self.player):
             return True
         with self._lock:
             active_item = dict(self._active_item) if isinstance(self._active_item, dict) else {}
         active_item_type = str(active_item.get("item_type") or active_item.get("media_type") or "").strip().lower()
-        return active_item_type == "widget"
+        if active_item_type == "widget":
+            return True
+        if self._media_playback_backend() != "webview":
+            return False
+        media_path = str(active_item.get("local_path") or active_item.get("path") or "").strip()
+        return self._is_webview_media(media_path)
 
     def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
-        has_primary_widget = bool(enabled and self._entries_have_widget(normalized_items))
-        if has_primary_widget:
+        has_primary_webview_runtime_content = bool(
+            enabled and self._entries_require_primary_webview_runtime(normalized_items)
+        )
+        if has_primary_webview_runtime_content:
             prewarm_ok = False
             should_background = False
             backgrounded = False
             secondary_visible = False
-            visible_content = self._primary_has_visible_widget_content()
+            visible_content = self._primary_has_visible_webview_content()
             try:
                 prewarm_ok = bool(
                     self.player.start_widget_engine_if_needed(
@@ -3467,7 +3486,7 @@ class PlaybackController:
                         clone_to_all_monitors=False,
                     )
                 )
-                visible_content = self._primary_has_visible_widget_content()
+                visible_content = self._primary_has_visible_webview_content()
                 secondary_widget_visibility_checker = getattr(
                     self.multi_monitor_playback,
                     "has_visible_widget_runtime_content",
@@ -3536,7 +3555,11 @@ class PlaybackController:
 
     @staticmethod
     def _is_webview_video(media_path: str) -> bool:
-        return Path(urlparse(str(media_path or "")).path).suffix.lower() in {".mp4", ".webm"}
+        return Path(urlparse(str(media_path or "")).path).suffix.lower() in PlaybackController.WEBVIEW_VIDEO_EXTENSIONS
+
+    @classmethod
+    def _is_webview_media(cls, media_path: str) -> bool:
+        return cls._is_webview_image(media_path) or cls._is_webview_video(media_path)
 
     @staticmethod
     def _media_webview_fallback_enabled() -> bool:
@@ -5486,6 +5509,8 @@ def _parse_cli_args(argv: list[str] | None = None):
         default=None,
         help="Target monitor index for widget viewer placement (0-based). Ignored when --monitor-bounds is set.",
     )
+    parser.add_argument("--runtime-event-port", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-event-token", default="", help=argparse.SUPPRESS)
     return parser.parse_known_args(argv)
 
 
@@ -5496,6 +5521,8 @@ def _run_widget_entrypoint(
     parent_pid: int | None = None,
     monitor_bounds: tuple[int, int, int, int] | None = None,
     monitor: int | None = None,
+    runtime_event_port: int | None = None,
+    runtime_event_token: str = "",
 ) -> int:
     from widget_viewer import (
         WIDGET_ENGINE_SENTINEL,
@@ -5534,6 +5561,11 @@ def _run_widget_entrypoint(
         return 2
 
     errors: list[str] = []
+    _safe_print(
+        "widget runtime reverse ipc | "
+        f"port={runtime_event_port} token_present={bool(runtime_event_token)} "
+        f"monitor={monitor if isinstance(monitor, int) else 0}"
+    )
     for backend in _viewer_backend_order():
         try:
             _safe_print(f"Widget viewer backend deneniyor: {backend}")
@@ -5542,6 +5574,9 @@ def _run_widget_entrypoint(
                 runtime_ipc=runtime_ipc,
                 start_hidden=start_hidden,
                 monitor_bounds=parsed_monitor_bounds,
+                runtime_event_port=runtime_event_port,
+                runtime_event_token=runtime_event_token,
+                monitor_index=monitor if isinstance(monitor, int) else 0,
             )
             return 0
         except Exception as exc:
@@ -5564,6 +5599,8 @@ if __name__ == "__main__":
                 parent_pid=args.parent_pid,
                 monitor_bounds=_parse_monitor_bounds(args.monitor_bounds),
                 monitor=args.monitor,
+                runtime_event_port=args.runtime_event_port,
+                runtime_event_token=args.runtime_event_token,
             )
         )
     main()

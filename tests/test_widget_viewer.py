@@ -7,6 +7,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from client import widget_viewer
+from client import client as client_module
 
 
 class _LoadedEvent:
@@ -111,6 +112,69 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(options.runtime_event_port, 4567)
         self.assertEqual(options.runtime_event_token, "secret")
         self.assertEqual(options.monitor_index, 0)
+
+    def test_frozen_entrypoint_cli_parses_reverse_event_channel(self):
+        args, unknown = client_module._parse_cli_args([
+            "--widget", "__BAYLAN_WIDGET_ENGINE__", "--runtime-ipc",
+            "--runtime-event-port", "51661", "--runtime-event-token", "secret",
+            "--monitor", "0",
+        ])
+
+        self.assertEqual(unknown, [])
+        self.assertEqual(args.runtime_event_port, 51661)
+        self.assertEqual(args.runtime_event_token, "secret")
+
+    def test_frozen_entrypoint_forwards_reverse_event_channel_and_monitor_safely(self):
+        start = unittest.mock.Mock()
+        safe_print = unittest.mock.Mock()
+        with patch.dict("sys.modules", {"widget_viewer": widget_viewer}), patch.object(
+            widget_viewer, "_start_with_pywebview", start
+        ), patch.object(widget_viewer, "_viewer_backend_order", return_value=["pywebview"]), patch.object(
+            widget_viewer, "_safe_print", safe_print
+        ), patch.object(client_module, "_start_parent_watchdog"):
+            result = client_module._run_widget_entrypoint(
+                widget_viewer.WIDGET_ENGINE_SENTINEL,
+                runtime_ipc=True,
+                monitor_bounds=(0, 0, 1920, 1080),
+                monitor=2,
+                runtime_event_port=51661,
+                runtime_event_token="secret",
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(start.call_args.kwargs["runtime_event_port"], 51661)
+        self.assertEqual(start.call_args.kwargs["runtime_event_token"], "secret")
+        self.assertEqual(start.call_args.kwargs["monitor_index"], 2)
+        diagnostic = "\n".join(str(call.args[0]) for call in safe_print.call_args_list)
+        self.assertIn("port=51661 token_present=True monitor=2", diagnostic)
+        self.assertNotIn("secret", diagnostic)
+
+    def test_frozen_entrypoint_reverse_channel_reaches_bridge_tcp_send(self):
+        connection = unittest.mock.MagicMock()
+        connection.__enter__.return_value = connection
+
+        def start_viewer(_url, **kwargs):
+            bridge = widget_viewer._WidgetEngineBridge(
+                kwargs["runtime_event_port"], kwargs["runtime_event_token"], kwargs["monitor_index"]
+            )
+            self.assertIsNotNone(bridge.event_port)
+            self.assertTrue(bridge.media_event("media_playing", {"session_id": "frozen"}))
+
+        with patch.dict("sys.modules", {"widget_viewer": widget_viewer}), patch.object(
+            widget_viewer, "_start_with_pywebview", side_effect=start_viewer
+        ), patch.object(widget_viewer, "_viewer_backend_order", return_value=["pywebview"]), patch.object(
+            widget_viewer.socket, "create_connection", return_value=connection
+        ), patch.object(client_module, "_start_parent_watchdog"):
+            result = client_module._run_widget_entrypoint(
+                widget_viewer.WIDGET_ENGINE_SENTINEL,
+                runtime_ipc=True,
+                monitor_bounds=(0, 0, 100, 100),
+                runtime_event_port=51661,
+                runtime_event_token="secret",
+            )
+
+        self.assertEqual(result, 0)
+        connection.sendall.assert_called_once()
 
     def test_parse_runtime_options_supports_equals_syntax(self):
         options = widget_viewer._parse_runtime_options(
