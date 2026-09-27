@@ -3006,8 +3006,8 @@ class PlaybackController:
             self.multi_monitor_playback.prewarm_widget_runtimes_on_startup()
 
     def _on_webview_media_ready(self, event_type: str, _session_id: str, _monitor_index: int | None) -> None:
-        if event_type == "media_first_frame":
-            self._background_overlay.hide(reason="webview_first_frame")
+        if event_type == "media_presented":
+            self._background_overlay.hide(reason="webview_media_presented")
 
     def _primary_target_monitor_index(self) -> int | None:
         if os.name != "nt":
