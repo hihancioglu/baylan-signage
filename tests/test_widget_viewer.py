@@ -337,6 +337,50 @@ class TestWidgetViewer(unittest.TestCase):
 
         self.assertTrue(any("__baylanApplyRuntimeConfig" in call.args[0] for call in window.evaluate_js.call_args_list))
 
+    def test_background_invalidates_queued_foreground_work_before_document_ready(self):
+        _, window, loaded_event, _ = self._run_runtime_messages(
+            [
+                {"type": "playlist_sync", "payload": {"items": [1]}},
+                {
+                    "type": "layout_update",
+                    "payload": {"signature": "stale", "config": {"widgets": [{"type": "video"}]}},
+                },
+                {"type": "background"},
+            ],
+            fire_loaded=False,
+        )
+
+        loaded_event.fire()
+
+        window.show.assert_not_called()
+        window.toggle_fullscreen.assert_not_called()
+        self.assertFalse(any("stale" in call.args[0] for call in window.evaluate_js.call_args_list))
+
+    def test_playlist_sync_alone_never_foregrounds_runtime(self):
+        _, window, _, _ = self._run_runtime_messages(
+            [{"type": "playlist_sync", "payload": {"items": [1]}}]
+        )
+
+        window.show.assert_not_called()
+        window.toggle_fullscreen.assert_not_called()
+        self.assertTrue(any("__playlist_sync" in call.args[0] for call in window.evaluate_js.call_args_list))
+
+    def test_new_layout_after_background_foregrounds_ready_runtime(self):
+        _, window, _, _ = self._run_runtime_messages(
+            [
+                {"type": "background"},
+                {
+                    "type": "layout_update",
+                    "payload": {"signature": "fresh", "config": {"widgets": [{"type": "video"}]}},
+                },
+            ],
+            ready_before_messages=True,
+        )
+
+        window.show.assert_called_once()
+        window.toggle_fullscreen.assert_called_once()
+        self.assertTrue(any("fresh" in call.args[0] for call in window.evaluate_js.call_args_list))
+
     def test_runtime_flush_preserves_playlist_then_layout_order(self):
         _, window, _, _ = self._run_runtime_messages([
             {"type": "playlist_sync", "payload": {"items": []}},

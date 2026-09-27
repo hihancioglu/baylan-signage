@@ -966,6 +966,7 @@ def _start_with_pywebview(
         webview_ready = threading.Event()
         pending_runtime_messages: list[dict] = []
         pending_lock = threading.Lock()
+        runtime_foreground_requested = False
         shown_once = not start_hidden
         fullscreen_applied = False
         runtime_control_checked = False
@@ -1041,10 +1042,8 @@ def _start_with_pywebview(
             except Exception as exc:
                 _safe_print(f"Widget runtime IPC pywebview hatası: {exc}")
 
-            _show_runtime_window_once()
-
         def dispatch(message: dict) -> None:
-            nonlocal shown_once
+            nonlocal shown_once, runtime_foreground_requested
             message_type = str(message.get("type") or "").strip().lower()
             _debug_log(f"pywebview dispatch message={message_type}")
             if message_type == "stop":
@@ -1055,6 +1054,9 @@ def _start_with_pywebview(
                     pass
                 return
             if message_type == "background":
+                with pending_lock:
+                    runtime_foreground_requested = False
+                    pending_runtime_messages.clear()
                 try:
                     window.evaluate_js(
                         "if(typeof window.__baylanCleanupMedia==='function'){window.__baylanCleanupMedia();}"
@@ -1083,6 +1085,8 @@ def _start_with_pywebview(
                 return
 
             with pending_lock:
+                if message_type == "layout_update":
+                    runtime_foreground_requested = True
                 if not webview_ready.is_set():
                     # Only the newest value of each semantic message type is
                     # useful at startup. Reinsert it at the tail so the order of
@@ -1107,6 +1111,9 @@ def _start_with_pywebview(
                 pending_runtime_messages.clear()
                 for message in queued_messages:
                     message_type = str(message.get("type") or "").strip().lower()
+                    if message_type == "layout_update" and not runtime_foreground_requested:
+                        _debug_log("pywebview queued message skipped | type=layout_update reason=backgrounded")
+                        continue
                     _debug_log(f"pywebview queued message flush | type={message_type}")
                     _apply_runtime_message(message)
 
