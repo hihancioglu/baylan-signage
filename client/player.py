@@ -2118,11 +2118,25 @@ class BorderlessFullscreenPlayer:
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
     ) -> bool:
-        if widget_signature and widget_signature == getattr(self, "_active_widget_signature", None):
-            _debug_log(f"update_widget_layout skipped | signature_unchanged={widget_signature}")
+        same_signature = bool(
+            widget_signature
+            and (
+                widget_signature == getattr(self, "_active_widget_signature", None)
+                or widget_signature == self._last_widget_signature
+            )
+        )
+        runtime_backgrounded = bool(self._widget_runtime_is_backgrounded)
+        if same_signature and not runtime_backgrounded:
+            _debug_log(
+                "update_widget_layout skipped | "
+                f"signature_unchanged={widget_signature} runtime_backgrounded=False"
+            )
             return True
-        if widget_signature and widget_signature == self._last_widget_signature:
-            return True
+        if same_signature:
+            _debug_log(
+                "update_widget_layout replay | "
+                f"reason=runtime_backgrounded signature={widget_signature}"
+            )
         payload = self._build_widget_layout_payload(widget_source, widget_config=widget_config)
         if payload is None:
             _safe_print("⚠️ widget layout payload geçersiz")

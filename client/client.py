@@ -3605,6 +3605,10 @@ class PlaybackController:
         media_path = str(active_item.get("local_path") or "").strip()
         return self._is_webview_image(media_path) or self._is_webview_video(media_path)
 
+    def widget_runtime_visible(self) -> bool:
+        """Return whether the primary widget runtime is ready to replace the idle overlay."""
+        return self.player.has_visible_widget_runtime_content()
+
     @classmethod
     def _is_webview_image(cls, media_path: str) -> bool:
         return Path(urlparse(str(media_path or "")).path).suffix.lower() in cls.WEBVIEW_IMAGE_EXTENSIONS
@@ -5318,7 +5322,17 @@ def run_state_cycle():
         if webview_ready:
             log_debug("idle_overlay hide | reason=webview_media_ready")
             idle_background.hide()
-        elif not webview_media_active and played_for_sec >= WIDGET_OVERLAY_HOLD_SEC:
+        elif (
+            active_item_type == "widget"
+            and played_for_sec >= WIDGET_OVERLAY_HOLD_SEC
+            and playback.widget_runtime_visible()
+        ):
+            idle_background.hide()
+        elif (
+            active_item_type != "widget"
+            and not webview_media_active
+            and played_for_sec >= WIDGET_OVERLAY_HOLD_SEC
+        ):
             idle_background.hide()
 
     minimum_playing_before_return = WIDGET_ACTIVITY_GRACE_SEC if active_item_type == "widget" else MIN_PLAYING_SECONDS

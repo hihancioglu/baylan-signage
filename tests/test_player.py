@@ -1166,6 +1166,69 @@ class TestBorderlessFullscreenPlayer(unittest.TestCase):
         self.assertEqual(sent_message["type"], "layout_update")
         self.assertIsNone(sent_message["payload"]["signature"])
 
+    def test_update_widget_layout_skips_same_signature_while_runtime_visible(self):
+        player = self._build_player()
+        player._active_widget_signature = "sig-1"
+        player._widget_runtime_is_backgrounded = False
+
+        with patch.object(player, "_send_widget_runtime_message") as sender:
+            self.assertTrue(player.update_widget_layout("https://example.com", widget_signature="sig-1"))
+
+        sender.assert_not_called()
+
+    def test_update_widget_layout_replays_same_active_signature_after_background(self):
+        player = self._build_player()
+        player._active_widget_signature = "sig-1"
+        player._widget_runtime_is_backgrounded = True
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            self.assertTrue(player.update_widget_layout("https://example.com", widget_signature="sig-1"))
+
+        self.assertEqual(sender.call_args.args[0]["type"], "layout_update")
+        self.assertFalse(player._widget_runtime_is_backgrounded)
+
+    def test_update_widget_layout_replays_same_last_signature_after_background(self):
+        player = self._build_player()
+        player._active_widget_signature = None
+        player._last_widget_signature = "sig-1"
+        player._widget_runtime_is_backgrounded = True
+
+        with patch.object(player, "_send_widget_runtime_message", return_value=True) as sender:
+            self.assertTrue(player.update_widget_layout("https://example.com", widget_signature="sig-1"))
+
+        self.assertEqual(sender.call_args.args[0]["type"], "layout_update")
+        self.assertEqual(player._active_widget_signature, "sig-1")
+        self.assertFalse(player._widget_runtime_is_backgrounded)
+
+    def test_background_then_same_signature_layout_replays_into_warm_runtime(self):
+        player = self._build_player()
+        process = unittest.mock.Mock(args=["widget_viewer"], pid=10)
+        process.poll.return_value = None
+        process.stdin = unittest.mock.Mock()
+        player._widget_runtime_processes = [process]
+        player._widget_process = process
+        player._last_runtime_signature = (((0, None),), False, 0)
+        player._active_widget_signature = "production-grid"
+        player._widget_runtime_is_backgrounded = False
+
+        self.assertTrue(player.background_widget_engine())
+        self.assertTrue(player._widget_runtime_is_backgrounded)
+        with patch.object(player, "_widget_runtime_controller_enabled", return_value=True), patch.object(
+            player, "_resolve_widget_runtime_monitor_targets", return_value=[(0, None)]
+        ):
+            self.assertTrue(
+                player.update_widget_layout(
+                    "https://example.com",
+                    widget_signature="production-grid",
+                    target_monitor_index=0,
+                    clone_to_all_monitors=False,
+                )
+            )
+
+        messages = [json.loads(call.args[0]) for call in process.stdin.write.call_args_list]
+        self.assertEqual([message["type"] for message in messages], ["background", "layout_update"])
+        self.assertFalse(player._widget_runtime_is_backgrounded)
+
 
     def test_play_media_in_widget_runtime_clears_stale_stop_flag(self):
         player = self._build_player()

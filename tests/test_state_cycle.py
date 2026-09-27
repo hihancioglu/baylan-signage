@@ -585,6 +585,36 @@ class TestRunStateCycle(unittest.TestCase):
             main.run_state_cycle()
         fake_idle_background.hide.assert_not_called()
 
+    def test_playing_widget_keeps_overlay_after_hold_while_runtime_backgrounded(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        fake_playback = self._playing_playback("widget")
+        fake_playback.widget_runtime_visible.return_value = False
+        overlay = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", overlay), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        overlay.hide.assert_not_called()
+
+    def test_playing_widget_hides_overlay_after_hold_when_runtime_visible(self):
+        self._configure_common()
+        main.current_state = main.ClientState.PLAYING
+        main.playing_started_at = 0.0
+        fake_playback = self._playing_playback("widget")
+        fake_playback.widget_runtime_visible.return_value = True
+        overlay = Mock()
+
+        with patch.object(main, "playback", fake_playback), patch.object(main, "idle_background", overlay), patch.object(
+            main, "get_idle_seconds", return_value=80.0
+        ), patch.object(main.time, "monotonic", return_value=100.0):
+            main.run_state_cycle()
+
+        overlay.hide.assert_called_once()
+
     def test_webview_media_keeps_overlay_past_hold_until_ready(self):
         self._configure_common()
         main.current_state = main.ClientState.PLAYING
