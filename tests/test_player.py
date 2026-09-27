@@ -4043,6 +4043,20 @@ class TestUnifiedMultiMonitorWebViewRuntime(unittest.TestCase):
         }))
         self.assertEqual([event["monitor_index"] for event in player._active_media_events], [1, 0])
 
+    def test_runtime_event_without_monitor_uses_authoritative_monitor(self):
+        player = BorderlessFullscreenPlayer.__new__(BorderlessFullscreenPlayer)
+        player._runtime_event_token = "token"
+        player._runtime_event_condition = threading.Condition()
+        player._active_media_session_id = "session"
+        player._active_media_monitor_indexes = {1}
+        player._authoritative_media_monitor_index = 1
+        player._active_media_events = __import__("collections").deque()
+
+        self.assertTrue(player._accept_runtime_event({
+            "token": "token", "type": "media_ended", "session_id": "session",
+        }))
+        self.assertEqual(player._active_media_events[-1]["monitor_index"], 1)
+
     def test_webview_fallback_keeps_owner_for_following_widget(self):
         from client.client import MultiMonitorPlayback
 

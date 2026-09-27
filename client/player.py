@@ -381,6 +381,12 @@ class BorderlessFullscreenPlayer:
         with self._runtime_event_condition:
             if not session_id or session_id != self._active_media_session_id:
                 return False
+            # Older/single-window runtimes did not include a monitor index in
+            # lifecycle events. Treat those events as coming from the selected
+            # authoritative monitor so that adding monitor-aware clone handling
+            # does not turn valid completion and failure events into timeouts.
+            if raw_monitor_index is None and self._authoritative_media_monitor_index is not None:
+                monitor_index = self._authoritative_media_monitor_index
             if self._active_media_monitor_indexes and monitor_index not in self._active_media_monitor_indexes:
                 return False
             self._active_media_events.append(dict(
