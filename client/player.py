@@ -369,22 +369,38 @@ class BorderlessFullscreenPlayer:
             return
 
     def _accept_runtime_event(self, event: object) -> bool:
-        if not isinstance(event, dict) or not secrets.compare_digest(
-            str(event.get("token") or ""), self._runtime_event_token
-        ):
+        if not isinstance(event, dict):
             return False
         event_type = str(event.get("type") or "").strip().lower()
-        if event_type not in self.RUNTIME_MEDIA_EVENTS:
-            return False
         session_id = str(event.get("session_id") or event.get("media_session_id") or "").strip()
+        critical = event_type != "media_progress"
         raw_monitor_index = event.get("monitor_index")
+        if critical:
+            _debug_log(
+                f"runtime media event received | type={event_type} session={session_id} monitor={raw_monitor_index}"
+            )
+
+        def reject(reason: str) -> bool:
+            if critical:
+                _debug_log(
+                    f"runtime media event rejected | type={event_type} session={session_id} "
+                    f"monitor={raw_monitor_index} reason={reason}"
+                )
+            return False
+
+        if not secrets.compare_digest(str(event.get("token") or ""), self._runtime_event_token):
+            return reject("invalid_token")
+        if event_type not in self.RUNTIME_MEDIA_EVENTS:
+            return reject("unknown_type")
         try:
             monitor_index = int(raw_monitor_index) if raw_monitor_index is not None else None
         except (TypeError, ValueError):
             monitor_index = None
         with self._runtime_event_condition:
-            if not session_id or session_id != self._active_media_session_id:
-                return False
+            if not session_id:
+                return reject("missing_session")
+            if session_id != self._active_media_session_id:
+                return reject("stale_session")
             # Older/single-window runtimes did not include a monitor index in
             # lifecycle events. Treat those events as coming from the selected
             # authoritative monitor so that adding monitor-aware clone handling
@@ -392,7 +408,7 @@ class BorderlessFullscreenPlayer:
             if raw_monitor_index is None and self._authoritative_media_monitor_index is not None:
                 monitor_index = self._authoritative_media_monitor_index
             if self._active_media_monitor_indexes and monitor_index not in self._active_media_monitor_indexes:
-                return False
+                return reject("wrong_monitor")
             authoritative = self._authoritative_media_monitor_index
             is_authoritative = authoritative is None or monitor_index == authoritative
             media_type = getattr(self, "_active_media_type", None)
@@ -410,6 +426,10 @@ class BorderlessFullscreenPlayer:
                 monitor_index=monitor_index,
             ))
             self._runtime_event_condition.notify_all()
+        if critical:
+            _debug_log(
+                f"runtime media event accepted | type={event_type} session={session_id} monitor={monitor_index}"
+            )
         return True
 
     def webview_media_ready(self) -> bool:

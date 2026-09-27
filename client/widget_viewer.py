@@ -32,6 +32,8 @@ MEDIA_EXTENSION_PATTERN = re.compile(
 DEBUG_MODE_ENABLED = os.getenv("CLIENT_DEBUG_MODE", "0").strip().lower() in {"1", "true", "yes", "on", "debug"}
 WIDGET_ENGINE_SENTINEL = "__BAYLAN_WIDGET_ENGINE__"
 WIDGET_VIEWER_LOG_NAME = "widget_viewer.log"
+MEDIA_RUNTIME_EVENT_POLL_SEC = 0.1
+MEDIA_RUNTIME_EVENT_DRAIN_LIMIT = 32
 _DPI_AWARENESS_MODE: str | None = None
 
 
@@ -164,7 +166,18 @@ class _WidgetEngineBridge:
 
     def media_event(self, event_type: str, detail: object = None) -> bool:
         normalized_type = str(event_type or "").strip().lower()
-        if normalized_type not in self.SUPPORTED_MEDIA_EVENTS or not self.event_port or not self.event_token:
+        session_id = ""
+        if isinstance(detail, dict):
+            session_id = str(detail.get("session_id") or detail.get("media_session_id") or "")
+        should_log = normalized_type != "media_progress"
+        if normalized_type not in self.SUPPORTED_MEDIA_EVENTS:
+            if should_log:
+                _debug_log(f"runtime media tcp skipped | reason=unsupported_type type={normalized_type}")
+            return False
+        if not self.event_port or not self.event_token:
+            if should_log:
+                reason = "missing_port" if not self.event_port else "missing_token"
+                _debug_log(f"runtime media tcp skipped | reason={reason} type={normalized_type} session={session_id}")
             return False
         if isinstance(detail, str):
             try:
@@ -181,8 +194,17 @@ class _WidgetEngineBridge:
         try:
             with socket.create_connection(("127.0.0.1", self.event_port), timeout=2.0) as connection:
                 connection.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+            if should_log:
+                _debug_log(
+                    f"runtime media tcp sent | type={normalized_type} session={payload['session_id']} "
+                    f"monitor={self.monitor_index}"
+                )
             return True
-        except OSError:
+        except OSError as exc:
+            if should_log:
+                _debug_log(
+                    f"runtime media tcp failed | type={normalized_type} session={payload['session_id']} error={exc}"
+                )
             return False
 
     def mediaEvent(self, event_type: str, detail: object = None) -> bool:
@@ -191,6 +213,27 @@ class _WidgetEngineBridge:
 
 # Backward-compatible name used by tests and external launchers.
 _WidgetEngineDebugBridge = _WidgetEngineBridge
+
+
+def _poll_media_runtime_events(window, bridge: _WidgetEngineBridge, stop_event: threading.Event) -> None:
+    """Drain the browser-owned lifecycle outbox until its WebView is stopped."""
+    script = (
+        "typeof window.__baylanDrainMediaRuntimeEvents === 'function' "
+        f"? window.__baylanDrainMediaRuntimeEvents({MEDIA_RUNTIME_EVENT_DRAIN_LIMIT}) : []"
+    )
+    while not stop_event.wait(MEDIA_RUNTIME_EVENT_POLL_SEC):
+        try:
+            events = window.evaluate_js(script)
+        except Exception as exc:
+            if not stop_event.is_set():
+                _debug_log(f"runtime media poll failed | error={exc}")
+            continue
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            bridge.media_event(event.get("type"), event.get("detail"))
 
 
 
@@ -926,6 +969,19 @@ def _start_with_pywebview(
         shown_once = not start_hidden
         fullscreen_applied = False
         runtime_control_checked = False
+        media_poller_stop = threading.Event()
+        media_poller_started = threading.Event()
+
+        def _start_media_poller_once() -> None:
+            if media_poller_started.is_set():
+                return
+            media_poller_started.set()
+            threading.Thread(
+                target=_poll_media_runtime_events,
+                args=(window, debug_bridge, media_poller_stop),
+                daemon=True,
+                name="media-runtime-poller",
+            ).start()
 
         def _enter_fullscreen_once() -> None:
             nonlocal fullscreen_applied
@@ -992,6 +1048,7 @@ def _start_with_pywebview(
             message_type = str(message.get("type") or "").strip().lower()
             _debug_log(f"pywebview dispatch message={message_type}")
             if message_type == "stop":
+                media_poller_stop.set()
                 try:
                     webview.destroy_window()
                 except Exception:
@@ -1045,6 +1102,7 @@ def _start_with_pywebview(
             with pending_lock:
                 webview_ready.set()
                 _debug_log("pywebview document ready")
+                _start_media_poller_once()
                 queued_messages = list(pending_runtime_messages)
                 pending_runtime_messages.clear()
                 for message in queued_messages:
@@ -1056,7 +1114,11 @@ def _start_with_pywebview(
 
         threading.Thread(target=_runtime_message_reader, args=(dispatch,), daemon=True).start()
 
-    _start_with_fallback(webview)
+    try:
+        _start_with_fallback(webview)
+    finally:
+        if runtime_ipc:
+            media_poller_stop.set()
 
 
 def main() -> int:

@@ -173,9 +173,8 @@
       }
     }
 
-    const pendingMediaRuntimeEvents = [];
-    const MAX_PENDING_MEDIA_RUNTIME_EVENTS = 32;
-    let pywebviewBridgeReady = false;
+    const mediaRuntimeOutbox = [];
+    const MAX_MEDIA_RUNTIME_OUTBOX = 64;
 
     function mediaRuntimeSession(detail) {
       return String((detail && (detail.session_id || detail.media_session_id)) || "");
@@ -186,55 +185,36 @@
       debugLog(`media runtime event ${action} | type=${type} session=${mediaRuntimeSession(detail)}`);
     }
 
-    function sendMediaRuntimeEvent(type, detail) {
-      const api = window.pywebview && window.pywebview.api;
-      if (!api) return false;
-      try {
-        let result;
-        if (typeof api.media_event === "function") {
-          result = api.media_event(String(type || ""), detail || {});
-        } else if (typeof api.mediaEvent === "function") {
-          result = api.mediaEvent(String(type || ""), detail || {});
-        } else {
-          return false;
-        }
-        if (result && typeof result.catch === "function") result.catch(() => {});
-        return true;
-      } catch (_err) {
-        return false;
+    function queueMediaRuntimeEvent(type, detail) {
+      if (mediaRuntimeOutbox.length >= MAX_MEDIA_RUNTIME_OUTBOX) {
+        const progressIndex = mediaRuntimeOutbox.findIndex((event) => event.type === "media_progress");
+        if (progressIndex >= 0) mediaRuntimeOutbox.splice(progressIndex, 1);
+        else if (type === "media_progress") return false;
+        else mediaRuntimeOutbox.shift();
       }
-    }
-
-    function flushPendingMediaRuntimeEvents() {
-      while (pendingMediaRuntimeEvents.length > 0) {
-        const pending = pendingMediaRuntimeEvents[0];
-        if (!sendMediaRuntimeEvent(pending.type, pending.detail)) return;
-        pendingMediaRuntimeEvents.shift();
-        logMediaRuntimeDelivery("flushed", pending.type, pending.detail);
-      }
+      mediaRuntimeOutbox.push({ type, detail });
+      return true;
     }
 
     function emitMediaRuntimeEvent(type, detail) {
       const normalizedType = String(type || "");
       const normalizedDetail = detail || {};
-      if (sendMediaRuntimeEvent(normalizedType, normalizedDetail)) {
-        logMediaRuntimeDelivery("sent", normalizedType, normalizedDetail);
-        return;
+      if (queueMediaRuntimeEvent(normalizedType, normalizedDetail)) {
+        logMediaRuntimeDelivery("queued", normalizedType, normalizedDetail);
       }
-      // Progress is periodic and is not needed to recover startup/completion state.
-      if (normalizedType === "media_progress") return;
-      if (pendingMediaRuntimeEvents.length >= MAX_PENDING_MEDIA_RUNTIME_EVENTS) {
-        pendingMediaRuntimeEvents.shift();
-      }
-      pendingMediaRuntimeEvents.push({ type: normalizedType, detail: normalizedDetail });
-      logMediaRuntimeDelivery("queued", normalizedType, normalizedDetail);
     }
 
-    window.addEventListener("pywebviewready", () => {
-      pywebviewBridgeReady = true;
-      debugLog("pywebview bridge ready");
-      flushPendingMediaRuntimeEvents();
-    });
+    window.__baylanDrainMediaRuntimeEvents = function(maxItems) {
+      try {
+        const parsedLimit = Number(maxItems);
+        const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+          ? Math.min(Math.floor(parsedLimit), MAX_MEDIA_RUNTIME_OUTBOX)
+          : 32;
+        return mediaRuntimeOutbox.splice(0, limit);
+      } catch (_err) {
+        return [];
+      }
+    };
 
     function parseConfig() {
       const params = new URLSearchParams(window.location.search);
