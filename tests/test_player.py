@@ -2350,6 +2350,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback = unittest.mock.Mock()
         controller.multi_monitor_playback.has_active_playlist.return_value = False
         controller.player = unittest.mock.Mock()
+        controller.player.has_visible_widget_runtime_content.return_value = True
         controller.player._active_item = {
             "item_type": "widget",
             "widget_url": "https://example.com/w",
@@ -2371,7 +2372,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
             }
         )
 
-        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.start_widget_engine_if_needed.assert_not_called()
         controller.player.background_widget_engine.assert_not_called()
 
     def test_update_from_config_does_not_background_primary_widget_when_secondary_widget_is_visible(self):
@@ -2385,6 +2386,7 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
         controller.multi_monitor_playback.has_active_playlist.return_value = False
         controller.multi_monitor_playback.has_visible_widget_runtime_content.return_value = True
         controller.player = unittest.mock.Mock()
+        controller.player.has_visible_widget_runtime_content.return_value = False
         controller.player.start_widget_engine_if_needed.return_value = True
         controller.player._active_item = {
             "item_type": "media",
@@ -2491,6 +2493,60 @@ class TestPlaybackControllerMpvGate(unittest.TestCase):
 
         controller.player.stop_widget_engine.assert_not_called()
         controller.player.background_widget_engine.assert_not_called()
+
+    def test_active_webview_video_survives_empty_or_disabled_reconcile(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                controller = self._build_controller()
+                controller.player = unittest.mock.Mock()
+                controller._active_item = {
+                    "url": "https://example.com/video.webm",
+                    "media_type": "video",
+                    "item_type": "media",
+                }
+
+                with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+                    controller._reconcile_primary_widget_runtime(enabled=enabled, normalized_items=[])
+
+                controller.player.stop_widget_engine.assert_not_called()
+                controller.player.start_widget_engine_if_needed.assert_not_called()
+
+    def test_active_webview_image_survives_empty_reconcile(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller._active_item = {
+            "source": "https://example.com/poster.jpg",
+            "media_type": "image",
+            "item_type": "media",
+        }
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller._reconcile_primary_widget_runtime(enabled=True, normalized_items=[])
+
+        controller.player.stop_widget_engine.assert_not_called()
+
+    def test_active_widget_survives_disabled_reconcile(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller._active_item = {"item_type": "widget", "widget_url": "https://example.com/widget"}
+
+        controller._reconcile_primary_widget_runtime(enabled=False, normalized_items=[])
+
+        controller.player.stop_widget_engine.assert_not_called()
+
+    def test_unresolved_webview_media_source_keeps_runtime_warm(self):
+        controller = self._build_controller()
+        controller.player = unittest.mock.Mock()
+        controller.player.start_widget_engine_if_needed.return_value = True
+
+        with patch.dict("os.environ", {"MEDIA_PLAYBACK_BACKEND": "webview"}, clear=False):
+            controller._reconcile_primary_widget_runtime(
+                enabled=True,
+                normalized_items=[{"filename": "pending-download", "item_type": "media"}],
+            )
+
+        controller.player.start_widget_engine_if_needed.assert_called_once()
+        controller.player.stop_widget_engine.assert_not_called()
 
     def test_disables_mpv_playlist_when_image_has_custom_duration(self):
         controller = self._build_controller()

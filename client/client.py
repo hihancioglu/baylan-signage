@@ -3439,18 +3439,28 @@ class PlaybackController:
             return True
         if self._media_playback_backend() != "webview":
             return False
-        return any(
-            self._is_webview_media(str(entry.get("local_path") or entry.get("path") or ""))
-            for entry in entries
-            if isinstance(entry, dict)
-        )
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            item_type = str(entry.get("item_type") or "media").strip().lower()
+            if item_type == "widget":
+                return True
+            if item_type != "media":
+                continue
+            # A webview-backed media entry may arrive before its local path or
+            # extension has been resolved (or carry an opaque URL/cache key).
+            # Every normal media entry therefore conservatively owns runtime.
+            return True
+        return False
 
     @staticmethod
     def _player_has_visible_widget_content(player: BorderlessFullscreenPlayer | None) -> bool:
         runtime_visible_checker = getattr(player, "has_visible_widget_runtime_content", None)
         if callable(runtime_visible_checker):
             try:
-                if bool(runtime_visible_checker()):
+                # Runtime implementations return a concrete bool. Avoid
+                # treating permissive proxy/mock objects as visible content.
+                if runtime_visible_checker() is True:
                     return True
             except Exception:
                 pass
@@ -3466,14 +3476,30 @@ class PlaybackController:
             return True
         if self._media_playback_backend() != "webview":
             return False
-        media_path = str(active_item.get("local_path") or active_item.get("path") or "").strip()
+        media_path = next(
+            (
+                str(active_item.get(field) or "").strip()
+                for field in ("local_path", "path", "url", "source", "filename")
+                if str(active_item.get(field) or "").strip()
+            ),
+            "",
+        )
         return self._is_webview_media(media_path)
 
     def _reconcile_primary_widget_runtime(self, *, enabled: bool, normalized_items: list[dict]) -> None:
-        has_primary_webview_runtime_content = bool(
+        requires_runtime = bool(
             enabled and self._entries_require_primary_webview_runtime(normalized_items)
         )
-        if has_primary_webview_runtime_content:
+        active_webview_visible = self._primary_has_visible_webview_content()
+        if active_webview_visible:
+            log_debug(
+                "primary_widget_runtime_reconcile | action=keep reason=active_webview_content "
+                f"enabled={enabled} item_count={len(normalized_items)} "
+                f"requires_runtime={requires_runtime} active_webview_visible=True"
+            )
+            return
+
+        if requires_runtime:
             prewarm_ok = False
             should_background = False
             backgrounded = False
@@ -3504,7 +3530,9 @@ class PlaybackController:
                 prewarm_ok = False
             log_debug(
                 "primary_widget_runtime_reconcile | "
-                f"action=ensure ok={prewarm_ok} visible={visible_content} "
+                f"action=ensure enabled={enabled} item_count={len(normalized_items)} "
+                f"requires_runtime=True active_webview_visible={active_webview_visible} "
+                f"ok={prewarm_ok} visible={visible_content} "
                 f"secondary_visible={secondary_visible} "
                 f"backgrounded={backgrounded if prewarm_ok else False}"
             )
@@ -3512,7 +3540,11 @@ class PlaybackController:
 
         try:
             self.player.stop_widget_engine()
-            log_debug("primary_widget_runtime_reconcile | action=stop ok=True")
+            log_debug(
+                "primary_widget_runtime_reconcile | action=stop "
+                f"enabled={enabled} item_count={len(normalized_items)} "
+                "requires_runtime=False active_webview_visible=False ok=True"
+            )
         except Exception:
             log_debug("primary_widget_runtime_reconcile | action=stop ok=False")
 
