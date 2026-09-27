@@ -90,6 +90,15 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertTrue(options.start_hidden)
         self.assertEqual(options.monitor_bounds, (10, 20, 1920, 1080))
 
+    def test_parse_runtime_options_reads_reverse_event_channel(self):
+        options = widget_viewer._parse_runtime_options([
+            "widget_viewer.py", "https://example.com", "--runtime-event-port", "4567",
+            "--runtime-event-token", "secret", "--monitor", "0", "--monitor-bounds=0,0,100,100",
+        ])
+        self.assertEqual(options.runtime_event_port, 4567)
+        self.assertEqual(options.runtime_event_token, "secret")
+        self.assertEqual(options.monitor_index, 0)
+
     def test_parse_runtime_options_supports_equals_syntax(self):
         options = widget_viewer._parse_runtime_options(
             [
@@ -173,13 +182,36 @@ class TestWidgetViewer(unittest.TestCase):
 
         fake_window.hide.assert_called()
         fake_window.minimize.assert_not_called()
+        self.assertIn("__baylanCleanupMedia", fake_window.evaluate_js.call_args_list[0].args[0])
         fake_window.toggle_fullscreen.assert_called_once()
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
         fake_window.show.assert_called_once()
         show_index = fake_window.method_calls.index(unittest.mock.call.show())
-        evaluate_index = fake_window.method_calls.index(unittest.mock.call.evaluate_js(unittest.mock.ANY))
-        self.assertLess(show_index, evaluate_index)
+        layout_calls = [
+            index for index, call in enumerate(fake_window.method_calls)
+            if call == unittest.mock.call.evaluate_js(unittest.mock.ANY)
+        ]
+        self.assertLess(show_index, layout_calls[-1])
+
+    def test_widget_engine_bridge_sends_authenticated_newline_json(self):
+        connection = unittest.mock.MagicMock()
+        connection.__enter__.return_value = connection
+        bridge = widget_viewer._WidgetEngineBridge(4321, "secret", 2)
+        with patch("client.widget_viewer.socket.create_connection", return_value=connection) as connector:
+            self.assertTrue(bridge.mediaEvent("media_ended", {"session_id": "abc", "duration": 4.2}))
+        connector.assert_called_once_with(("127.0.0.1", 4321), timeout=2.0)
+        payload = json.loads(connection.sendall.call_args.args[0].decode().strip())
+        self.assertEqual(payload["token"], "secret")
+        self.assertEqual(payload["type"], "media_ended")
+        self.assertEqual(payload["monitor_index"], 2)
+        self.assertEqual(payload["session_id"], "abc")
+
+    def test_widget_engine_bridge_ignores_unknown_event(self):
+        bridge = widget_viewer._WidgetEngineBridge(4321, "secret")
+        with patch("client.widget_viewer.socket.create_connection") as connector:
+            self.assertFalse(bridge.media_event("unknown", {}))
+        connector.assert_not_called()
 
 
     def test_widget_engine_preserves_iframe_url_for_server_driven_live_updates(self):

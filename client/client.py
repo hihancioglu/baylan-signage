@@ -3423,6 +3423,16 @@ class PlaybackController:
     def _is_webview_image(cls, media_path: str) -> bool:
         return Path(urlparse(str(media_path or "")).path).suffix.lower() in cls.WEBVIEW_IMAGE_EXTENSIONS
 
+    @staticmethod
+    def _is_webview_video(media_path: str) -> bool:
+        return Path(urlparse(str(media_path or "")).path).suffix.lower() in {".mp4", ".webm"}
+
+    @staticmethod
+    def _media_webview_fallback_enabled() -> bool:
+        return str(os.getenv("MEDIA_WEBVIEW_FALLBACK_TO_MPV", "1") or "").strip().lower() in {
+            "1", "true", "yes"
+        }
+
     def update_from_config(self, config: dict):
         self.mark_initial_config_received()
         with self._lock:
@@ -3810,12 +3820,6 @@ class PlaybackController:
 
                     log_debug(f"media playback start | path={media_path} resume_sec={resume_sec} media_duration_sec={media_duration_sec}")
                     requested_media_backend = self._media_playback_backend()
-                    if requested_media_backend == "webview" and is_video_media:
-                        log_debug(
-                            "media backend phase1 | requested=webview type=video effective=mpv "
-                            "reason=video_reverse_ipc_not_enabled"
-                        )
-
                     if requested_media_backend == "webview" and self._is_webview_image(media_path):
                         webview_image_duration_sec = (
                             duration_sec
@@ -3826,14 +3830,27 @@ class PlaybackController:
                             media_path,
                             webview_image_duration_sec,
                         )
-                    elif requested_media_backend == "webview" and is_video_media:
-                        ok = self.player.play_blocking(
+                    elif requested_media_backend == "webview" and is_video_media and self._is_webview_video(media_path):
+                        ok = self.player.play_media_in_widget_runtime_blocking(
                             media_path,
-                            image_duration_sec=media_duration_sec,
+                            media_duration_sec,
                             start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
-                            target_monitor_index=self._primary_target_monitor_index(),
-                            clone_to_all_monitors=self._clone_to_all_monitors,
                         )
+                        if not ok and not self.player.last_play_was_interrupted() and self._media_webview_fallback_enabled():
+                            failure_reason = getattr(self.player, "last_webview_failure_reason", None)
+                            log_debug(
+                                "webview media fallback | backend=mpv "
+                                f"reason={failure_reason or 'runtime_start_failed'} path={media_path}"
+                            )
+                            self.player.background_widget_engine()
+                            ok = self.player.play_blocking(
+                                media_path,
+                                image_duration_sec=media_duration_sec,
+                                start_position_sec=effective_resume_sec if effective_resume_sec > 0 else None,
+                                target_monitor_index=self._primary_target_monitor_index(),
+                                clone_to_all_monitors=self._clone_to_all_monitors,
+                                preserve_widget_runtime=True,
+                            )
                     elif is_video_media and media_duration_sec is None:
                         ok = self.player.play_blocking(
                             media_path,

@@ -11,6 +11,10 @@ import tempfile
 import ctypes
 import time
 import threading
+import secrets
+import socket
+import uuid
+from collections import deque
 import re
 import logging
 import traceback
@@ -84,6 +88,11 @@ def _resolve_runtime_resource(*relative_parts: str) -> Path:
 
 class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
+    WEBVIEW_VIDEO_EXTENSIONS = {".mp4", ".webm"}
+    RUNTIME_MEDIA_EVENTS = {
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_progress",
+        "media_ended", "media_error", "media_play_rejected",
+    }
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
     VLC_VIDEO_TEMPLATE = (
         "{player} --intf dummy --dummy-quiet --fullscreen --play-and-exit "
@@ -279,11 +288,82 @@ class BorderlessFullscreenPlayer:
         else:
             self._keep_widget_runtime_warm = bool(keep_widget_runtime_warm)
         self._last_interrupted = False
+        self._runtime_event_token = secrets.token_urlsafe(32)
+        self._runtime_event_socket: socket.socket | None = None
+        self._runtime_event_port: int | None = None
+        self._runtime_event_condition = threading.Condition()
+        self._active_media_session_id: str | None = None
+        self._active_media_events: deque[dict] = deque()
+        self._last_webview_failure_reason: str | None = None
+        try:
+            self._media_webview_start_timeout_sec = max(
+                1.0, float(os.getenv("MEDIA_WEBVIEW_START_TIMEOUT_SEC", "12"))
+            )
+        except (TypeError, ValueError):
+            self._media_webview_start_timeout_sec = 12.0
+        self._start_runtime_event_listener()
         self._last_widget_source = ""
         self._last_runtime_signature: tuple[tuple[tuple[int | None, tuple[int, int, int, int] | None], ...], bool, int | None] | None = None
         self._last_widget_signature: str | None = None
         self._active_widget_signature: str | None = None
         _debug_log("player initialized | keep_widget_runtime_warm=%s python_viewer_supported=%s" % (self._keep_widget_runtime_warm, self._python_widget_viewer_supported))
+
+    def _start_runtime_event_listener(self) -> None:
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(8)
+            listener.settimeout(1.0)
+        except OSError as exc:
+            _debug_log(f"runtime event listener failed | error={exc}")
+            return
+        self._runtime_event_socket = listener
+        self._runtime_event_port = int(listener.getsockname()[1])
+        threading.Thread(target=self._runtime_event_accept_loop, daemon=True).start()
+
+    def _runtime_event_accept_loop(self) -> None:
+        listener = self._runtime_event_socket
+        while listener is not None:
+            try:
+                client, _address = listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            threading.Thread(target=self._read_runtime_event_client, args=(client,), daemon=True).start()
+
+    def _read_runtime_event_client(self, client: socket.socket) -> None:
+        try:
+            with client, client.makefile("r", encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    try:
+                        event = json.loads(line)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    self._accept_runtime_event(event)
+        except OSError:
+            return
+
+    def _accept_runtime_event(self, event: object) -> bool:
+        if not isinstance(event, dict) or not secrets.compare_digest(
+            str(event.get("token") or ""), self._runtime_event_token
+        ):
+            return False
+        event_type = str(event.get("type") or "").strip().lower()
+        if event_type not in self.RUNTIME_MEDIA_EVENTS:
+            return False
+        session_id = str(event.get("session_id") or event.get("media_session_id") or "").strip()
+        with self._runtime_event_condition:
+            if not session_id or session_id != self._active_media_session_id:
+                return False
+            self._active_media_events.append(dict(event, type=event_type, session_id=session_id))
+            self._runtime_event_condition.notify_all()
+        return True
+
+    @property
+    def last_webview_failure_reason(self) -> str | None:
+        return self._last_webview_failure_reason
 
     def _apply_pending_stop_to_media_processes(self, processes: list[subprocess.Popen]) -> bool:
         """
@@ -1281,6 +1361,7 @@ class BorderlessFullscreenPlayer:
         self,
         media_path: str,
         start_position_sec: float | None = None,
+        media_session_id: str | None = None,
     ) -> dict:
         normalized_media = self._normalize_widget_source(media_path)
         media_widget: dict[str, object]
@@ -1299,6 +1380,8 @@ class BorderlessFullscreenPlayer:
                 "loop": False,
                 "preload": "auto",
             }
+            if media_session_id:
+                media_widget["media_session_id"] = str(media_session_id)
             if isinstance(start_position_sec, (int, float)) and start_position_sec > 0:
                 media_widget["start_position_sec"] = float(start_position_sec)
 
@@ -1315,23 +1398,57 @@ class BorderlessFullscreenPlayer:
         duration_sec: int | None,
         start_position_sec: float | None = None,
     ) -> bool:
-        payload = self.build_media_widget_payload(media_path, start_position_sec=start_position_sec)
+        is_video = self._is_video(media_path)
+        session_id = uuid.uuid4().hex if is_video else None
+        payload = self.build_media_widget_payload(
+            media_path, start_position_sec=start_position_sec, media_session_id=session_id
+        )
         signature = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        if is_video:
+            with self._runtime_event_condition:
+                self._active_media_session_id = session_id
+                self._active_media_events.clear()
+        self._last_webview_failure_reason = None
+        self._stop_requested = False
         if not self.update_widget_layout(media_path, widget_config=payload, widget_signature=signature):
             self._last_interrupted = False
+            self._last_webview_failure_reason = "layout_update_failed"
             return False
 
-        if self._is_video(media_path) and (not isinstance(duration_sec, int) or duration_sec <= 0):
+        if is_video:
+            startup_deadline = time.monotonic() + self._media_webview_start_timeout_sec
+            started = False
             while True:
                 if self._stop_requested:
                     self._last_interrupted = True
+                    self._last_webview_failure_reason = "interrupted"
                     return True
                 if not self._widget_process or self._widget_process.poll() is not None:
                     self._last_interrupted = False
+                    self._last_webview_failure_reason = "runtime_died"
                     return False
-                time.sleep(0.2)
+                with self._runtime_event_condition:
+                    event = self._active_media_events.popleft() if self._active_media_events else None
+                    if event is None:
+                        remaining = startup_deadline - time.monotonic() if not started else 0.5
+                        if not started and remaining <= 0:
+                            self._last_interrupted = False
+                            self._last_webview_failure_reason = "startup_timeout"
+                            return False
+                        self._runtime_event_condition.wait(timeout=min(0.5, max(0.01, remaining)))
+                        continue
+                event_type = event.get("type")
+                if event_type in {"media_loadedmetadata", "media_playing"}:
+                    started = True
+                elif event_type == "media_ended":
+                    self._last_interrupted = False
+                    return True
+                elif event_type in {"media_error", "media_play_rejected"}:
+                    self._last_interrupted = False
+                    self._last_webview_failure_reason = event_type
+                    return False
 
         if not isinstance(duration_sec, int) or duration_sec <= 0:
             self._last_interrupted = False
@@ -1475,6 +1592,9 @@ class BorderlessFullscreenPlayer:
         command.append("--runtime-ipc")
         command.append("--baylan-widget-runtime")
         command.append("--start-hidden")
+        if self._runtime_event_port is not None:
+            command.extend(["--runtime-event-port", str(self._runtime_event_port)])
+            command.extend(["--runtime-event-token", self._runtime_event_token])
         if isinstance(monitor_index, int) and monitor_index >= 0:
             command.extend(["--monitor", str(monitor_index)])
         if monitor_bounds is not None:
@@ -2630,6 +2750,7 @@ class BorderlessFullscreenPlayer:
         start_position_sec: float | None = None,
         target_monitor_index: int | None = None,
         clone_to_all_monitors: bool | None = None,
+        preserve_widget_runtime: bool = False,
     ) -> bool:
         _debug_log(
             "play_blocking start | "
@@ -2657,12 +2778,14 @@ class BorderlessFullscreenPlayer:
         self._process = None
         self._extra_processes = []
 
-        if self._widget_process and self._widget_process.poll() is None:
+        if self._widget_process and self._widget_process.poll() is None and not preserve_widget_runtime:
             # Harici medya oynatıcıları (mpv/vlc) ile oynatımda widget runtime'ın
             # sıcak tutulması bazı ortamlarda siyah ekran/başlatılamama
             # davranışına neden olabiliyor. Bu yüzden doğrudan oynatım öncesi
             # widget runtime temizce kapatılır.
             self.stop_widget_engine()
+        elif self._widget_process and self._widget_process.poll() is None:
+            self.background_widget_engine()
 
         process = None
 
@@ -2816,6 +2939,8 @@ class BorderlessFullscreenPlayer:
             return False
 
         self._stop_requested = True
+        with self._runtime_event_condition:
+            self._runtime_event_condition.notify_all()
         if self._process and self._process.poll() is None:
             self._terminate_process(self._process, timeout_sec=5)
         for extra_process in self._extra_processes:
@@ -2904,6 +3029,8 @@ class BorderlessFullscreenPlayer:
             f"thread={threading.current_thread().name}{caller_hint}"
         )
         self._stop_requested = True
+        with self._runtime_event_condition:
+            self._runtime_event_condition.notify_all()
 
         if stop_widget_runtime is None:
             stop_widget_runtime = not self._keep_widget_runtime_warm

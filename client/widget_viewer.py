@@ -7,6 +7,7 @@ import mimetypes
 import os
 import sys
 import threading
+import socket
 import tempfile
 import time
 from pathlib import Path
@@ -138,7 +139,17 @@ def _debug_log(message: str) -> None:
     _safe_print(f"[DEBUG][widget_viewer] {message}")
 
 
-class _WidgetEngineDebugBridge:
+class _WidgetEngineBridge:
+    SUPPORTED_MEDIA_EVENTS = {
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_progress",
+        "media_ended", "media_error", "media_play_rejected",
+    }
+
+    def __init__(self, event_port: int | None = None, event_token: str = "", monitor_index: int = 0):
+        self.event_port = event_port
+        self.event_token = str(event_token or "")
+        self.monitor_index = monitor_index
+
     def debug_log(self, message: str, extra_json: str = "") -> None:
         message_text = str(message or "").strip()
         extra_text = str(extra_json or "").strip()
@@ -150,6 +161,36 @@ class _WidgetEngineDebugBridge:
     # Compatibility alias for camelCase calls.
     def debugLog(self, message: str, extra_json: str = "") -> None:
         self.debug_log(message, extra_json)
+
+    def media_event(self, event_type: str, detail: object = None) -> bool:
+        normalized_type = str(event_type or "").strip().lower()
+        if normalized_type not in self.SUPPORTED_MEDIA_EVENTS or not self.event_port or not self.event_token:
+            return False
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                detail = {}
+        payload = dict(detail) if isinstance(detail, dict) else {}
+        payload.update({
+            "token": self.event_token,
+            "type": normalized_type,
+            "session_id": str(payload.get("session_id") or payload.get("media_session_id") or ""),
+            "monitor_index": self.monitor_index,
+        })
+        try:
+            with socket.create_connection(("127.0.0.1", self.event_port), timeout=2.0) as connection:
+                connection.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+            return True
+        except OSError:
+            return False
+
+    def mediaEvent(self, event_type: str, detail: object = None) -> bool:
+        return self.media_event(event_type, detail)
+
+
+# Backward-compatible name used by tests and external launchers.
+_WidgetEngineDebugBridge = _WidgetEngineBridge
 
 
 
@@ -741,6 +782,9 @@ class _RuntimeOptions:
     runtime_ipc: bool = False
     start_hidden: bool = False
     monitor_bounds: tuple[int, int, int, int] | None = None
+    runtime_event_port: int | None = None
+    runtime_event_token: str = ""
+    monitor_index: int = 0
 
 
 def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
@@ -748,6 +792,8 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
     start_hidden = False
     monitor_bounds_arg: str | None = None
     monitor_index: int | None = None
+    runtime_event_port: int | None = None
+    runtime_event_token = ""
 
     idx = 2
     while idx < len(argv):
@@ -778,6 +824,22 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
                 monitor_index = int(str(token.split("=", 1)[1]).strip())
             except ValueError:
                 monitor_index = -1
+        elif token == "--runtime-event-port" and idx + 1 < len(argv):
+            try:
+                runtime_event_port = int(argv[idx + 1])
+            except ValueError:
+                runtime_event_port = None
+            idx += 1
+        elif token.startswith("--runtime-event-port="):
+            try:
+                runtime_event_port = int(token.split("=", 1)[1])
+            except ValueError:
+                runtime_event_port = None
+        elif token == "--runtime-event-token" and idx + 1 < len(argv):
+            runtime_event_token = str(argv[idx + 1])
+            idx += 1
+        elif token.startswith("--runtime-event-token="):
+            runtime_event_token = token.split("=", 1)[1]
         idx += 1
 
     monitor_bounds = _parse_monitor_bounds(monitor_bounds_arg)
@@ -794,6 +856,9 @@ def _parse_runtime_options(argv: list[str]) -> _RuntimeOptions:
         runtime_ipc=runtime_ipc,
         start_hidden=start_hidden,
         monitor_bounds=monitor_bounds,
+        runtime_event_port=runtime_event_port,
+        runtime_event_token=runtime_event_token,
+        monitor_index=monitor_index if isinstance(monitor_index, int) and monitor_index >= 0 else 0,
     )
 
 
@@ -802,10 +867,13 @@ def _start_with_pywebview(
     runtime_ipc: bool = False,
     start_hidden: bool = False,
     monitor_bounds: tuple[int, int, int, int] | None = None,
+    runtime_event_port: int | None = None,
+    runtime_event_token: str = "",
+    monitor_index: int = 0,
 ) -> None:
     dpi_awareness_mode = _configure_windows_dpi_awareness()
     import webview
-    debug_bridge = _WidgetEngineDebugBridge()
+    debug_bridge = _WidgetEngineBridge(runtime_event_port, runtime_event_token, monitor_index)
     _debug_log(
         "pywebview create_window request | "
         f"url={widget_url} runtime_ipc={runtime_ipc} start_hidden={start_hidden} monitor_bounds={monitor_bounds} "
@@ -872,6 +940,12 @@ def _start_with_pywebview(
                     pass
                 return
             if message.get("type") == "background":
+                try:
+                    window.evaluate_js(
+                        "if(typeof window.__baylanCleanupMedia==='function'){window.__baylanCleanupMedia();}"
+                    )
+                except Exception as exc:
+                    _debug_log(f"pywebview background media cleanup failed | error={exc}")
                 try:
                     window.hide()
                 except Exception as exc:
@@ -981,6 +1055,9 @@ def main() -> int:
                 runtime_ipc=runtime_ipc,
                 start_hidden=start_hidden,
                 monitor_bounds=monitor_bounds,
+                runtime_event_port=runtime_options.runtime_event_port,
+                runtime_event_token=runtime_options.runtime_event_token,
+                monitor_index=runtime_options.monitor_index,
             )
             _debug_log(f"main backend success | backend={backend} total_elapsed_ms={int((time.perf_counter() - launch_started_at) * 1000)}")
             return 0
