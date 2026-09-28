@@ -224,7 +224,7 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertEqual(fake_webview.create_window.call_args.kwargs["height"], 1080)
         self.assertFalse(fake_webview.create_window.call_args.kwargs["fullscreen"])
 
-    def test_start_with_pywebview_background_hides_window_and_promotes_fullscreen_on_foreground(self):
+    def test_start_with_pywebview_explicit_geometry_skips_fullscreen_promotion(self):
         fake_window = unittest.mock.Mock()
         loaded_event = _LoadedEvent()
         fake_window.events.loaded = loaded_event
@@ -264,7 +264,7 @@ class TestWidgetViewer(unittest.TestCase):
         fake_window.hide.assert_called()
         fake_window.minimize.assert_not_called()
         self.assertIn("__baylanCleanupMedia", fake_window.evaluate_js.call_args_list[0].args[0])
-        fake_window.toggle_fullscreen.assert_called_once()
+        fake_window.toggle_fullscreen.assert_not_called()
         fake_window.move.assert_not_called()
         fake_window.resize.assert_not_called()
         fake_window.show.assert_called_once()
@@ -275,7 +275,9 @@ class TestWidgetViewer(unittest.TestCase):
         ]
         self.assertLess(show_index, layout_calls[-1])
 
-    def _run_runtime_messages(self, messages, *, fire_loaded=True, ready_before_messages=False):
+    def _run_runtime_messages(
+        self, messages, *, fire_loaded=True, ready_before_messages=False, monitor_bounds=None
+    ):
         loaded_event = _LoadedEvent()
         fake_window = unittest.mock.Mock()
         fake_window.events.loaded = loaded_event
@@ -313,7 +315,7 @@ class TestWidgetViewer(unittest.TestCase):
             "client.widget_viewer._start_with_fallback", side_effect=start_webview
         ):
             widget_viewer._start_with_pywebview(
-                "https://example.com", runtime_ipc=True, start_hidden=True
+                "https://example.com", runtime_ipc=True, start_hidden=True, monitor_bounds=monitor_bounds
             )
 
         return fake_webview, fake_window, loaded_event, _TestThread
@@ -388,7 +390,7 @@ class TestWidgetViewer(unittest.TestCase):
                 "signature": "media",
                 "config": {"presentation_mode": "fullscreen_media", "widgets": [{"type": "video"}]},
             },
-        }])
+        }], monitor_bounds=(0, 0, 1920, 1080))
 
         show_index = window.method_calls.index(unittest.mock.call.show())
         layout_indexes = [
@@ -396,6 +398,7 @@ class TestWidgetViewer(unittest.TestCase):
             if call == unittest.mock.call.evaluate_js(unittest.mock.ANY)
         ]
         self.assertLess(layout_indexes[-1], show_index)
+        window.toggle_fullscreen.assert_not_called()
 
     def test_ordinary_layout_still_shows_before_apply(self):
         _, window, _, _ = self._run_runtime_messages([{
@@ -600,9 +603,22 @@ class TestWidgetViewer(unittest.TestCase):
         self.assertNotIn("api.media_event", engine)
         self.assertIn("mediaRuntimeOutbox.splice(0, limit)", engine)
         for event_type in (
-            "media_loadedmetadata", "media_playing", "media_first_frame", "media_error", "media_play_rejected", "media_ended"
+            "media_loadedmetadata", "media_playing", "media_first_frame", "media_presented",
+            "media_error", "media_play_rejected", "media_ended"
         ):
             self.assertIn(f'emitMediaRuntimeEvent("{event_type}"', engine)
+
+    def test_widget_engine_presents_video_after_first_frame_and_double_animation_frame(self):
+        engine = Path("client/widget_engine.html").read_text(encoding="utf-8")
+        emit_first_frame = engine.split("const emitFirstFrame = () => {", 1)[1].split("};", 1)[0]
+
+        self.assertLess(
+            emit_first_frame.index('emitMediaRuntimeEvent("media_first_frame"'),
+            emit_first_frame.index("schedulePresented()"),
+        )
+        self.assertIn("requestAnimationFrame(() => requestAnimationFrame(emitPresented))", engine)
+        self.assertIn('typeof video.requestVideoFrameCallback === "function"', engine)
+        self.assertIn("requestAnimationFrame(() => requestAnimationFrame(emitFirstFrame))", engine)
 
     def test_media_runtime_poller_drains_events_through_bridge(self):
         window = unittest.mock.Mock()

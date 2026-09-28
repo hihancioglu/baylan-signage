@@ -143,7 +143,7 @@ def _debug_log(message: str) -> None:
 
 class _WidgetEngineBridge:
     SUPPORTED_MEDIA_EVENTS = {
-        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_progress",
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_presented", "media_progress",
         "media_ended", "media_error", "media_play_rejected",
     }
 
@@ -987,6 +987,10 @@ def _start_with_pywebview(
         def _enter_fullscreen_once() -> None:
             nonlocal fullscreen_applied
             if fullscreen_applied:
+                return
+            if monitor_bounds is not None:
+                fullscreen_applied = True
+                _debug_log("pywebview fullscreen promotion skipped | reason=explicit_monitor_bounds")
                 return
             try:
                 window.toggle_fullscreen()

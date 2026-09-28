@@ -771,6 +771,16 @@
 
       let firstFrameSent = false;
       let firstFrameScheduled = false;
+      let presentedSent = false;
+      const emitPresented = () => {
+        if (presentedSent) return;
+        presentedSent = true;
+        emitMediaRuntimeEvent("media_presented", runtimeDetail());
+        debugLog("video presented", { widgetIndex, url: video.currentSrc || video.src });
+      };
+      const schedulePresented = () => {
+        requestAnimationFrame(() => requestAnimationFrame(emitPresented));
+      };
       const signalFirstFrame = () => {
         if (firstFrameSent || firstFrameScheduled) return;
         firstFrameScheduled = true;
@@ -779,6 +789,7 @@
           firstFrameSent = true;
           emitMediaRuntimeEvent("media_first_frame", runtimeDetail());
           debugLog("video first frame", { widgetIndex, url: video.currentSrc || video.src });
+          schedulePresented();
         };
         if (typeof video.requestVideoFrameCallback === "function") {
           video.requestVideoFrameCallback(emitFirstFrame);

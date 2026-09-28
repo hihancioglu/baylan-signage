@@ -90,7 +90,7 @@ class BorderlessFullscreenPlayer:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
     WEBVIEW_VIDEO_EXTENSIONS = {".mp4", ".webm"}
     RUNTIME_MEDIA_EVENTS = {
-        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_progress",
+        "media_loaded", "media_loadedmetadata", "media_playing", "media_first_frame", "media_presented", "media_progress",
         "media_ended", "media_error", "media_play_rejected",
     }
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg"}
@@ -415,14 +415,14 @@ class BorderlessFullscreenPlayer:
             is_authoritative = authoritative is None or monitor_index == authoritative
             media_type = getattr(self, "_active_media_type", None)
             ready_event = (
-                (media_type == "video" and event_type == "media_first_frame")
+                (media_type == "video" and event_type == "media_presented")
                 or (media_type == "image" and event_type == "media_loaded")
             )
+            if is_authoritative and media_type == "video" and event_type == "media_first_frame":
+                _debug_log(f"media first frame | session={session_id} monitor={monitor_index}")
             if is_authoritative and ready_event and not getattr(self, "_webview_media_ready", False):
                 self._webview_media_ready = True
                 _debug_log(f"webview media ready | type={media_type} session={session_id}")
-                if event_type == "media_first_frame":
-                    _debug_log(f"media first frame | session={session_id} monitor={monitor_index}")
                 ready_callback = self._webview_media_ready_callback
             self._active_media_events.append(dict(
                 event,
